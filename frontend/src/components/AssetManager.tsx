@@ -37,6 +37,15 @@ const directoryOf = (asset: Asset) => {
 };
 const formatBytes = (bytes = 0) => bytes >= 1024 ** 2 ? `${(bytes / 1024 ** 2).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 const supportedImage = (asset: Asset) => /\.(png|jpe?g|webp)$/i.test(asset.path || asset.name);
+const mergeAssetFile = (existing: Asset | undefined, replacement: Asset): Asset => existing ? {
+  ...replacement,
+  ...existing,
+  id: existing.id,
+  path: replacement.path,
+  uri: replacement.uri,
+  size: replacement.size,
+  contentHash: replacement.contentHash,
+} : replacement;
 
 function AssetIcon({ asset }: { asset: Asset }) {
   const kind = kindOf(asset);
@@ -61,6 +70,7 @@ export function AssetManager({ project, commit, notify, requestConfirm, activate
   const [matchingFolder, setMatchingFolder] = useState(false);
   const [applyingMatches, setApplyingMatches] = useState(false);
   const [selectedMatches, setSelectedMatches] = useState<Set<string>>(() => new Set());
+  const [conflictSelections, setConflictSelections] = useState<Record<string, string>>({});
   const report = useMemo(() => analyzeAssetReferences(project), [project]);
   const directories = useMemo(() => Array.from(new Set(project.assets.map(directoryOf))).sort((a, b) => a.localeCompare(b)), [project.assets]);
   const selected = project.assets.find((asset) => asset.id === selectedId);
@@ -122,7 +132,7 @@ export function AssetManager({ project, commit, notify, requestConfirm, activate
       if (!replacement) return;
       commit((current) => {
         const existing = current.assets.find((item) => item.id === assetId);
-        const next = { ...existing, ...replacement, id: assetId, forceBundle: existing?.forceBundle } as Asset;
+        const next = mergeAssetFile(existing, replacement);
         return { ...current, assets: existing ? current.assets.map((item) => item.id === assetId ? next : item) : [...current.assets, next] };
       }, `重新定位素材 ${asset?.name ?? assetId}`);
       notify('素材已更换，场景、角色和剧本预览已刷新');
@@ -148,6 +158,7 @@ export function AssetManager({ project, commit, notify, requestConfirm, activate
       if (!preview) return;
       setFolderPreview(preview);
       setSelectedMatches(new Set(preview.matches.map((item) => item.assetId)));
+      setConflictSelections({});
       notify(`已扫描 ${preview.scannedFiles} 个素材文件，匹配 ${preview.matches.length} 项`);
     } catch (error) { notify(String(error), 'error'); } finally { setMatchingFolder(false); }
   };
@@ -156,15 +167,29 @@ export function AssetManager({ project, commit, notify, requestConfirm, activate
     const known = new Set(current.assets.map((item) => item.id));
     const assets = current.assets.map((item) => {
       const replacement = byId.get(item.id);
-      return replacement ? { ...item, ...replacement, id: item.id, forceBundle: item.forceBundle } : item;
+      return replacement ? mergeAssetFile(item, replacement) : item;
     });
     for (const replacement of replacements) if (!known.has(replacement.id)) assets.push(replacement);
     return { ...current, assets };
   };
   const applyFolderMatches = async () => {
     if (!folderPreview) return;
-    const matches = folderPreview.matches.filter((item) => selectedMatches.has(item.assetId));
-    if (!matches.length) { notify('请至少选择一个无冲突匹配项', 'error'); return; }
+    const automaticMatches = folderPreview.matches.filter((item) => selectedMatches.has(item.assetId));
+    const resolvedConflicts: AssetRepairMatch[] = folderPreview.ambiguous.flatMap((item) => {
+      const sourcePath = conflictSelections[item.assetId];
+      const candidate = item.candidates.find((entry) => entry.sourcePath === sourcePath);
+      return candidate ? [{
+        assetId: item.assetId,
+        name: item.name,
+        expectedPath: item.expectedPath,
+        sourcePath: candidate.sourcePath,
+        fileName: candidate.fileName,
+        reason: `用户解决冲突 · ${item.reason}`,
+        score: item.score,
+      }] : [];
+    });
+    const matches = [...automaticMatches, ...resolvedConflicts];
+    if (!matches.length) { notify('请至少选择一个匹配项或解决一个冲突', 'error'); return; }
     const confirmed = await requestConfirm({
       title: '应用文件夹修复',
       message: `将复制 ${matches.length} 个文件到项目素材目录，并保留现有素材 ID。此操作可通过项目历史撤销引用变更。`,
@@ -175,8 +200,14 @@ export function AssetManager({ project, commit, notify, requestConfirm, activate
     try {
       const replacements = await applyAssetFolderRepair(matches);
       commit((current) => mergeReplacements(current, replacements), `自动修复 ${replacements.length} 个缺失素材`);
-      setFolderPreview((current) => current ? { ...current, matches: current.matches.filter((item) => !selectedMatches.has(item.assetId)) } : current);
+      const appliedIds = new Set(matches.map((item) => item.assetId));
+      setFolderPreview((current) => current ? {
+        ...current,
+        matches: current.matches.filter((item) => !appliedIds.has(item.assetId)),
+        ambiguous: current.ambiguous.filter((item) => !appliedIds.has(item.assetId)),
+      } : current);
       setSelectedMatches(new Set());
+      setConflictSelections({});
       notify(`已修复 ${replacements.length} 个素材，所有引用已刷新`);
     } catch (error) { notify(String(error), 'error'); } finally { setApplyingMatches(false); }
   };
@@ -185,6 +216,7 @@ export function AssetManager({ project, commit, notify, requestConfirm, activate
     if (next.has(match.assetId)) next.delete(match.assetId); else next.add(match.assetId);
     return next;
   });
+  const selectedRepairCount = selectedMatches.size + Object.keys(conflictSelections).length;
   const update = (assetId: string, patch: Partial<Asset>, label: string) => commit((current) => ({ ...current, assets: current.assets.map((asset) => asset.id === assetId ? { ...asset, ...patch } : asset) }), label);
 
   return <div className={`asset-manager ${dropActive ? 'drop-active' : ''}`} onDragOver={(event) => { event.preventDefault(); setDropActive(true); }} onDragLeave={() => setDropActive(false)} onDrop={drop}>
@@ -201,9 +233,9 @@ export function AssetManager({ project, commit, notify, requestConfirm, activate
       <div className="asset-folder-repair-toolbar"><div><FolderOpen /><span><strong>{folderPreview ? folderPreview.folder : '选择原素材所在文件夹'}</strong><small>{folderPreview ? `递归扫描 ${folderPreview.scannedFiles} 个支持的文件` : '扫描结果只会预览，确认前不会修改项目'}</small></span></div><button className="button primary" disabled={matchingFolder || applyingMatches} onClick={() => void previewFolder()}>{matchingFolder ? <LoaderCircle className="spinning" /> : <FolderOpen />}{matchingFolder ? '正在扫描' : folderPreview ? '重新选择文件夹' : '选择文件夹自动匹配'}</button></div>
       {folderPreview ? <div className="modal-body asset-folder-results"><div className="asset-repair-summary"><span className="success"><CheckCircle2 /><strong>{folderPreview.matches.length}</strong> 可修复</span><span className="warning"><AlertTriangle /><strong>{folderPreview.ambiguous.length}</strong> 冲突</span><span><Search /><strong>{folderPreview.unmatched.length}</strong> 未匹配</span></div>
         {folderPreview.matches.length > 0 && <section><header><strong>确定匹配</strong><small>仅勾选项会被复制并替换，素材 ID 保持不变</small></header>{folderPreview.matches.map((match) => <label className="asset-folder-match" key={match.assetId}><input type="checkbox" checked={selectedMatches.has(match.assetId)} onChange={() => toggleMatch(match)} /><span className="asset-repair-icon success"><CheckCircle2 /></span><span><strong>{match.name}</strong><small>{match.fileName} · {match.reason}</small><code>{match.sourcePath}</code></span><em>{match.score >= 400 ? '哈希' : match.score >= 300 ? '高' : match.score >= 200 ? '中' : '弱'}</em></label>)}</section>}
-        {folderPreview.ambiguous.length > 0 && <section><header><strong>存在冲突</strong><small>多个候选同分，不会自动修复，请逐项手动定位</small></header>{folderPreview.ambiguous.map((item) => <article className="asset-folder-conflict" key={item.assetId}><span className="asset-repair-icon"><AlertTriangle /></span><span><strong>{item.name}</strong><small>{item.reason} · {item.candidates.length} 个候选</small><code>{item.candidates.map((candidate) => candidate.fileName).join(' · ')}</code></span><button className="button ghost" disabled={Boolean(repairingId)} onClick={() => void repairAsset(item.assetId)}><LocateFixed />手动选择</button></article>)}</section>}
+        {folderPreview.ambiguous.length > 0 && <section><header><strong>存在冲突</strong><small>选择正确候选后可与确定匹配一起批量修复</small></header>{folderPreview.ambiguous.map((item) => { const resolved = Boolean(conflictSelections[item.assetId]); return <article className={`asset-folder-conflict ${resolved ? 'resolved' : ''}`} key={item.assetId}><span className={`asset-repair-icon ${resolved ? 'success' : ''}`}>{resolved ? <CheckCircle2 /> : <AlertTriangle />}</span><div><strong>{item.name}</strong><small>{item.reason} · {item.candidates.length} 个同分候选</small><div className="asset-conflict-candidates">{item.candidates.map((candidate) => <label key={candidate.sourcePath}><input type="radio" name={`repair-conflict-${item.assetId}`} checked={conflictSelections[item.assetId] === candidate.sourcePath} onChange={() => setConflictSelections((current) => ({ ...current, [item.assetId]: candidate.sourcePath }))} /><span><b>{candidate.fileName}</b><code>{candidate.sourcePath}</code></span></label>)}</div></div><button className="button ghost" disabled={Boolean(repairingId)} onClick={() => void repairAsset(item.assetId)}><LocateFixed />浏览其他文件</button></article>; })}</section>}
         {folderPreview.unmatched.length > 0 && <section><header><strong>未找到匹配</strong><small>可手动重新定位，或换一个更完整的素材文件夹扫描</small></header>{folderPreview.unmatched.map((item) => <article className="asset-folder-unmatched" key={item.assetId}><span className="asset-repair-icon muted"><Search /></span><span><strong>{item.name}</strong><small>预期文件：{item.expectedPath}</small></span><button className="button ghost" disabled={Boolean(repairingId)} onClick={() => void repairAsset(item.assetId)}><LocateFixed />手动选择</button></article>)}</section>}
       </div> : <div className="modal-body asset-repair-list">{repairIssues.map((issue) => <article key={issue.assetId}><span className="asset-repair-icon"><AlertTriangle /></span><div><strong>{issue.name}</strong><small>{issue.reason} · {issue.references} 处引用</small><code>{issue.assetId}</code></div><button className="button ghost" disabled={Boolean(repairingId)} onClick={() => void repairAsset(issue.assetId)}>{repairingId === issue.assetId ? <LoaderCircle className="spinning" /> : <LocateFixed />}{repairingId === issue.assetId ? '正在替换' : '手动选择'}</button></article>)}{!repairIssues.length && <div className="asset-repair-complete"><CheckCircle2 /><strong>所有问题已修复</strong><span>可以关闭窗口继续制作。</span></div>}</div>}
-      <footer className="modal-footer"><span>{folderPreview ? `已选择 ${selectedMatches.size} / ${folderPreview.matches.length} 项` : `剩余 ${repairIssues.length} 项`}</span>{folderPreview && <button className="button ghost" disabled={applyingMatches} onClick={() => { setFolderPreview(undefined); setSelectedMatches(new Set()); }}>返回问题列表</button>}<button className="button primary" disabled={applyingMatches || Boolean(folderPreview && !selectedMatches.size)} onClick={() => folderPreview ? void applyFolderMatches() : setRepairOpen(false)}>{applyingMatches && <LoaderCircle className="spinning" />}{folderPreview ? applyingMatches ? '正在修复' : `应用 ${selectedMatches.size} 项修复` : repairIssues.length ? '稍后继续' : '完成'}</button></footer></section></div>}
+      <footer className="modal-footer"><span>{folderPreview ? `已选择 ${selectedRepairCount} 项 · ${Object.keys(conflictSelections).length} 个冲突已解决` : `剩余 ${repairIssues.length} 项`}</span>{folderPreview && <button className="button ghost" disabled={applyingMatches} onClick={() => { setFolderPreview(undefined); setSelectedMatches(new Set()); setConflictSelections({}); }}>返回问题列表</button>}<button className="button primary" disabled={applyingMatches || Boolean(folderPreview && !selectedRepairCount)} onClick={() => folderPreview ? void applyFolderMatches() : setRepairOpen(false)}>{applyingMatches && <LoaderCircle className="spinning" />}{folderPreview ? applyingMatches ? '正在修复' : `应用 ${selectedRepairCount} 项修复` : repairIssues.length ? '稍后继续' : '完成'}</button></footer></section></div>}
   </div>;
 }
