@@ -1,0 +1,12 @@
+{
+  "id": "start",
+  "name": "开始",
+  "entry": true,
+  "fragments": [
+    {
+      "id": "opening",
+      "name": "片头"
+    }
+  ],
+  "disabled": false
+}

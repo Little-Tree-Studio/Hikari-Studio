@@ -1,0 +1,15 @@
+{
+  "id": "c1",
+  "name": "第一章 · 雾中的来信",
+  "fragments": [
+    {
+      "id": "lake-meeting",
+      "name": "湖畔相遇"
+    },
+    {
+      "id": "old-school",
+      "name": "旧校舍"
+    }
+  ],
+  "disabled": false
+}

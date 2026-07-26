@@ -1,0 +1,173 @@
+{
+  "version": 2,
+  "meta": {
+    "id": "star-sea-echo",
+    "name": "星海回声",
+    "author": "Kyle",
+    "resolution": [
+      1280,
+      720
+    ],
+    "updatedAt": "2026-07-24T12:48:12.987921+00:00"
+  },
+  "characters": [
+    {
+      "id": "lin-cheng",
+      "name": "林澄",
+      "color": "#e66b4f",
+      "expressions": [
+        "默认",
+        "浅笑",
+        "惊讶",
+        "难过"
+      ]
+    },
+    {
+      "id": "su-rui",
+      "name": "苏芮",
+      "color": "#825eb5",
+      "expressions": [
+        "默认",
+        "平静",
+        "犹豫"
+      ]
+    }
+  ],
+  "chapters": [
+    {
+      "id": "start",
+      "name": "开始",
+      "entry": true,
+      "fragments": [
+        {
+          "id": "opening",
+          "name": "片头"
+        },
+        {
+          "id": "menu",
+          "name": "主菜单"
+        }
+      ]
+    },
+    {
+      "id": "chapter-1",
+      "name": "第一章 · 雾中的来信",
+      "fragments": [
+        {
+          "id": "lake-meeting",
+          "name": "湖畔相遇"
+        },
+        {
+          "id": "old-school",
+          "name": "旧校舍"
+        },
+        {
+          "id": "rain-call",
+          "name": "雨夜电话"
+        }
+      ]
+    },
+    {
+      "id": "chapter-2",
+      "name": "第二章 · 蓝色时刻",
+      "fragments": [
+        {
+          "id": "rooftop",
+          "name": "天台"
+        },
+        {
+          "id": "planetarium",
+          "name": "星象馆"
+        }
+      ]
+    }
+  ],
+  "activeFragmentId": "lake-meeting",
+  "assets": [
+    {
+      "id": "lake",
+      "kind": "scene",
+      "name": "晨雾湖畔",
+      "path": "builtin/lake.jpg",
+      "uri": "./assets/lake.jpg"
+    },
+    {
+      "id": "mountain",
+      "kind": "scene",
+      "name": "远山晴空",
+      "path": "builtin/mountain.jpg",
+      "uri": "./assets/mountain.jpg"
+    }
+  ],
+  "scripts": {
+    "lake-meeting": [
+      {
+        "id": "b1",
+        "type": "scene",
+        "title": "晨雾湖畔",
+        "transition": "dissolve",
+        "duration": 1.2,
+        "assetId": "lake"
+      },
+      {
+        "id": "b2",
+        "type": "sound",
+        "title": "summer_memory.mp3",
+        "volume": 0.68,
+        "loop": true
+      },
+      {
+        "id": "b3",
+        "type": "narration",
+        "text": "薄雾沿着湖面缓慢散开，夏日的第一束阳光落在旧码头上。"
+      },
+      {
+        "id": "b4",
+        "type": "dialogue",
+        "speaker": "林澄",
+        "text": "你果然还是来了。",
+        "expression": "浅笑",
+        "voice": "lc_001.ogg"
+      },
+      {
+        "id": "b5",
+        "type": "dialogue",
+        "speaker": "苏芮",
+        "text": "因为有人在信里说，错过今天就再也见不到这片星海了。",
+        "expression": "平静",
+        "voice": "sr_014.ogg"
+      },
+      {
+        "id": "b6",
+        "type": "branch",
+        "title": "如何回应？",
+        "options": [
+          {
+            "text": "相信她",
+            "target": "坦白心意"
+          },
+          {
+            "text": "转移话题",
+            "target": "询问往事"
+          },
+          {
+            "text": "保持沉默",
+            "target": "沉默片段"
+          }
+        ]
+      }
+    ],
+    "opening": [],
+    "menu": [],
+    "old-school": [],
+    "rain-call": [],
+    "rooftop": [],
+    "planetarium": []
+  },
+  "variables": {},
+  "settings": {
+    "textSpeed": 35,
+    "autoSave": true,
+    "skipRead": true
+  }
+}

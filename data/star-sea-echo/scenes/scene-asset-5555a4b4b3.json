@@ -1,0 +1,18 @@
+{
+  "id": "scene-asset-5555a4b4b3",
+  "name": "真琴裤袜外套眼镜平静A",
+  "layers": [
+    {
+      "id": "layer-asset-5555a4b4b3",
+      "name": "背景",
+      "assetId": "asset-5555a4b4b3",
+      "opacity": 1,
+      "blendMode": "normal",
+      "offsetX": 0,
+      "offsetY": 0,
+      "scale": 1,
+      "distance": 1,
+      "visible": true
+    }
+  ]
+}

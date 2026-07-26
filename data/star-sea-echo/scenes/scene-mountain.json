@@ -1,0 +1,18 @@
+{
+  "id": "scene-mountain",
+  "name": "远山晴空",
+  "layers": [
+    {
+      "id": "layer-mountain",
+      "name": "背景",
+      "assetId": "mountain",
+      "opacity": 1,
+      "blendMode": "normal",
+      "offsetX": 0,
+      "offsetY": 0,
+      "scale": 1,
+      "distance": 1,
+      "visible": true
+    }
+  ]
+}

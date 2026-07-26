@@ -1,0 +1,50 @@
+{
+  "version": 3,
+  "meta": {
+    "id": "demo",
+    "name": "星海回声",
+    "author": "",
+    "resolution": [
+      1280,
+      720
+    ],
+    "updatedAt": "2026-07-26T06:36:12.761421+00:00",
+    "gameVersion": "1.0.0"
+  },
+  "activeFragmentId": "lake-meeting",
+  "variables": {
+    "好感度": 0
+  },
+  "variableDefinitions": {
+    "好感度": {
+      "type": "number",
+      "scope": "project",
+      "persistence": "slot"
+    }
+  },
+  "locale": {
+    "default": "zh-CN",
+    "languages": [
+      "zh-CN"
+    ]
+  },
+  "chapterOrder": [
+    "start",
+    "c1"
+  ],
+  "characterOrder": [
+    "lin",
+    "su",
+    "character-mrzu199d-qs17r"
+  ],
+  "sceneOrder": [
+    "scene-lake",
+    "scene-mountain",
+    "scene-asset-c8f4afee39",
+    "scene-asset-167279e040",
+    "scene-asset-a9f29e2c37",
+    "scene-asset-5555a4b4b3",
+    "scene-asset-420dde491f"
+  ],
+  "sceneGroups": []
+}

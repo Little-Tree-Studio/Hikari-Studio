@@ -1,0 +1,18 @@
+{
+  "id": "scene-lake",
+  "name": "晨雾湖畔",
+  "layers": [
+    {
+      "id": "layer-lake",
+      "name": "背景",
+      "assetId": "lake",
+      "opacity": 1,
+      "blendMode": "normal",
+      "offsetX": 0,
+      "offsetY": 0,
+      "scale": 1,
+      "distance": 1,
+      "visible": true
+    }
+  ]
+}

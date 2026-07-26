@@ -1,0 +1,101 @@
+.save-game-backdrop {
+  z-index: 360;
+  padding: 24px;
+  background: rgba(15, 24, 29, 0.66);
+  backdrop-filter: blur(2px);
+}
+
+.save-game-dialog {
+  width: min(880px, calc(100vw - 48px));
+  height: min(720px, calc(100vh - 48px));
+  max-height: none;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #c9d0d2;
+  border-radius: 6px;
+  background: #f4f6f7;
+  box-shadow: 0 24px 70px rgba(8, 18, 23, 0.34);
+}
+
+.save-game-dialog > .modal-header {
+  min-height: 62px;
+  flex: 0 0 62px;
+  padding: 0 18px;
+  background: #fff;
+}
+
+.save-game-dialog > .modal-header > div { flex: 1; min-width: 0; }
+.save-game-dialog > .modal-header strong,
+.save-game-dialog > .modal-header small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.save-game-dialog > .modal-header strong { font-size: 15px; }
+.save-game-dialog > .modal-header small { margin-top: 4px; color: var(--muted); font-size: 9px; }
+.save-game-body { flex: 1; min-height: 0; overflow: auto; padding: 16px 18px 20px; }
+.save-game-body h2 { margin: 0 0 8px; color: #526068; font-size: 10px; }
+.save-slot-utility { margin-bottom: 17px; }
+.save-slot-utility > div,
+.save-slot-manual > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+
+.save-slot-card {
+  height: 94px;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 142px minmax(0, 1fr);
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #fff;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.14s, box-shadow 0.14s, background 0.14s;
+}
+
+.save-slot-card:hover { border-color: #8eb6ae; background: #fbfdfc; }
+.save-slot-card.selected { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(24, 124, 107, 0.12); }
+.save-slot-card.corrupt { border-color: #dfaaa5; background: #fff9f8; }
+.save-slot-thumbnail { position: relative; height: 92px; display: grid; place-items: center; overflow: hidden; border-right: 1px solid var(--line); background: #dce4e5; color: #7a888d; }
+.save-slot-thumbnail > img { width: 100%; height: 100%; object-fit: cover; }
+.save-slot-thumbnail > svg { width: 25px; }
+.save-slot-thumbnail > em { position: absolute; right: 5px; bottom: 5px; display: flex; align-items: center; gap: 3px; padding: 3px 5px; border-radius: 3px; background: rgba(22, 92, 79, 0.9); color: #fff; font-size: 7px; font-style: normal; }
+.save-slot-thumbnail > em svg { width: 9px; }
+.save-slot-copy { min-width: 0; display: flex; flex-direction: column; justify-content: center; padding: 10px 11px; }
+.save-slot-copy strong,
+.save-slot-copy > span,
+.save-slot-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.save-slot-copy strong { font-size: 11px; }
+.save-slot-copy > span { margin-top: 7px; font-size: 9px; font-weight: 600; }
+.save-slot-copy small { margin-top: 6px; color: var(--muted); font-size: 8px; }
+.save-slot-copy small svg { width: 10px; margin-right: 4px; vertical-align: -2px; }
+.save-slot-card.empty .save-slot-copy > span { color: #718087; font-weight: 400; }
+.save-slot-card.corrupt .save-slot-copy > span,
+.save-slot-card.corrupt .save-slot-thumbnail { color: var(--danger); }
+.save-game-loading { height: 100%; min-height: 240px; display: grid; place-items: center; align-content: center; gap: 8px; color: var(--muted); font-size: 10px; }
+.save-game-loading svg { width: 23px; color: var(--accent); }
+.save-game-error,
+.save-game-confirm { min-height: 42px; flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 8px 18px; border-top: 1px solid; }
+.save-game-error { border-color: #ecc7c3; background: #fff1ef; color: #923f38; font-size: 9px; }
+.save-game-confirm { border-color: #e6d39e; background: #fff9e8; color: #745b19; font-size: 9px; }
+.save-game-confirm > svg,
+.save-game-error > svg { width: 15px; flex: 0 0 auto; }
+.save-game-confirm > span { flex: 1; }
+.save-game-confirm > button { border: 0; background: transparent; color: inherit; font-size: 8px; font-weight: 700; cursor: pointer; }
+.save-game-footer { min-height: 58px; flex: 0 0 58px; align-items: center; background: #fff; }
+.save-game-footer > span { flex: 1; }
+.save-game-footer .button { height: 32px; }
+.save-game-footer .button svg { width: 13px; }
+.danger-text { color: var(--danger); }
+
+@media (max-width: 760px) {
+  .save-game-backdrop { padding: 8px; }
+  .save-game-dialog { width: 100%; height: calc(100vh - 16px); }
+  .save-game-body { padding: 12px; }
+  .save-slot-utility > div,
+  .save-slot-manual > div { grid-template-columns: 1fr; }
+  .save-slot-card { grid-template-columns: 120px minmax(0, 1fr); }
+  .save-game-footer { padding: 9px 11px; }
+  .save-game-footer .button { padding: 0 8px; }
+  .save-game-confirm,
+  .save-game-error { padding: 8px 12px; }
+}

@@ -1,0 +1,16 @@
+{
+  "id": "character-mrzu199d-qs17r",
+  "name": "1",
+  "color": "#3478c5",
+  "expressions": [
+    "害羞",
+    "高兴",
+    "平静"
+  ],
+  "portraits": {
+    "默认": "",
+    "害羞": "asset-167279e040",
+    "高兴": "asset-420dde491f",
+    "平静": "asset-5555a4b4b3"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "id": "scene-asset-c8f4afee39",
+  "name": "真琴裤袜外套眼镜闭眼A",
+  "layers": [
+    {
+      "id": "layer-asset-c8f4afee39",
+      "name": "背景",
+      "assetId": "asset-c8f4afee39",
+      "opacity": 1,
+      "blendMode": "normal",
+      "offsetX": 0,
+      "offsetY": 0,
+      "scale": 1,
+      "distance": 1,
+      "visible": true
+    }
+  ]
+}

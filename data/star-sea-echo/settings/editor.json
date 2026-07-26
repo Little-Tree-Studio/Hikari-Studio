@@ -1,0 +1,24 @@
+{
+  "textSpeed": 35,
+  "autoSave": true,
+  "skipRead": true,
+  "editorSession": {
+    "openFragmentIds": [
+      "lake-meeting"
+    ],
+    "selectedBlockByFragment": {
+      "lake-meeting": 2
+    },
+    "scrollTopByFragment": {
+      "lake-meeting": 236.6666717529297
+    },
+    "inspectorDock": "preview",
+    "scriptView": "cards"
+  },
+  "autoPlay": false,
+  "autoPlayDelay": 1.5,
+  "fastForward": true,
+  "narrativeMap": {
+    "positions": {}
+  }
+}

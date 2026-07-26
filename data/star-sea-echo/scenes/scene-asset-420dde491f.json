@@ -1,0 +1,18 @@
+{
+  "id": "scene-asset-420dde491f",
+  "name": "真琴裤袜外套眼镜微笑A",
+  "layers": [
+    {
+      "id": "layer-asset-420dde491f",
+      "name": "背景",
+      "assetId": "asset-420dde491f",
+      "opacity": 1,
+      "blendMode": "normal",
+      "offsetX": 0,
+      "offsetY": 0,
+      "scale": 1,
+      "distance": 1,
+      "visible": true
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "id": "scene-asset-a9f29e2c37",
+  "name": "真琴裤袜外套眼镜惊讶A",
+  "layers": [
+    {
+      "id": "layer-asset-a9f29e2c37",
+      "name": "背景",
+      "assetId": "asset-a9f29e2c37",
+      "opacity": 1,
+      "blendMode": "normal",
+      "offsetX": 0,
+      "offsetY": 0,
+      "scale": 1,
+      "distance": 1,
+      "visible": true
+    }
+  ]
+}

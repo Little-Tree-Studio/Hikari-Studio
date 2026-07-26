@@ -1,0 +1,56 @@
+[
+  {
+    "id": "lake",
+    "kind": "scene",
+    "name": "晨雾湖畔",
+    "path": "builtin/lake.jpg",
+    "forceBundle": false
+  },
+  {
+    "id": "mountain",
+    "kind": "scene",
+    "name": "远山晴空",
+    "path": "builtin/mountain.jpg",
+    "forceBundle": false
+  },
+  {
+    "id": "asset-c8f4afee39",
+    "kind": "scene",
+    "name": "真琴裤袜外套眼镜闭眼A",
+    "path": "真琴裤袜外套眼镜闭眼A.png",
+    "size": 2876889,
+    "forceBundle": false
+  },
+  {
+    "id": "asset-167279e040",
+    "kind": "scene",
+    "name": "真琴裤袜外套眼镜害羞A",
+    "path": "真琴裤袜外套眼镜害羞A.png",
+    "size": 2892459,
+    "forceBundle": false
+  },
+  {
+    "id": "asset-a9f29e2c37",
+    "kind": "scene",
+    "name": "真琴裤袜外套眼镜惊讶A",
+    "path": "真琴裤袜外套眼镜惊讶A.png",
+    "size": 2883023,
+    "forceBundle": false
+  },
+  {
+    "id": "asset-5555a4b4b3",
+    "kind": "scene",
+    "name": "真琴裤袜外套眼镜平静A",
+    "path": "真琴裤袜外套眼镜平静A.png",
+    "size": 2851271,
+    "forceBundle": false
+  },
+  {
+    "id": "asset-420dde491f",
+    "kind": "scene",
+    "name": "真琴裤袜外套眼镜微笑A",
+    "path": "真琴裤袜外套眼镜微笑A.png",
+    "size": 2873675,
+    "forceBundle": false
+  }
+]

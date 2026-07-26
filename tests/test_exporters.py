@@ -1,0 +1,191 @@
+import tempfile
+import unittest
+from pathlib import Path
+
+from backend.exporters import build_web_game, export_renpy
+from backend.project_store import default_project
+
+
+class ExporterTests(unittest.TestCase):
+    @staticmethod
+    def runtime(root: Path) -> Path:
+        runtime = root / "runtime"
+        runtime.mkdir(exist_ok=True)
+        (runtime / "player.js").write_text("/* engine-core shared runtime */", encoding="utf-8")
+        (runtime / "player.css").write_text("/* runtime styles */", encoding="utf-8")
+        return runtime
+
+    def test_renpy_export_contains_labels_and_dialogue(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output = export_renpy(default_project(), Path(directory))
+            text = output.read_text(encoding="utf-8")
+            self.assertIn("label start:", text)
+            self.assertIn("你果然还是来了", text)
+
+    def test_web_build_creates_playable_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            builtin = root / "builtin"
+            builtin.mkdir()
+            (builtin / "lake.jpg").write_bytes(b"lake")
+            (builtin / "mountain.jpg").write_bytes(b"mountain")
+            project_file = root / "game.hikari.json"
+            project_file.write_text("{}", encoding="utf-8")
+            index = build_web_game(default_project(), root / "build", project_file, builtin, runtime_dist=self.runtime(root))
+            self.assertTrue(index.exists())
+            self.assertTrue((root / "build" / "player.js").exists())
+            self.assertIn("engine-core shared runtime", (root / "build" / "player.js").read_text(encoding="utf-8"))
+            self.assertIn("HIKARI_PROJECT", (root / "build" / "project.js").read_text(encoding="utf-8"))
+            self.assertTrue((root / "build" / "assets" / "lake.jpg").exists())
+            self.assertFalse((root / "build" / "assets" / "mountain.jpg").exists())
+
+    def test_web_build_includes_force_bundled_assets(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            builtin = root / "builtin"
+            builtin.mkdir()
+            (builtin / "lake.jpg").write_bytes(b"lake")
+            (builtin / "mountain.jpg").write_bytes(b"mountain")
+            project = default_project()
+            next(asset for asset in project["assets"] if asset["id"] == "mountain")["forceBundle"] = True
+            project_file = root / "game.hikari.json"
+            project_file.write_text("{}", encoding="utf-8")
+            build_web_game(project, root / "build", project_file, builtin, runtime_dist=self.runtime(root))
+            self.assertTrue((root / "build" / "assets" / "mountain.jpg").exists())
+
+    def test_web_build_includes_title_screen_assets(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            builtin = root / "builtin"
+            builtin.mkdir()
+            (builtin / "lake.jpg").write_bytes(b"lake")
+            (builtin / "mountain.jpg").write_bytes(b"mountain")
+            project = default_project()
+            project["ui"] = {"theme": "hikari-light", "dialogueStyle": "glass", "title": {"backgroundAssetId": "mountain", "logoAssetId": "mountain"}}
+            project_file = root / "game.hikari.json"
+            project_file.write_text("{}", encoding="utf-8")
+            build_web_game(project, root / "build", project_file, builtin, runtime_dist=self.runtime(root))
+            self.assertTrue((root / "build" / "assets" / "mountain.jpg").exists())
+            self.assertIn('"backgroundAssetId": "mountain"', (root / "build" / "project.js").read_text(encoding="utf-8"))
+
+    def test_web_build_preserves_runtime_ui_theme(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            builtin = root / "builtin"
+            builtin.mkdir()
+            (builtin / "lake.jpg").write_bytes(b"lake")
+            (builtin / "mountain.jpg").write_bytes(b"mountain")
+            project = default_project()
+            project["ui"]["runtimeTheme"] = {
+                "preset": "minimal",
+                "dialogueFontSize": 17,
+                "dialogueHeight": 13,
+                "accentColor": "#8fd8c9",
+            }
+            project_file = root / "game.hikari.json"
+            project_file.write_text("{}", encoding="utf-8")
+            build_web_game(project, root / "build", project_file, builtin, runtime_dist=self.runtime(root))
+            web_project = (root / "build" / "project.js").read_text(encoding="utf-8")
+            self.assertIn('"preset": "minimal"', web_project)
+            self.assertIn('"dialogueHeight": 13', web_project)
+            self.assertIn('"accentColor": "#8fd8c9"', web_project)
+
+    def test_web_build_bundles_runtime_theme_font(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            builtin = root / "builtin"
+            custom = root / "custom"
+            builtin.mkdir()
+            custom.mkdir()
+            (builtin / "lake.jpg").write_bytes(b"lake")
+            (builtin / "mountain.jpg").write_bytes(b"mountain")
+            (custom / "dialogue.woff2").write_bytes(b"font")
+            project = default_project()
+            project["assets"].append({"id": "font-dialogue", "kind": "font", "name": "对白字体", "path": "assets/files/dialogue.woff2"})
+            project["ui"]["runtimeTheme"] = {"preset": "modern", "fontAssetId": "font-dialogue", "fontFamily": '"Hikari Project Font", sans-serif'}
+            project_file = root / "game.hikari.json"
+            project_file.write_text("{}", encoding="utf-8")
+            build_web_game(project, root / "build", project_file, builtin, custom, self.runtime(root))
+            self.assertTrue((root / "build" / "assets" / "dialogue.woff2").exists())
+            self.assertIn('"fontAssetId": "font-dialogue"', (root / "build" / "project.js").read_text(encoding="utf-8"))
+
+    def test_web_build_collects_multilayer_scene_assets(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            builtin = root / "builtin"
+            builtin.mkdir()
+            (builtin / "lake.jpg").write_bytes(b"lake")
+            (builtin / "mountain.jpg").write_bytes(b"mountain")
+            project = default_project()
+            project["scripts"]["lake-meeting"][0]["layers"] = [{"id": "mist", "name": "雾层", "assetId": "mountain", "opacity": 0.4, "layer": 1}]
+            project_file = root / "game.hikari.json"
+            project_file.write_text("{}", encoding="utf-8")
+            build_web_game(project, root / "build", project_file, builtin, runtime_dist=self.runtime(root))
+            self.assertTrue((root / "build" / "assets" / "mountain.jpg").exists())
+            self.assertIn('"uri": "assets/mountain.jpg"', (root / "build" / "project.js").read_text(encoding="utf-8"))
+
+    def test_web_build_collects_character_overlay_assets(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            builtin = root / "builtin"
+            builtin.mkdir()
+            (builtin / "lake.jpg").write_bytes(b"lake")
+            (builtin / "mountain.jpg").write_bytes(b"mountain")
+            project = default_project()
+            project["characters"][0]["overlays"] = [{"id": "coat", "name": "外套", "assetId": "mountain", "opacity": 1, "layer": 2}]
+            project_file = root / "game.hikari.json"
+            project_file.write_text("{}", encoding="utf-8")
+            build_web_game(project, root / "build", project_file, builtin, runtime_dist=self.runtime(root))
+            self.assertTrue((root / "build" / "assets" / "mountain.jpg").exists())
+            self.assertIn("engine-core shared runtime", (root / "build" / "player.js").read_text(encoding="utf-8"))
+
+    def test_web_build_collects_voice_by_asset_id_and_includes_audio_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            builtin = root / "builtin"
+            custom = root / "custom"
+            builtin.mkdir()
+            custom.mkdir()
+            (builtin / "lake.jpg").write_bytes(b"lake")
+            (builtin / "mountain.jpg").write_bytes(b"mountain")
+            (custom / "cv-001.ogg").write_bytes(b"voice")
+            project = default_project()
+            project["assets"].append({"id": "voice-001", "kind": "audio", "name": "cv-001", "path": "cv-001.ogg", "audioCategory": "voice"})
+            dialogue = next(block for block in project["scripts"]["lake-meeting"] if block["type"] == "dialogue")
+            dialogue["voice"] = "voice-001"
+            project_file = root / "game.hikari.json"
+            project_file.write_text("{}", encoding="utf-8")
+            build_web_game(project, root / "build", project_file, builtin, custom, self.runtime(root))
+            self.assertTrue((root / "build" / "assets" / "cv-001.ogg").exists())
+            web_project = (root / "build" / "project.js").read_text(encoding="utf-8")
+            self.assertIn('"uri": "assets/cv-001.ogg"', web_project)
+
+    def test_disabled_chapters_are_excluded_from_builds(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            builtin = root / "builtin"
+            builtin.mkdir()
+            (builtin / "lake.jpg").write_bytes(b"lake")
+            project = default_project()
+            project["chapters"][1]["disabled"] = True
+            project_file = root / "game.hikari.json"
+            project_file.write_text("{}", encoding="utf-8")
+            build_web_game(project, root / "build", project_file, builtin, runtime_dist=self.runtime(root))
+            web_project = (root / "build" / "project.js").read_text(encoding="utf-8")
+            self.assertNotIn("lake-meeting", web_project)
+            script = export_renpy(project, root / "renpy").read_text(encoding="utf-8")
+            self.assertNotIn("label lake_meeting", script)
+
+    def test_web_build_fails_when_shared_runtime_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            builtin = root / "builtin"
+            builtin.mkdir()
+            project_file = root / "game.hikari.json"
+            project_file.write_text("{}", encoding="utf-8")
+            with self.assertRaises(FileNotFoundError):
+                build_web_game(default_project(), root / "build", project_file, builtin, runtime_dist=root / "missing-runtime")
+
+
+if __name__ == "__main__":
+    unittest.main()
