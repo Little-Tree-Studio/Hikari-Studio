@@ -161,6 +161,7 @@ Windows / Web 发布       ██████░░░░  可用，待稳定化
 python -m unittest discover -s tests -q
 
 cd frontend
+pnpm test
 pnpm run typecheck
 pnpm run build
 ```
