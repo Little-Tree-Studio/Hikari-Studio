@@ -119,6 +119,31 @@ class HistoricalCheckpointAi:
 
 
 class AgentTaskManagerTests(unittest.TestCase):
+    def test_director_operations_and_memory_apply_in_order(self) -> None:
+        project = sample_project()
+        project["scripts"]["opening"].append({"id": "b2", "type": "dialogue", "speaker": "林澄", "text": "原台词"})
+        memory = {"version": 1, "world": "导演测试", "characterRules": [], "styleRules": [], "facts": [], "restrictions": [], "updatedAt": "now"}
+        operations = [
+            {"type": "insert_blocks", "fragmentId": "opening", "anchorBlockId": "b2", "position": "before", "blocks": [{"type": "camera", "zoom": 1.2}]},
+            {"type": "update_blocks", "fragmentId": "opening", "updates": [{"blockId": "b2", "patch": {"text": "保留但调整后的台词"}}]},
+            {"type": "move_blocks", "fragmentId": "opening", "blockIds": ["b1"], "position": "end"},
+            {"type": "update_production_memory", "memory": memory},
+        ]
+        result = AgentTaskManager._apply_operations(project, operations)
+        blocks = result["scripts"]["opening"]
+        self.assertEqual(blocks[-1]["id"], "b1")
+        self.assertEqual(next(block for block in blocks if block["id"] == "b2")["text"], "保留但调整后的台词")
+        self.assertTrue(any(block["type"] == "camera" for block in blocks))
+        self.assertEqual(result["productionMemory"], memory)
+        self.assertNotEqual(result, project)
+
+    def test_director_operations_reject_missing_project_references(self) -> None:
+        project = sample_project()
+        with self.assertRaisesRegex(ValueError, "角色引用无效"):
+            AgentTaskManager._apply_operations(project, [{"type": "insert_blocks", "fragmentId": "opening", "position": "end", "blocks": [{"type": "characterShow", "characterId": "missing"}]}])
+        with self.assertRaisesRegex(ValueError, "素材引用无效"):
+            AgentTaskManager._apply_operations(project, [{"type": "insert_blocks", "fragmentId": "opening", "position": "end", "blocks": [{"type": "sound", "assetId": "missing"}]}])
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name) / "project"
@@ -225,7 +250,12 @@ class AgentTaskManagerTests(unittest.TestCase):
     def test_historical_checkpoint_creates_branch_without_mutating_source_task(self) -> None:
         ai = HistoricalCheckpointAi()
         manager = self.manager(ai)
-        source = manager.start_task("branch history", sample_project(), self.root)
+        context = {
+            "mode": "director",
+            "activeFragmentId": "opening",
+            "simulation": {"summary": {"coverage": 75}},
+        }
+        source = manager.start_task("branch history", sample_project(), self.root, context=context)
         self.assertTrue(ai.started.wait(1))
         manager.pause_task(source["id"], self.root)
         paused = wait_status(manager, self.root, source["id"], {"paused"})
@@ -237,6 +267,9 @@ class AgentTaskManagerTests(unittest.TestCase):
         self.assertNotEqual(branch["id"], source["id"])
         self.assertEqual(branch["parentTaskId"], source["id"])
         self.assertEqual(branch["sourceCheckpointId"], first_checkpoint["id"])
+        self.assertEqual(branch["context"]["mode"], "director")
+        self.assertEqual(branch["context"]["activeFragmentId"], "opening")
+        self.assertEqual(branch["context"]["simulation"], context["simulation"])
         completed = wait_status(manager, self.root, branch["id"], {"completed"})
         self.assertEqual(completed["plan"]["summary"], "resumed from 1")
         self.assertEqual(ai.restored_steps, [1])
@@ -276,7 +309,8 @@ class AgentTaskManagerTests(unittest.TestCase):
     def test_rejected_operations_create_child_task_with_current_project(self) -> None:
         ai = PartialRetryAi()
         manager = self.manager(ai)
-        source = manager.start_task("配置角色和分支", sample_project(), self.root)
+        context = {"mode": "director", "activeFragmentId": "opening", "simulation": {"summary": {"coverage": 80}}}
+        source = manager.start_task("配置角色和分支", sample_project(), self.root, context=context)
         source = wait_status(manager, self.root, source["id"], {"completed"})
         current_project = sample_project()
         current_project["meta"]["name"] = "已应用角色修改"
@@ -285,6 +319,9 @@ class AgentTaskManagerTests(unittest.TestCase):
         self.assertEqual(child["remainingOperationIndexes"], [1])
         self.assertNotIn("executionInstruction", child)
         self.assertTrue(child["instruction"].startswith("重新执行 1 项未接受修改"))
+        self.assertEqual(child["context"]["mode"], "director")
+        self.assertEqual(child["context"]["activeFragmentId"], "opening")
+        self.assertEqual(child["context"]["simulation"], context["simulation"])
         completed = wait_status(manager, self.root, child["id"], {"completed"})
         self.assertEqual(completed["status"], "completed")
         self.assertIn('"type":"update_branch"', ai.calls[1][0])
@@ -317,7 +354,8 @@ class AgentTaskManagerTests(unittest.TestCase):
     def test_patch_preconditions_block_changed_target_and_rebase_from_latest_project(self) -> None:
         ai = PartialRetryAi()
         manager = self.manager(ai)
-        source = manager.start_task("配置角色和分支", sample_project(), self.root)
+        context = {"mode": "director", "activeFragmentId": "opening", "simulation": {"summary": {"coverage": 60}}}
+        source = manager.start_task("配置角色和分支", sample_project(), self.root, context=context)
         source = wait_status(manager, self.root, source["id"], {"completed"})
         current = sample_project()
         current["scripts"]["opening"][0]["text"] = "用户已经修改了当前片段。"
@@ -334,6 +372,9 @@ class AgentTaskManagerTests(unittest.TestCase):
         self.assertNotIn("executionInstruction", child)
         self.assertNotIn("patchPreconditions", child)
         self.assertNotIn("scopes", child["projectVersion"])
+        self.assertEqual(child["context"]["mode"], "director")
+        self.assertEqual(child["context"]["activeFragmentId"], "opening")
+        self.assertEqual(child["context"]["simulation"], context["simulation"])
         wait_status(manager, self.root, child["id"], {"completed"})
         self.assertEqual(ai.calls[1][1]["scripts"]["opening"][0]["text"], "用户已经修改了当前片段。")
 

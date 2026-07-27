@@ -184,6 +184,7 @@ def build_web_game(
     assets_dir = output_dir / "assets"
     assets_dir.mkdir(parents=True, exist_ok=True)
     exported = json.loads(json.dumps(project, ensure_ascii=False))
+    exported.pop("productionMemory", None)
     enabled_fragment_ids = {
         fragment["id"]
         for chapter in exported.get("chapters", []) if not chapter.get("disabled")

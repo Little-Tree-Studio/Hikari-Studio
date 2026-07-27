@@ -77,4 +77,26 @@ describe('Agent Patch semantic history', () => {
     expect(restored.scripts.opening.find((block) => block.id === 'choice')?.title).toBe('旧选择');
     expect(restored.assets[0].name).toBe('用户之后修改的素材名');
   });
+
+  it('restores director block edits and production memory by semantic category', () => {
+    const before = beforeProject();
+    before.productionMemory = { version: 1, world: '旧世界', characterRules: [], styleRules: [], facts: [], restrictions: [], updatedAt: '' };
+    const after = structuredClone(before);
+    after.scripts.opening = [{ id: 'camera', type: 'camera', zoom: 1.2 }, { ...after.scripts.opening[0], text: '导演修改' }, after.scripts.opening[1]];
+    after.productionMemory = { ...before.productionMemory, world: '新世界', updatedAt: 'now' };
+    const directorOperations: AgentOperation[] = [
+      { type: 'insert_blocks', fragmentId: 'opening', anchorBlockId: 'intro', position: 'before', blocks: [{ type: 'camera', zoom: 1.2 }] },
+      { type: 'update_blocks', fragmentId: 'opening', updates: [{ blockId: 'intro', patch: { text: '导演修改' } }] },
+      { type: 'update_production_memory', memory: after.productionMemory },
+    ];
+    const record = buildAgentPatchSemanticRecord(directorOperations);
+    expect(record.categories.map((category) => category.id)).toEqual(['blocks', 'memory']);
+    const blocksRestored = restoreAgentPatchCategory(after, before, after, 'blocks', record);
+    expect(blocksRestored.scripts.opening.map((block) => block.id)).toEqual(['intro', 'choice']);
+    expect(blocksRestored.scripts.opening[0].text).toBe('旧文本');
+    expect(blocksRestored.productionMemory?.world).toBe('新世界');
+    const memoryRestored = restoreAgentPatchCategory(after, before, after, 'memory', record);
+    expect(memoryRestored.productionMemory?.world).toBe('旧世界');
+    expect(memoryRestored.scripts.opening[0].id).toBe('camera');
+  });
 });

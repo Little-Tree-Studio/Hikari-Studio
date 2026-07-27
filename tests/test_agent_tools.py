@@ -13,6 +13,7 @@ def sample_project() -> dict:
         "chapters": [{"id": "start", "name": "开始", "entry": True, "fragments": [{"id": "opening", "name": "片头"}]}],
         "scripts": {"opening": [{"id": "b1", "type": "narration", "text": "夜幕降临。"}]},
         "characters": [{"id": "hero", "name": "林澄"}],
+        "scenes": [{"id": "lake-scene", "name": "湖畔", "layers": []}],
         "assets": [{"id": "lake", "kind": "scene", "name": "湖畔", "path": "lake.png"}],
         "variables": {"affection": 0},
         "variableDefinitions": {"affection": {"type": "number", "scope": "project", "persistence": "slot"}},
@@ -26,6 +27,7 @@ class AgentToolRegistryTests(unittest.TestCase):
         search = registry.invoke("search_project", {"query": "夜幕"})
         self.assertTrue(overview["ok"])
         self.assertEqual(overview["blockCount"], 1)
+        self.assertEqual(overview["scenes"][0]["id"], "lake-scene")
         self.assertEqual(search["total"], 1)
         self.assertEqual(registry.trace[0]["permission"], "read")
 
@@ -65,6 +67,26 @@ class AgentToolRegistryTests(unittest.TestCase):
         self.assertFalse(registry.invoke("propose_update_asset", {"assetId": "missing", "forceBundle": True})["ok"])
         self.assertFalse(registry.invoke("propose_upsert_variable", {"name": "score", "defaultValue": "zero", "valueType": "number"})["ok"])
         self.assertFalse(registry.invoke("propose_update_branch", {"fragmentId": "opening", "blockId": "b1", "options": [{"text": "继续", "target": "opening"}]})["ok"])
+        self.assertFalse(registry.invoke("propose_insert_blocks", {"fragmentId": "opening", "position": "end", "blocks": [{"type": "characterShow", "characterId": "missing"}]})["ok"])
+        self.assertFalse(registry.invoke("propose_insert_blocks", {"fragmentId": "opening", "position": "end", "blocks": [{"type": "scene", "sceneId": "missing"}]})["ok"])
+        self.assertFalse(registry.invoke("propose_insert_blocks", {"fragmentId": "opening", "position": "end", "blocks": [{"type": "sound", "assetId": "missing"}]})["ok"])
+
+    def test_simulation_memory_and_director_tools_use_structured_proposals(self) -> None:
+        project = sample_project()
+        project["productionMemory"] = {"version": 1, "world": "近未来湖城", "characterRules": [], "styleRules": [], "facts": [], "restrictions": [], "updatedAt": ""}
+        context = {"projectFingerprint": "fp", "branchSimulation": {"pathCount": 2, "summary": {"completed": 2}}}
+        registry = AgentToolRegistry(project, context)
+        simulation = registry.invoke("get_branch_simulation", {})
+        memory = registry.invoke("get_production_memory", {})
+        inserted = registry.invoke("propose_insert_blocks", {"fragmentId": "opening", "anchorBlockId": "b1", "position": "before", "blocks": [{"type": "camera", "zoom": 1.2}]})
+        updated = registry.invoke("propose_update_blocks", {"fragmentId": "opening", "updates": [{"blockId": "b1", "patch": {"text": "雾落下来。"}}]})
+        moved = registry.invoke("propose_move_blocks", {"fragmentId": "opening", "blockIds": ["b1"], "position": "end"})
+        memory_patch = registry.invoke("propose_memory_update", {"world": "近未来湖城，记忆可以被保存。", "facts": [{"title": "湖", "content": "湖会记录声音", "pinned": True}]})
+        self.assertTrue(all(result["ok"] for result in (simulation, memory, inserted, updated, moved, memory_patch)))
+        self.assertEqual(simulation["projectFingerprint"], "fp")
+        self.assertEqual(memory["world"], "近未来湖城")
+        self.assertEqual([item["type"] for item in registry.proposed_operations], ["insert_blocks", "update_blocks", "move_blocks", "update_production_memory"])
+        self.assertEqual(project["scripts"]["opening"][0]["text"], "夜幕降临。")
 
 
 if __name__ == "__main__":

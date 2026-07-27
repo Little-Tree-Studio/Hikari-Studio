@@ -250,8 +250,8 @@ class DesktopApi:
     def run_ai_agent(self, instruction: str, project: dict[str, Any]) -> dict[str, Any]:
         return self._ai.run(instruction, project)
 
-    def start_ai_task(self, instruction: str, project: dict[str, Any]) -> dict[str, Any]:
-        return self._agent_tasks.start_task(instruction, project, self._store.project_root)
+    def start_ai_task(self, instruction: str, project: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self._agent_tasks.start_task(instruction, project, self._store.project_root, context)
 
     def retry_ai_task_operations(self, task_id: str, operation_indexes: list[int], project: dict[str, Any]) -> dict[str, Any]:
         return self._agent_tasks.retry_remaining_operations(task_id, operation_indexes, project, self._store.project_root)

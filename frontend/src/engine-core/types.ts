@@ -144,3 +144,49 @@ export interface ProjectDiagnostic extends BlockIssue {
   blockIndex?: number;
   relatedId?: string;
 }
+
+export interface BranchSimulationRequest {
+  entryFragmentId?: string;
+  variableOverrides?: Record<string, string | number | boolean>;
+  maxPaths?: number;
+  maxStepsPerPath?: number;
+  maxVariableScenarios?: number;
+}
+
+export type BranchSimulationPathStatus = 'completed' | 'dead-end' | 'loop' | 'error' | 'truncated';
+
+export interface BranchSimulationLocation {
+  fragmentId: string;
+  blockId?: string;
+  blockIndex?: number;
+}
+
+export interface BranchSimulationPath {
+  id: string;
+  status: BranchSimulationPathStatus;
+  steps: number;
+  choices: Array<{ blockId: string; text: string; target: string }>;
+  initialVariables: Record<string, string | number | boolean>;
+  finalVariables: Record<string, string | number | boolean>;
+  visitedFragments: string[];
+  message: string;
+  location?: BranchSimulationLocation;
+}
+
+export interface BranchSimulationResult {
+  entryFragmentId: string;
+  generatedAt: string;
+  limits: { maxPaths: number; maxStepsPerPath: number; maxVariableScenarios: number };
+  truncated: boolean;
+  truncationReason?: 'path-limit' | 'variable-scenario-limit';
+  scenarioCount: number;
+  pathCount: number;
+  coverage: {
+    fragments: { visited: number; total: number; percent: number; unreachable: string[] };
+    blocks: { visited: number; total: number; percent: number };
+    branchOptions: { visited: number; total: number; percent: number };
+  };
+  summary: Record<BranchSimulationPathStatus, number>;
+  variableConflicts: Array<{ name: string; observedTypes: string[]; locations: BranchSimulationLocation[] }>;
+  paths: BranchSimulationPath[];
+}

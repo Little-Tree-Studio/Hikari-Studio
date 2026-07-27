@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import os
 import queue
@@ -51,15 +52,18 @@ class AgentTaskManager:
         self._stop = threading.Event()
         self._active_task_id: str | None = None
 
-    def start_task(self, instruction: str, project: dict[str, Any], project_root: Path) -> dict[str, Any]:
-        return self._enqueue_new_task(instruction, project, project_root)
+    def start_task(self, instruction: str, project: dict[str, Any], project_root: Path, context: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self._enqueue_new_task(instruction, project, project_root, context=context)
 
-    def _enqueue_new_task(self, instruction: str, project: dict[str, Any], project_root: Path, parent_task_id: str | None = None, remaining_operation_indexes: list[int] | None = None, display_instruction: str | None = None, initial_event: tuple[str, str] | None = None) -> dict[str, Any]:
+    def _enqueue_new_task(self, instruction: str, project: dict[str, Any], project_root: Path, parent_task_id: str | None = None, remaining_operation_indexes: list[int] | None = None, display_instruction: str | None = None, initial_event: tuple[str, str] | None = None, context: dict[str, Any] | None = None) -> dict[str, Any]:
         instruction = instruction.strip()
         if not instruction:
             raise ValueError("请先描述希望 Agent 完成的任务")
         task_id = uuid.uuid4().hex
         now = self._now()
+        project_version = self._project_version(project)
+        clean_context = deepcopy(context) if isinstance(context, dict) else {}
+        clean_context["projectFingerprint"] = project_version["fingerprint"]
         task = {
             "id": task_id,
             "instruction": display_instruction or instruction,
@@ -82,7 +86,8 @@ class AgentTaskManager:
             "sourceCheckpointId": None,
             "remainingOperationIndexes": remaining_operation_indexes or [],
             "appliedOperationIndexes": [],
-            "projectVersion": self._project_version(project),
+            "projectVersion": project_version,
+            "context": clean_context,
             "patchPreconditions": [],
             "events": [],
             "lastEventSeq": 0,
@@ -125,7 +130,15 @@ class AgentTaskManager:
             f"未接受操作：{payload[:20000]}"
         )
         display = f"重新执行 {len(indexes)} 项未接受修改 · {source.get('displayInstruction') or source.get('instruction', '')}"
-        return self._enqueue_new_task(instruction, project, root, source["id"], indexes, display)
+        return self._enqueue_new_task(
+            instruction,
+            project,
+            root,
+            source["id"],
+            indexes,
+            display,
+            context=source.get("context"),
+        )
 
     def check_patch_preconditions(self, task_id: str, operation_indexes: list[int], project: dict[str, Any], project_root: Path) -> dict[str, Any]:
         root = project_root.resolve()
@@ -201,6 +214,7 @@ class AgentTaskManager:
             indexes,
             display,
             ("patch_rebase", "正在基于最新项目重新生成 Patch"),
+            source.get("context"),
         )
 
     def restart_from_checkpoint(self, task_id: str, checkpoint_id: str, project: dict[str, Any], project_root: Path) -> dict[str, Any]:
@@ -223,6 +237,8 @@ class AgentTaskManager:
             task = {
                 "id": new_id,
                 "instruction": source["instruction"],
+                "displayInstruction": source.get("displayInstruction") or source["instruction"],
+                "executionInstruction": source.get("executionInstruction"),
                 "status": "queued",
                 "projectId": str(project.get("meta", {}).get("id", "")),
                 "projectName": str(project.get("meta", {}).get("name", "")),
@@ -241,12 +257,14 @@ class AgentTaskManager:
                 "remainingOperationIndexes": [],
                 "appliedOperationIndexes": [],
                 "projectVersion": self._project_version(project),
+                "context": deepcopy(source.get("context") or {}),
                 "patchPreconditions": [],
                 "events": [],
                 "lastEventSeq": 0,
                 "plan": None,
                 "error": None,
             }
+            task["context"]["projectFingerprint"] = task["projectVersion"]["fingerprint"]
             self._tasks[new_id] = task
             self._projects[new_id] = deepcopy(project)
             self._roots[new_id] = root
@@ -385,15 +403,16 @@ class AgentTaskManager:
                 self._append_event_locked(task_id, "started", "任务开始执行", {"attempt": task.get("attempt", 1)})
                 project = deepcopy(self._projects[task_id])
             try:
-                plan = self.ai_service.run(
-                    task.get("executionInstruction") or task["instruction"],
-                    project,
-                    checkpoint=lambda: self._checkpoint(task_id),
-                    progress=lambda kind, message, data=None: self._progress(task_id, kind, message, data or {}),
-                    cancellation=self._controls[task_id].cancellation,
-                    execution_checkpoint=deepcopy(task.get("executionCheckpoint")),
-                    save_execution_checkpoint=lambda value: self._save_execution_checkpoint(task_id, value),
-                )
+                run_kwargs = {
+                    "checkpoint": lambda: self._checkpoint(task_id),
+                    "progress": lambda kind, message, data=None: self._progress(task_id, kind, message, data or {}),
+                    "cancellation": self._controls[task_id].cancellation,
+                    "execution_checkpoint": deepcopy(task.get("executionCheckpoint")),
+                    "save_execution_checkpoint": lambda value: self._save_execution_checkpoint(task_id, value),
+                }
+                if "context" in inspect.signature(self.ai_service.run).parameters:
+                    run_kwargs["context"] = deepcopy(task.get("context") or {})
+                plan = self.ai_service.run(task.get("executionInstruction") or task["instruction"], project, **run_kwargs)
                 with self._lock:
                     task = self._tasks[task_id]
                     task["status"] = "completed"
@@ -535,6 +554,7 @@ class AgentTaskManager:
             "characters": cls._hash_value(clean.get("characters", [])), "assets": cls._hash_value(clean.get("assets", [])),
             "variables": cls._hash_value({"values": clean.get("variables", {}), "definitions": clean.get("variableDefinitions", {})}),
             "settings": cls._hash_value(clean.get("settings", {})), "scenes": cls._hash_value(clean.get("scenes", [])),
+            "production-memory": cls._hash_value(clean.get("productionMemory", {})),
         }
         for fragment_id, blocks in clean.get("scripts", {}).items(): scopes[f"script:{fragment_id}"] = cls._hash_value(blocks)
         for character in clean.get("characters", []): scopes[f"character:{character.get('id')}"] = cls._hash_value(character)
@@ -549,11 +569,12 @@ class AgentTaskManager:
     def _operation_scopes(operation: dict[str, Any]) -> list[str]:
         kind = operation.get("type")
         if kind == "update_project": return ["meta"]
-        if kind in {"add_blocks", "update_branch"}: return [f"script:{operation.get('fragmentId')}"]
+        if kind in {"add_blocks", "insert_blocks", "update_blocks", "move_blocks", "update_branch"}: return [f"script:{operation.get('fragmentId')}"]
         if kind == "create_fragment": return ["chapters"]
         if kind == "upsert_character": return [f"character:{operation['characterId']}"] if operation.get("characterId") else ["characters"]
         if kind == "update_asset": return [f"asset:{operation.get('assetId')}"]
         if kind == "upsert_variable": return [f"variable:{operation.get('name')}"]
+        if kind == "update_production_memory": return ["production-memory"]
         return ["meta"]
 
     @classmethod
@@ -563,7 +584,7 @@ class AgentTaskManager:
 
     @staticmethod
     def _conflict_message(operation: dict[str, Any], scope: str) -> str:
-        labels = {"add_blocks": "目标 Fragment 的剧本", "update_branch": "目标分支所在剧本", "create_fragment": "章节结构", "upsert_character": "目标角色配置", "update_asset": "目标素材配置", "upsert_variable": "目标变量", "update_project": "项目基本信息"}
+        labels = {"add_blocks": "目标 Fragment 的剧本", "insert_blocks": "目标 Fragment 的剧本", "update_blocks": "目标 Fragment 的剧本", "move_blocks": "目标 Fragment 的剧本", "update_branch": "目标分支所在剧本", "create_fragment": "章节结构", "upsert_character": "目标角色配置", "update_asset": "目标素材配置", "upsert_variable": "目标变量", "update_project": "项目基本信息", "update_production_memory": "制作记忆"}
         return f"{labels.get(str(operation.get('type')), scope)}在 Patch 生成后已被修改"
 
     @staticmethod
@@ -586,6 +607,28 @@ class AgentTaskManager:
         fragment_ids = {str(fragment.get("id")) for chapter in chapters for fragment in chapter.get("fragments", [])}
         character_ids = {str(character.get("id")) for character in characters}
         asset_ids = {str(asset.get("id")) for asset in assets}
+        scene_ids = {str(scene.get("id")) for scene in next_project.get("scenes", [])}
+
+        def validate_block_references(block: dict[str, Any]) -> None:
+            if not isinstance(block, dict):
+                raise ValueError("Agent Patch 包含无效的 Block")
+            referenced_assets = [block.get("assetId")]
+            referenced_assets.extend(layer.get("assetId") for layer in block.get("layers", []) if isinstance(layer, dict))
+            if any(str(asset_id) not in asset_ids for asset_id in filter(None, referenced_assets)):
+                raise ValueError("Agent Patch 的 Block 素材引用无效")
+            if block.get("sceneId") and str(block["sceneId"]) not in scene_ids:
+                raise ValueError("Agent Patch 的 Block 场景引用无效")
+            if block.get("characterId") and str(block["characterId"]) not in character_ids:
+                raise ValueError("Agent Patch 的 Block 角色引用无效")
+            targets: list[Any] = []
+            if block.get("type") == "branch":
+                targets = [option.get("target") for option in block.get("options", []) if isinstance(option, dict)]
+            elif block.get("type") == "condition":
+                targets = [block.get("trueTarget"), block.get("falseTarget")]
+            elif block.get("type") in {"jump", "call"}:
+                targets = [block.get("target")]
+            if any(str(target) not in fragment_ids for target in filter(None, targets)):
+                raise ValueError("Agent Patch 的 Block Fragment 引用无效")
 
         for operation in operations:
             kind = operation.get("type")
@@ -593,9 +636,45 @@ class AgentTaskManager:
                 fragment_id = str(operation.get("fragmentId") or "")
                 if fragment_id not in fragment_ids or not isinstance(operation.get("blocks"), list):
                     raise ValueError("Agent Patch 引用了无效的目标 Fragment")
+                for block in operation["blocks"]:
+                    validate_block_references(block)
+            elif kind == "insert_blocks":
+                fragment_id = str(operation.get("fragmentId") or "")
+                blocks = scripts.get(fragment_id)
+                position = operation.get("position")
+                anchor = operation.get("anchorBlockId")
+                if not isinstance(blocks, list) or not isinstance(operation.get("blocks"), list) or position not in {"before", "after", "start", "end"}:
+                    raise ValueError("Agent Patch 的插入 Block 操作无效")
+                if position in {"before", "after"} and not any(block.get("id") == anchor for block in blocks):
+                    raise ValueError("Agent Patch 的插入锚点不存在")
+                for block in operation["blocks"]:
+                    validate_block_references(block)
+            elif kind == "update_blocks":
+                fragment_id = str(operation.get("fragmentId") or "")
+                blocks = scripts.get(fragment_id)
+                ids = {str(block.get("id")) for block in blocks or []}
+                updates = operation.get("updates")
+                if not isinstance(blocks, list) or not isinstance(updates, list) or not updates or any(str(update.get("blockId")) not in ids or not isinstance(update.get("patch"), dict) or any(key in update["patch"] for key in ("id", "type")) for update in updates):
+                    raise ValueError("Agent Patch 的 Block 更新无效")
+                originals = {str(block.get("id")): block for block in blocks}
+                for update in updates:
+                    validate_block_references({**originals[str(update["blockId"])], **update["patch"]})
+            elif kind == "move_blocks":
+                fragment_id = str(operation.get("fragmentId") or "")
+                blocks = scripts.get(fragment_id)
+                ids = {str(block.get("id")) for block in blocks or []}
+                moving = [str(value) for value in operation.get("blockIds") or []]
+                position = operation.get("position")
+                anchor = str(operation.get("anchorBlockId") or "")
+                if not isinstance(blocks, list) or not moving or len(set(moving)) != len(moving) or any(value not in ids for value in moving) or position not in {"before", "after", "start", "end"}:
+                    raise ValueError("Agent Patch 的 Block 移动无效")
+                if position in {"before", "after"} and (anchor not in ids or anchor in moving):
+                    raise ValueError("Agent Patch 的移动锚点无效")
             elif kind == "create_fragment":
                 if str(operation.get("chapterId") or "") not in chapter_ids or not isinstance(operation.get("blocks"), list):
                     raise ValueError("Agent Patch 引用了无效的目标章节")
+                for block in operation["blocks"]:
+                    validate_block_references(block)
             elif kind == "upsert_character":
                 character_id = operation.get("characterId")
                 if character_id and str(character_id) not in character_ids:
@@ -622,6 +701,12 @@ class AgentTaskManager:
                 options = operation.get("options")
                 if block is None or not isinstance(options, list) or any(str(option.get("target") or "") not in fragment_ids for option in options):
                     raise ValueError("Agent Patch 的分支引用无效")
+            elif kind == "update_production_memory":
+                memory = operation.get("memory")
+                if not isinstance(memory, dict) or int(memory.get("version", 0)) != 1:
+                    raise ValueError("Agent Patch 的制作记忆格式无效")
+                if any(not isinstance(memory.get(section), list) for section in ("characterRules", "styleRules", "facts", "restrictions")):
+                    raise ValueError("Agent Patch 的制作记忆分类无效")
             elif kind != "update_project":
                 raise ValueError(f"Agent Patch 包含不支持的操作: {kind}")
 
@@ -635,6 +720,27 @@ class AgentTaskManager:
             elif kind == "add_blocks":
                 fragment_id = operation["fragmentId"]
                 scripts[fragment_id] = [*scripts.get(fragment_id, []), *[{**block, "id": f"block-{uuid.uuid4().hex[:10]}"} for block in operation["blocks"]]]
+            elif kind == "insert_blocks":
+                fragment_id = operation["fragmentId"]
+                current = scripts[fragment_id]
+                position = operation["position"]
+                anchor_index = next((index for index, block in enumerate(current) if block.get("id") == operation.get("anchorBlockId")), 0)
+                insert_at = 0 if position == "start" else len(current) if position == "end" else anchor_index + (1 if position == "after" else 0)
+                inserted = [{**block, "id": f"block-{uuid.uuid4().hex[:10]}"} for block in operation["blocks"]]
+                scripts[fragment_id] = [*current[:insert_at], *inserted, *current[insert_at:]]
+            elif kind == "update_blocks":
+                fragment_id = operation["fragmentId"]
+                updates = {update["blockId"]: update["patch"] for update in operation["updates"]}
+                scripts[fragment_id] = [{**block, **deepcopy(updates[str(block.get("id"))])} if str(block.get("id")) in updates else block for block in scripts[fragment_id]]
+            elif kind == "move_blocks":
+                fragment_id = operation["fragmentId"]
+                moving_ids = set(operation["blockIds"])
+                moving = [block for block in scripts[fragment_id] if str(block.get("id")) in moving_ids]
+                remaining = [block for block in scripts[fragment_id] if str(block.get("id")) not in moving_ids]
+                position = operation["position"]
+                anchor_index = next((index for index, block in enumerate(remaining) if block.get("id") == operation.get("anchorBlockId")), 0)
+                insert_at = 0 if position == "start" else len(remaining) if position == "end" else anchor_index + (1 if position == "after" else 0)
+                scripts[fragment_id] = [*remaining[:insert_at], *moving, *remaining[insert_at:]]
             elif kind == "create_fragment":
                 fragment_id = f"fragment-{uuid.uuid4().hex[:10]}"
                 chapter = next(item for item in chapters if item.get("id") == operation["chapterId"])
@@ -669,6 +775,8 @@ class AgentTaskManager:
             elif kind == "update_branch":
                 fragment_id = operation["fragmentId"]
                 scripts[fragment_id] = [{**block, "title": operation["title"], "options": deepcopy(operation["options"])} if block.get("id") == operation["blockId"] and block.get("type") == "branch" else block for block in scripts[fragment_id]]
+            elif kind == "update_production_memory":
+                next_project["productionMemory"] = deepcopy(operation["memory"])
         return next_project
 
     @staticmethod
@@ -696,6 +804,12 @@ class AgentTaskManager:
             if kind == "add_blocks":
                 blocks = operation.get("blocks") or []
                 return "剧本 Block", f"向 {operation.get('fragmentId', '未知片段')} 添加 {len(blocks)} 个 Block", {"kind": "fragment", "id": operation.get("fragmentId")}
+            if kind == "insert_blocks":
+                return "剧本 Block", f"在 {operation.get('fragmentId', '未知片段')} 的 {operation.get('position', '锚点')} 插入 {len(operation.get('blocks') or [])} 个 Block", {"kind": "fragment", "id": operation.get("fragmentId")}
+            if kind == "update_blocks":
+                return "剧本 Block", f"更新 {operation.get('fragmentId', '未知片段')} 的 {len(operation.get('updates') or [])} 个 Block", {"kind": "fragment", "id": operation.get("fragmentId")}
+            if kind == "move_blocks":
+                return "剧本 Block", f"移动 {operation.get('fragmentId', '未知片段')} 的 {len(operation.get('blockIds') or [])} 个 Block", {"kind": "fragment", "id": operation.get("fragmentId")}
             if kind == "create_fragment":
                 blocks = operation.get("blocks") or []
                 return "章节与 Fragment", f"在章节 {operation.get('chapterId', '未知章节')} 创建 {operation.get('name', '未命名片段')}（{len(blocks)} Blocks）", {"kind": "chapter", "id": operation.get("chapterId")}
@@ -712,6 +826,10 @@ class AgentTaskManager:
             if kind == "update_branch":
                 options = operation.get("options") or []
                 return "变量与分支", f"修改分支 {operation.get('blockId', '未知 Block')}（{len(options)} 个选项）", {"kind": "fragment", "id": operation.get("fragmentId")}
+            if kind == "update_production_memory":
+                memory = operation.get("memory") or {}
+                count = sum(len(memory.get(section) or []) for section in ("characterRules", "styleRules", "facts", "restrictions"))
+                return "制作记忆", f"更新世界观与 {count} 条制作规则", {"kind": "memory", "id": None}
             return "其他", str(kind or "未知操作"), None
 
         categories: dict[str, list[dict[str, Any]]] = {}
@@ -782,6 +900,7 @@ class AgentTaskManager:
         task.setdefault("executionInstruction", None)
         task.setdefault("projectVersion", None)
         task.setdefault("patchPreconditions", [])
+        task.setdefault("context", {})
         if not task["checkpoints"] and isinstance(task.get("executionCheckpoint"), dict):
             checkpoint = task["executionCheckpoint"]
             checkpoint_id = uuid.uuid5(uuid.NAMESPACE_URL, f"hikari:{task.get('id')}:{checkpoint.get('nextRound', 0)}").hex

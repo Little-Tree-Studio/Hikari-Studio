@@ -15,6 +15,10 @@ from typing import Any
 
 
 PROJECT_VERSION = 3
+
+
+def default_production_memory() -> dict[str, Any]:
+    return {"version": 1, "world": "", "characterRules": [], "styleRules": [], "facts": [], "restrictions": [], "updatedAt": ""}
 MANIFEST_NAME = "project.hikari.json"
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 AUDIO_EXTENSIONS = {".mp3", ".ogg", ".wav", ".flac", ".m4a"}
@@ -102,6 +106,7 @@ def default_project(name: str = "星海回声") -> dict[str, Any]:
         "settings": {"textSpeed": 35, "autoSave": True, "skipRead": True},
         "locale": {"default": "zh-CN", "languages": ["zh-CN"]},
         "ui": {"theme": "hikari-light", "dialogueStyle": "glass"},
+        "productionMemory": default_production_memory(),
     }
 
 
@@ -443,6 +448,7 @@ class ProjectStore:
             expected[root / "locales" / "zh-CN.json"] = payload.get("translations", {})
             expected[root / "settings" / "editor.json"] = payload.get("settings", {})
             expected[root / "ui" / "theme.json"] = payload.get("ui", {"theme": "hikari-light", "dialogueStyle": "glass"})
+            expected[root / ".hikari" / "agent" / "memory.json"] = payload.get("productionMemory", default_production_memory())
 
             for path, value in expected.items():
                 if path != self.project_path:
@@ -616,6 +622,7 @@ class ProjectStore:
             "locale": manifest.get("locale", {"default": "zh-CN", "languages": ["zh-CN"]}),
             "translations": self._read_json(root / "locales" / "zh-CN.json", default={}),
             "ui": self._read_json(root / "ui" / "theme.json", default={"theme": "hikari-light", "dialogueStyle": "glass"}),
+            "productionMemory": self._read_json(root / ".hikari" / "agent" / "memory.json", default=default_production_memory()),
         }
         return self._migrate(project)
 
@@ -725,6 +732,29 @@ class ProjectStore:
         if locale["default"] not in locale["languages"]:
             locale["languages"].insert(0, locale["default"])
         result.setdefault("ui", {"theme": "hikari-light", "dialogueStyle": "glass"})
+        memory = result.get("productionMemory")
+        if not isinstance(memory, dict):
+            memory = default_production_memory()
+            result["productionMemory"] = memory
+        memory["version"] = 1
+        memory.setdefault("world", "")
+        for section in ("characterRules", "styleRules", "facts", "restrictions"):
+            if not isinstance(memory.get(section), list):
+                memory[section] = []
+            normalized_entries = []
+            for entry in memory[section]:
+                if not isinstance(entry, dict):
+                    continue
+                normalized = deepcopy(entry)
+                normalized.setdefault("id", f"memory-{uuid.uuid4().hex[:10]}")
+                normalized["title"] = str(normalized.get("title", "")).strip()
+                normalized["content"] = str(normalized.get("content", "")).strip()
+                normalized["pinned"] = bool(normalized.get("pinned", False))
+                normalized["references"] = normalized.get("references") if isinstance(normalized.get("references"), list) else []
+                normalized.setdefault("updatedAt", "")
+                normalized_entries.append(normalized)
+            memory[section] = normalized_entries
+        memory.setdefault("updatedAt", "")
         result["version"] = PROJECT_VERSION
         for chapter in result.get("chapters", []):
             chapter["disabled"] = False if chapter.get("entry") else bool(chapter.get("disabled", False))
@@ -782,6 +812,13 @@ class ProjectStore:
             raise ValueError("Active fragment does not exist")
         if not all(isinstance(project["scripts"].get(fragment_id, []), list) for fragment_id in fragment_ids):
             raise ValueError("Every fragment script must be a list")
+        memory = project.get("productionMemory", default_production_memory())
+        if not isinstance(memory, dict) or int(memory.get("version", 0)) != 1 or not isinstance(memory.get("world", ""), str):
+            raise ValueError("Production memory is invalid")
+        for section in ("characterRules", "styleRules", "facts", "restrictions"):
+            entries = memory.get(section)
+            if not isinstance(entries, list) or any(not isinstance(entry, dict) or not isinstance(entry.get("id"), str) or not isinstance(entry.get("title"), str) or not isinstance(entry.get("content"), str) or not isinstance(entry.get("references", []), list) for entry in entries):
+                raise ValueError(f"Production memory section is invalid: {section}")
         component_ids = [chapter.get("id") for chapter in project["chapters"]]
         component_ids += list(fragment_ids)
         component_ids += [character.get("id") for character in project.get("characters", [])]

@@ -238,6 +238,26 @@ export interface GameUiTheme {
   cornerRadius: number;
 }
 
+export type ProductionMemorySection = 'characterRules' | 'styleRules' | 'facts' | 'restrictions';
+export interface ProductionMemoryReference { fragmentId: string; blockId?: string; note?: string }
+export interface ProductionMemoryEntry {
+  id: string;
+  title: string;
+  content: string;
+  pinned: boolean;
+  references: ProductionMemoryReference[];
+  updatedAt: string;
+}
+export interface ProductionMemory {
+  version: 1;
+  world: string;
+  characterRules: ProductionMemoryEntry[];
+  styleRules: ProductionMemoryEntry[];
+  facts: ProductionMemoryEntry[];
+  restrictions: ProductionMemoryEntry[];
+  updatedAt: string;
+}
+
 export interface Project {
   version: number;
   meta: { id: string; name: string; author: string; resolution: [number, number]; updatedAt: string; gameVersion?: string };
@@ -275,6 +295,7 @@ export interface Project {
     title?: { backgroundAssetId?: string; logoAssetId?: string; subtitle?: string };
     runtimeTheme?: GameUiTheme;
   };
+  productionMemory?: ProductionMemory;
 }
 
 export interface DesktopApiResult<T> {
@@ -337,7 +358,7 @@ export interface DesktopApi {
   save_ai_settings(settings: AiSettingsInput): Promise<AiSettings>;
   discover_ai_models(settings: AiSettingsInput): Promise<AiModelDiscovery>;
   run_ai_agent(instruction: string, project: Project): Promise<AgentPlan>;
-  start_ai_task(instruction: string, project: Project): Promise<AgentTask>;
+  start_ai_task(instruction: string, project: Project, context: AgentContext): Promise<AgentTask>;
   retry_ai_task_operations(taskId: string, operationIndexes: number[], project: Project): Promise<AgentTask>;
   check_ai_patch_preconditions(taskId: string, operationIndexes: number[], project: Project): Promise<AgentPatchPreconditionResult>;
   apply_ai_patch(taskId: string, operationIndexes: number[], project: Project): Promise<AgentPatchApplyResult>;
@@ -450,14 +471,35 @@ export interface AiModelDiscovery {
   healthCache?: { ttlSeconds: number; cachedHits: number; staleEntries: number; probed: number };
 }
 
+export interface AgentContext {
+  mode?: 'assistant' | 'director';
+  activeFragmentId: string;
+  selectedBlockIndexes: number[];
+  projectFingerprint?: string;
+  branchSimulation: {
+    generatedAt: string;
+    truncated: boolean;
+    pathCount: number;
+    scenarioCount: number;
+    coverage: import('./engine-core/types').BranchSimulationResult['coverage'];
+    summary: import('./engine-core/types').BranchSimulationResult['summary'];
+    variableConflicts: import('./engine-core/types').BranchSimulationResult['variableConflicts'];
+    problemPaths: import('./engine-core/types').BranchSimulationPath[];
+  };
+}
+
 export type AgentOperation =
   | { type: 'add_blocks'; fragmentId: string; blocks: StoryBlockInput[] }
+  | { type: 'insert_blocks'; fragmentId: string; anchorBlockId?: string; position: 'before' | 'after' | 'start' | 'end'; blocks: StoryBlockInput[] }
+  | { type: 'update_blocks'; fragmentId: string; updates: Array<{ blockId: string; patch: StoryBlockPatch }> }
+  | { type: 'move_blocks'; fragmentId: string; blockIds: string[]; anchorBlockId?: string; position: 'before' | 'after' | 'start' | 'end' }
   | { type: 'create_fragment'; chapterId: string; name: string; blocks: StoryBlockInput[] }
   | { type: 'update_project'; name?: string; author?: string }
   | { type: 'upsert_character'; characterId?: string; name: string; color?: string; description?: string; expressions?: string[]; portraits?: Record<string, string>; defaultPosition?: CharacterPosition; defaultScale?: number }
   | { type: 'update_asset'; assetId: string; name?: string; forceBundle?: boolean; audioCategory?: AudioCategory; voiceCharacterId?: string }
   | { type: 'upsert_variable'; name: string; defaultValue: string | number | boolean; valueType: VariableType; displayName?: string; description?: string; persistence: VariablePersistence }
-  | { type: 'update_branch'; fragmentId: string; blockId: string; title: string; options: BranchOption[] };
+  | { type: 'update_branch'; fragmentId: string; blockId: string; title: string; options: BranchOption[] }
+  | { type: 'update_production_memory'; memory: ProductionMemory };
 
 export interface AgentPlan {
   summary: string;
@@ -530,6 +572,7 @@ export interface AgentTask {
   plan?: AgentPlan | null;
   hasPlan?: boolean;
   error?: string | null;
+  context?: AgentContext;
 }
 
 export interface AgentPatchConflict { operationIndex: number; operationType: AgentOperation['type'] | 'unknown'; scope: string; expectedHash?: string; currentHash?: string; message: string }
@@ -537,7 +580,7 @@ export interface AgentPatchPreconditionResult { taskId: string; stale: boolean; 
 export interface AgentPatchApplyResult extends AgentPatchPreconditionResult { ok: boolean; project?: Project; appliedOperationIndexes: number[]; summary?: string; save?: { ok: boolean; path: string; bytes: number; version: number } }
 
 export interface AgentResultRef { taskId: string; checkpointId?: string | null }
-export interface AgentComparisonTarget { kind: 'fragment' | 'chapter' | 'character' | 'asset' | 'variable' | 'project'; id?: string | null }
+export interface AgentComparisonTarget { kind: 'fragment' | 'chapter' | 'character' | 'asset' | 'variable' | 'memory' | 'project'; id?: string | null }
 export interface AgentComparisonItem { status: 'added' | 'removed' | 'modified'; summary: string; target?: AgentComparisonTarget | null; value: Record<string, unknown> }
 export interface AgentComparisonCategory { name: string; items: AgentComparisonItem[] }
 export interface AgentResultComparison {

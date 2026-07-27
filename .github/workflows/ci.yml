@@ -30,6 +30,8 @@ jobs:
         working-directory: frontend
       - run: pnpm test
         working-directory: frontend
+      - run: pnpm run test:e2e
+        working-directory: frontend
       - run: pnpm run build
         working-directory: frontend
       - run: dotnet publish launcher/Hikari.GameLauncher/Hikari.GameLauncher.csproj --configuration Release --runtime win-x64 --self-contained false --output launcher-ci

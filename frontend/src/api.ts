@@ -1,4 +1,4 @@
-import type { AgentPatchApplyResult, AgentPatchPreconditionResult, AgentPlan, AgentResultComparison, AgentResultRef, AgentTask, AiModelDiscovery, AiSettings, AiSettingsInput, Asset, AssetFileStatus, AssetFolderRepairPreview, AssetRepairIssue, AssetRepairMatch, AudioCategory, CommandHistoryStorageStats, Project, RecentProject, RecoverySnapshot, ScriptImportPreview } from './types';
+import type { AgentContext, AgentPatchApplyResult, AgentPatchPreconditionResult, AgentPlan, AgentResultComparison, AgentResultRef, AgentTask, AiModelDiscovery, AiSettings, AiSettingsInput, Asset, AssetFileStatus, AssetFolderRepairPreview, AssetRepairIssue, AssetRepairMatch, AudioCategory, CommandHistoryStorageStats, Project, RecentProject, RecoverySnapshot, ScriptImportPreview } from './types';
 import { readLargeValue, writeLargeValue } from './core/storage';
 import type { PersistedCommandHistory } from './hooks/useCommandHistory';
 
@@ -199,10 +199,10 @@ export async function runAiAgent(instruction: string, project: Project): Promise
   return withTimeout(api.run_ai_agent(instruction, project), 120000);
 }
 
-export async function startAiTask(instruction: string, project: Project): Promise<AgentTask> {
+export async function startAiTask(instruction: string, project: Project, context: AgentContext): Promise<AgentTask> {
   const api = await waitForDesktopApi();
   if (!api) throw new Error('AI Agent 任务仅在桌面应用中可用');
-  return withTimeout(api.start_ai_task(instruction, project), 10000);
+  return withTimeout(api.start_ai_task(instruction, project, context), 10000);
 }
 
 export async function listAiTasks(): Promise<AgentTask[]> {

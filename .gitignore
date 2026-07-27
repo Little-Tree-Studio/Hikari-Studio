@@ -4,6 +4,8 @@
 frontend/dist/
 frontend/runtime-dist/
 frontend/node_modules/
+frontend/test-results/
+frontend/playwright-report/
 *.tsbuildinfo
 launcher/**/bin/
 launcher/**/obj/

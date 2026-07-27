@@ -1,7 +1,7 @@
 import type { AgentOperation, Project, StoryBlock } from '../types';
 import type { CommandCategory } from '../hooks/useCommandHistory';
 
-export type AgentPatchCategoryId = 'blocks' | 'characters' | 'assets' | 'variables' | 'project';
+export type AgentPatchCategoryId = 'blocks' | 'characters' | 'assets' | 'variables' | 'memory' | 'project';
 
 export interface AgentPatchSemanticRecord {
   categories: CommandCategory[];
@@ -13,6 +13,7 @@ const categoryMeta: Record<AgentPatchCategoryId, { label: string }> = {
   characters: { label: '角色配置' },
   assets: { label: '素材引用' },
   variables: { label: '变量' },
+  memory: { label: '制作记忆' },
   project: { label: '项目信息' },
 };
 
@@ -21,6 +22,7 @@ function operationCategory(operation: AgentOperation): AgentPatchCategoryId {
   if (operation.type === 'update_asset') return 'assets';
   if (operation.type === 'upsert_variable') return 'variables';
   if (operation.type === 'update_project') return 'project';
+  if (operation.type === 'update_production_memory') return 'memory';
   return 'blocks';
 }
 
@@ -29,11 +31,15 @@ function operationSummaries(operation: AgentOperation): string[] {
     const content = block.text || block.title || block.speaker || block.type;
     return `${operation.fragmentId} · ${block.type}：${content}`;
   });
+  if (operation.type === 'insert_blocks') return operation.blocks.map((block) => `${operation.fragmentId} · 插入 ${block.type}：${block.text || block.title || block.speaker || block.type}`);
+  if (operation.type === 'update_blocks') return operation.updates.map((update) => `${operation.fragmentId} · 更新 ${update.blockId}`);
+  if (operation.type === 'move_blocks') return operation.blockIds.map((blockId) => `${operation.fragmentId} · 移动 ${blockId}`);
   if (operation.type === 'create_fragment') return [`${operation.name}：创建 Fragment（${operation.blocks.length} 个 Block）`];
   if (operation.type === 'update_branch') return [`${operation.fragmentId}：修改分支“${operation.title}”`];
   if (operation.type === 'upsert_character') return [operation.name];
   if (operation.type === 'update_asset') return [operation.name ?? operation.assetId];
   if (operation.type === 'upsert_variable') return [operation.displayName ? `${operation.displayName} (${operation.name})` : operation.name];
+  if (operation.type === 'update_production_memory') return [`世界观与 ${operation.memory.characterRules.length + operation.memory.styleRules.length + operation.memory.facts.length + operation.memory.restrictions.length} 条制作规则`];
   return [[operation.name, operation.author].filter(Boolean).join(' / ') || '项目基本信息'];
 }
 
@@ -43,7 +49,7 @@ export function buildAgentPatchSemanticRecord(operations: AgentOperation[]): Age
     const category = operationCategory(operation);
     groups.set(category, [...(groups.get(category) ?? []), ...operationSummaries(operation)]);
   }
-  const order: AgentPatchCategoryId[] = ['blocks', 'characters', 'assets', 'variables', 'project'];
+  const order: AgentPatchCategoryId[] = ['blocks', 'characters', 'assets', 'variables', 'memory', 'project'];
   return {
     operations: structuredClone(operations),
     categories: order.filter((id) => groups.has(id)).map((id) => ({ id, label: categoryMeta[id].label, count: groups.get(id)!.length, items: groups.get(id)! })),
@@ -58,13 +64,21 @@ function restoreBlocks(current: Project, before: Project, after: Project, operat
   const afterFragments = after.chapters.flatMap((chapter) => chapter.fragments);
   const createdIds = new Set(afterFragments.filter((fragment) => !beforeFragmentIds.has(fragment.id)).map((fragment) => fragment.id));
   for (const operation of operations) {
-    if (operation.type === 'add_blocks') {
+    if (operation.type === 'add_blocks' || operation.type === 'insert_blocks') {
       const beforeIds = new Set((before.scripts[operation.fragmentId] ?? []).map((block) => block.id));
       const addedIds = new Set((after.scripts[operation.fragmentId] ?? []).filter((block) => !beforeIds.has(block.id)).map((block) => block.id));
       next.scripts[operation.fragmentId] = (next.scripts[operation.fragmentId] ?? []).filter((block) => !addedIds.has(block.id));
     } else if (operation.type === 'update_branch') {
       const original = blockById(before.scripts[operation.fragmentId] ?? [], operation.blockId);
       if (original) next.scripts[operation.fragmentId] = (next.scripts[operation.fragmentId] ?? []).map((block) => block.id === operation.blockId ? structuredClone(original) : block);
+    } else if (operation.type === 'update_blocks') {
+      const originals = new Map((before.scripts[operation.fragmentId] ?? []).map((block) => [block.id, block]));
+      const ids = new Set(operation.updates.map((update) => update.blockId));
+      next.scripts[operation.fragmentId] = (next.scripts[operation.fragmentId] ?? []).map((block) => ids.has(block.id) && originals.has(block.id) ? structuredClone(originals.get(block.id)!) : block);
+    } else if (operation.type === 'move_blocks') {
+      const current = next.scripts[operation.fragmentId] ?? [];
+      const order = new Map((before.scripts[operation.fragmentId] ?? []).map((block, index) => [block.id, index]));
+      next.scripts[operation.fragmentId] = [...current].sort((left, right) => (order.get(left.id) ?? Number.MAX_SAFE_INTEGER) - (order.get(right.id) ?? Number.MAX_SAFE_INTEGER));
     }
   }
   if (operations.some((operation) => operation.type === 'create_fragment')) {
@@ -121,6 +135,7 @@ export function restoreAgentPatchCategory(current: Project, before: Project, aft
   if (categoryId === 'characters') return restoreCharacters(current, before, after);
   if (categoryId === 'assets') return restoreAssets(current, before, operations);
   if (categoryId === 'variables') return restoreVariables(current, before, operations);
+  if (categoryId === 'memory') return { ...structuredClone(current), productionMemory: structuredClone(before.productionMemory) };
   if (categoryId === 'project') return restoreProjectMeta(current, before, operations);
   return current;
 }

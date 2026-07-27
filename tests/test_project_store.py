@@ -9,6 +9,16 @@ from backend.project_store import ProjectStore, default_project
 
 
 class ProjectStoreTests(unittest.TestCase):
+    def test_production_memory_persists_outside_build_project_files(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = ProjectStore(Path(directory))
+            project = store.load()
+            project["productionMemory"] = {"version": 1, "world": "测试世界", "characterRules": [], "styleRules": [], "facts": [{"id": "fact", "title": "事实", "content": "不会遗忘", "pinned": True, "references": [], "updatedAt": "now"}], "restrictions": [], "updatedAt": "now"}
+            store.save(project)
+            memory_path = store.project_root / ".hikari" / "agent" / "memory.json"
+            self.assertTrue(memory_path.exists())
+            self.assertEqual(ProjectStore(Path(directory)).load()["productionMemory"]["world"], "测试世界")
+
     @staticmethod
     def _command_history(project: dict) -> dict:
         return {

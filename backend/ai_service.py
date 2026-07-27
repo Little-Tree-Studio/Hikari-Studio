@@ -143,6 +143,7 @@ class AiService:
         cancellation: RequestCancellation | None = None,
         execution_checkpoint: dict[str, Any] | None = None,
         save_execution_checkpoint: Callable[[dict[str, Any]], None] | None = None,
+        context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         checkpoint = checkpoint or (lambda: None)
         progress = progress or (lambda _kind, _message, _data=None: None)
@@ -167,7 +168,7 @@ class AiService:
                 progress("model_skipped", f"模型 {model_id} 处于熔断冷却期", {"model": model_id})
                 continue
             candidate_settings = {**settings, "model": model_id}
-            registry = AgentToolRegistry(project)
+            registry = AgentToolRegistry(project, context)
             try:
                 progress("model_selected", f"正在使用模型 {model_id}", {"model": model_id})
                 provider = self.provider_factory(candidate_settings, api_key)
@@ -208,9 +209,15 @@ class AiService:
             "完成工具调用后只输出 JSON：{summary:string,assumptions:string[],operations:array}。"
             "operations 通常留空，因为编辑工具产生的提案会自动合并；禁止声称已经写入或构建。"
         )
+        if registry.context.get("mode") == "director":
+            system += (
+                "当前任务是导演模式。必须先调用 get_project_overview、get_production_memory、get_fragment 和 get_branch_simulation，"
+                "只使用项目中真实存在的角色、场景和音频素材。使用插入、更新或移动 Block 工具编排场景、角色、镜头、声音与转场，"
+                "保持原对白和流程控制不变，并在摘要中列出制作记忆冲突与模拟风险。"
+            )
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system},
-            {"role": "user", "content": json.dumps({"task": instruction, "activeFragmentId": registry.project.get("activeFragmentId")}, ensure_ascii=False)},
+            {"role": "user", "content": json.dumps({"task": instruction, "activeFragmentId": registry.project.get("activeFragmentId"), "context": registry.context}, ensure_ascii=False)},
         ]
         usage: dict[str, int] = {}
         start_round = 0
@@ -579,6 +586,7 @@ class AiService:
             "assets": [{key: asset.get(key) for key in ("id", "kind", "name")} for asset in project.get("assets", [])],
             "variables": project.get("variables", {}),
             "activeBlocks": project.get("scripts", {}).get(active, []),
+            "productionMemory": project.get("productionMemory", {}),
         }
 
     @staticmethod
@@ -592,12 +600,15 @@ class AiService:
             raise ValueError("Agent 没有返回有效的结构化计划") from error
         if not isinstance(plan, dict) or not isinstance(plan.get("summary"), str) or not isinstance(plan.get("operations"), list):
             raise ValueError("Agent 计划缺少 summary 或 operations")
-        allowed_operations = {"add_blocks", "create_fragment", "update_project", "upsert_character", "update_asset", "upsert_variable", "update_branch"}
+        allowed_operations = {"add_blocks", "insert_blocks", "update_blocks", "move_blocks", "create_fragment", "update_project", "upsert_character", "update_asset", "upsert_variable", "update_branch", "update_production_memory"}
         required_fields = {
             "add_blocks": ("fragmentId", "blocks"), "create_fragment": ("chapterId", "name", "blocks"),
+            "insert_blocks": ("fragmentId", "position", "blocks"), "update_blocks": ("fragmentId", "updates"),
+            "move_blocks": ("fragmentId", "blockIds", "position"),
             "update_project": (), "upsert_character": ("name",), "update_asset": ("assetId",),
             "upsert_variable": ("name", "defaultValue", "valueType", "persistence"),
             "update_branch": ("fragmentId", "blockId", "title", "options"),
+            "update_production_memory": ("memory",),
         }
         allowed_blocks = {"scene", "sound", "characterShow", "characterHide", "camera", "narration", "dialogue", "branch", "setVariable", "condition", "jump", "call", "return"}
         for operation in plan["operations"]:

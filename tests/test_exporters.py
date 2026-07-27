@@ -186,6 +186,22 @@ class ExporterTests(unittest.TestCase):
             with self.assertRaises(FileNotFoundError):
                 build_web_game(default_project(), root / "build", project_file, builtin, runtime_dist=root / "missing-runtime")
 
+    def test_web_build_excludes_production_memory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            builtin = root / "builtin"
+            builtin.mkdir()
+            (builtin / "lake.jpg").write_bytes(b"lake")
+            (builtin / "mountain.jpg").write_bytes(b"mountain")
+            project = default_project()
+            project["productionMemory"] = {"version": 1, "world": "SECRET_STORY_BIBLE", "characterRules": [], "styleRules": [], "facts": [], "restrictions": [], "updatedAt": ""}
+            project_file = root / "game.hikari.json"
+            project_file.write_text("{}", encoding="utf-8")
+            build_web_game(project, root / "build", project_file, builtin, runtime_dist=self.runtime(root))
+            web_project = (root / "build" / "project.js").read_text(encoding="utf-8")
+            self.assertNotIn("productionMemory", web_project)
+            self.assertNotIn("SECRET_STORY_BIBLE", web_project)
+
 
 if __name__ == "__main__":
     unittest.main()
