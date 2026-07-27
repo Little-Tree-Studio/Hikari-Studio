@@ -45,6 +45,7 @@ interface PersistedCommandHistoryV2<T> {
   version: 2;
   projectId: string;
   snapshots: EncodedSnapshot<T>[];
+  storage?: { uncompressedBytes: number };
   undo: PersistedCommandV2[];
   redo: PersistedCommandV2[];
   archive?: PersistedCommandV2[];
@@ -126,6 +127,10 @@ export function useCommandHistory<T>(initial: T, limit = 50) {
   const serializeHistory = useCallback((projectId: string): PersistedCommandHistory<T> => {
     const commands = [...undoRef.current, ...redoRef.current, ...archiveRef.current];
     const encoded = encodeSnapshotValues(commands.flatMap((command) => [command.before, command.after]));
+    const textEncoder = new TextEncoder();
+    const uncompressedBytes = commands.reduce((total, command) => total
+      + textEncoder.encode(JSON.stringify(command.before)).byteLength
+      + textEncoder.encode(JSON.stringify(command.after)).byteLength, 0);
     let refIndex = 0;
     const serialize = (command: SnapshotCommand<T>): PersistedCommandV2 => ({
       id: command.id,
@@ -139,7 +144,7 @@ export function useCommandHistory<T>(initial: T, limit = 50) {
       undoneCategoryIds: [...(command.undoneCategoryIds ?? [])],
       categoryEffect: command.categoryEffect ? { ...command.categoryEffect } : undefined,
     });
-    return { version: 2, projectId, snapshots: encoded.snapshots, undo: undoRef.current.map(serialize), redo: redoRef.current.map(serialize), archive: archiveRef.current.map(serialize) };
+    return { version: 2, projectId, snapshots: encoded.snapshots, storage: { uncompressedBytes }, undo: undoRef.current.map(serialize), redo: redoRef.current.map(serialize), archive: archiveRef.current.map(serialize) };
   }, []);
 
   const restoreHistory = useCallback((next: T, state: PersistedCommandHistory<T> | null | undefined, strategies: CommandRestoreStrategies<T>) => {
@@ -317,6 +322,19 @@ export function useCommandHistory<T>(initial: T, limit = 50) {
     return true;
   }, [syncCounts, touchHistory, trimHistory]);
 
+  const clearUnpinnedHistory = useCallback(() => {
+    const commands = [...undoRef.current, ...redoRef.current, ...archiveRef.current];
+    const pinned = commands.filter((command) => command.pinned);
+    const removed = commands.length - pinned.length;
+    if (!removed) return 0;
+    undoRef.current = [];
+    redoRef.current = [];
+    archiveRef.current = trimHistory(pinned);
+    syncCounts();
+    touchHistory();
+    return removed;
+  }, [syncCounts, touchHistory, trimHistory]);
+
   const snapshotEntry = (state: CommandSnapshotEntry<T>['state']) => ({ id, label, timestamp, name, pinned, before, after, options, undoneCategoryIds }: SnapshotCommand<T>): CommandSnapshotEntry<T> => ({
     id,
     label,
@@ -347,6 +365,7 @@ export function useCommandHistory<T>(initial: T, limit = 50) {
     undoCategory,
     renameCommand,
     toggleCommandPinned,
+    clearUnpinnedHistory,
     undoCount: counts.undo,
     redoCount: counts.redo,
     history,

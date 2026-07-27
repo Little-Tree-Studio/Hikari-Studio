@@ -220,8 +220,30 @@ class ProjectStore:
             raise ValueError("Command history exceeds the 128 MiB limit")
         with self._lock:
             self._write_json_atomic(self.command_history_path, value)
-        archive_count = len(value.get("archive", [])) if value["version"] == 2 else 0
-        return {"ok": True, "path": str(self.command_history_path), "bytes": self.command_history_path.stat().st_size, "commandCount": len(value["undo"]) + len(value["redo"]) + archive_count}
+        return {"ok": True, "path": str(self.command_history_path), **self._command_history_stats(value, self.command_history_path.stat().st_size)}
+
+    def load_command_history_stats(self) -> dict[str, Any]:
+        with self._lock:
+            value = self.load_command_history()
+            if value is None:
+                return self._command_history_stats(None, 0)
+            return self._command_history_stats(value, self.command_history_path.stat().st_size)
+
+    @staticmethod
+    def _command_history_stats(history: dict[str, Any] | None, size: int) -> dict[str, Any]:
+        if history is None:
+            return {"version": 2, "bytes": 0, "uncompressedBytes": 0, "compressionRate": 0.0, "commandCount": 0, "ordinaryCount": 0, "pinnedCount": 0, "snapshotCount": 0}
+        archive = history.get("archive", []) if history["version"] == 2 else []
+        commands = [*history["undo"], *history["redo"], *archive]
+        raw_size = history.get("storage", {}).get("uncompressedBytes", size) if history["version"] == 2 else size
+        uncompressed_size = max(size, int(raw_size)) if isinstance(raw_size, (int, float)) and raw_size >= 0 else size
+        compression_rate = max(0.0, min(1.0, 1.0 - (size / uncompressed_size))) if uncompressed_size else 0.0
+        pinned_count = sum(1 for command in commands if command.get("pinned") is True)
+        return {
+            "version": history["version"], "bytes": size, "uncompressedBytes": uncompressed_size, "compressionRate": compression_rate,
+            "commandCount": len(commands), "ordinaryCount": len(commands) - pinned_count, "pinnedCount": pinned_count,
+            "snapshotCount": len(history.get("snapshots", [])) if history["version"] == 2 else len(commands) * 2,
+        }
 
     @staticmethod
     def _validate_command_history(history: Any) -> dict[str, Any]:
@@ -255,6 +277,9 @@ class ProjectStore:
                 if not isinstance(command.get("before"), dict) or not isinstance(command.get("after"), dict):
                     raise ValueError("Command history snapshot is invalid")
         else:
+            storage = history.get("storage")
+            if storage is not None and (not isinstance(storage, dict) or not isinstance(storage.get("uncompressedBytes"), int) or storage["uncompressedBytes"] < 0):
+                raise ValueError("Command history storage metadata is invalid")
             snapshots = history.get("snapshots")
             if not isinstance(snapshots, list) or len(snapshots) > 400:
                 raise ValueError("Command history snapshots are invalid")

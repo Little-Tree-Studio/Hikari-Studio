@@ -38,6 +38,7 @@ class ProjectStoreTests(unittest.TestCase):
                 {"id": "snapshot-1", "value": project},
                 {"id": "snapshot-2", "baseId": "snapshot-1", "delta": {"type": "object", "changed": {"meta": {"type": "object", "changed": {"name": {"type": "replace", "value": "新名称"}}}}}},
             ],
+            "storage": {"uncompressedBytes": 100000},
             "undo": [{
                 "id": "command-2", "label": "重命名项目", "name": "发布前检查点", "pinned": True, "timestamp": 2,
                 "beforeRef": "snapshot-1", "afterRef": "snapshot-2", "undoneCategoryIds": [],
@@ -76,6 +77,14 @@ class ProjectStoreTests(unittest.TestCase):
             self.assertEqual(reopened["undo"][0]["name"], "发布前检查点")
             self.assertTrue(reopened["undo"][0]["pinned"])
             self.assertEqual(reopened["archive"][0]["name"], "固定归档")
+            stats = ProjectStore(root).load_command_history_stats()
+            self.assertEqual(stats["bytes"], Path(result["path"]).stat().st_size)
+            self.assertEqual(stats["uncompressedBytes"], 100000)
+            self.assertGreater(stats["compressionRate"], 0)
+            self.assertEqual(stats["commandCount"], 2)
+            self.assertEqual(stats["ordinaryCount"], 0)
+            self.assertEqual(stats["pinnedCount"], 2)
+            self.assertEqual(stats["snapshotCount"], 2)
 
     def test_command_history_rejects_wrong_project_and_invalid_stacks(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

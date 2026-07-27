@@ -25,6 +25,12 @@ class DesktopApiTests(unittest.TestCase):
             self.assertTrue(result["ok"])
             self.assertIn(str(Path(".hikari") / "history" / "commands.json"), result["path"])
             self.assertEqual(json.loads(json.dumps(api.load_command_history(), ensure_ascii=False)), history)
+            stats = api.load_command_history_stats()
+            self.assertEqual(stats["version"], 1)
+            self.assertEqual(stats["commandCount"], 1)
+            self.assertEqual(stats["ordinaryCount"], 1)
+            self.assertEqual(stats["pinnedCount"], 0)
+            json.loads(json.dumps(stats, ensure_ascii=False))
 
     def test_recovery_snapshot_bridge_returns_validated_project(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

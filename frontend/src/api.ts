@@ -1,4 +1,4 @@
-import type { AgentPatchApplyResult, AgentPatchPreconditionResult, AgentPlan, AgentResultComparison, AgentResultRef, AgentTask, AiModelDiscovery, AiSettings, AiSettingsInput, Asset, AssetFileStatus, AssetFolderRepairPreview, AssetRepairIssue, AssetRepairMatch, AudioCategory, Project, RecentProject, RecoverySnapshot, ScriptImportPreview } from './types';
+import type { AgentPatchApplyResult, AgentPatchPreconditionResult, AgentPlan, AgentResultComparison, AgentResultRef, AgentTask, AiModelDiscovery, AiSettings, AiSettingsInput, Asset, AssetFileStatus, AssetFolderRepairPreview, AssetRepairIssue, AssetRepairMatch, AudioCategory, CommandHistoryStorageStats, Project, RecentProject, RecoverySnapshot, ScriptImportPreview } from './types';
 import { readLargeValue, writeLargeValue } from './core/storage';
 import type { PersistedCommandHistory } from './hooks/useCommandHistory';
 
@@ -241,6 +241,12 @@ export async function loadCommandHistory(): Promise<PersistedCommandHistory<Proj
   return withTimeout(api.load_command_history(), 10000);
 }
 
+export async function loadCommandHistoryStats(): Promise<CommandHistoryStorageStats> {
+  const api = await waitForDesktopApi();
+  if (!api) return { version: 2, bytes: 0, uncompressedBytes: 0, compressionRate: 0, commandCount: 0, ordinaryCount: 0, pinnedCount: 0, snapshotCount: 0 };
+  return withTimeout(api.load_command_history_stats(), 10000);
+}
+
 export async function loadRecoverySnapshot(): Promise<RecoverySnapshot | null> {
   const api = await waitForDesktopApi();
   if (!api) return null;
@@ -249,7 +255,11 @@ export async function loadRecoverySnapshot(): Promise<RecoverySnapshot | null> {
 
 export async function saveCommandHistory(history: PersistedCommandHistory<Project>) {
   const api = await waitForDesktopApi();
-  if (!api) return { ok: true, path: 'browser-memory', bytes: 0, commandCount: history.undo.length + history.redo.length + (history.version === 2 ? history.archive?.length ?? 0 : 0) };
+  if (!api) {
+    const commands = history.undo.length + history.redo.length + (history.version === 2 ? history.archive?.length ?? 0 : 0);
+    const pinned = [...history.undo, ...history.redo, ...(history.version === 2 ? history.archive ?? [] : [])].filter((command) => command.pinned).length;
+    return { ok: true, path: 'browser-memory', version: history.version, bytes: 0, uncompressedBytes: history.version === 2 ? history.storage?.uncompressedBytes ?? 0 : 0, compressionRate: 0, commandCount: commands, ordinaryCount: commands - pinned, pinnedCount: pinned, snapshotCount: history.version === 2 ? history.snapshots.length : commands * 2 };
+  }
   return withTimeout(api.save_command_history(history), 30000);
 }
 

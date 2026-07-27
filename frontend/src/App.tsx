@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import {
   buildWeb, buildWindows, callWindow, exportRenpy, importAssets, loadProject, newProject,
-  applyAiPatch, loadCommandHistory, loadRecoverySnapshot, openProject, openRecentProject, previewScriptImport, replaceAssetFile, saveCommandHistory, saveProject, saveProjectAs,
+  applyAiPatch, loadCommandHistory, loadCommandHistoryStats, loadRecoverySnapshot, openProject, openRecentProject, previewScriptImport, replaceAssetFile, saveCommandHistory, saveProject, saveProjectAs,
 } from './api';
 import { Preview } from './components/Preview';
 import { AiAgentPanel } from './components/AiAgentPanel';
@@ -36,7 +36,7 @@ import { projectScenes, sceneBlockSnapshot } from './core/scenes';
 import { createBlock } from './engine-core/blocks';
 import { diagnosticSummary } from './engine-core/diagnostics';
 import { useCommandHistory, type CommandRestoreStrategies, type CommandSnapshotEntry, type PersistedCommandHistory } from './hooks/useCommandHistory';
-import type { AgentOperation, AppNotification, Asset, AudioCategory, BlockType, ConditionOperator, InspectorDock, Project, RecoverySnapshot, ScriptImportPreview, StoryBlock, StoryBlockPatch } from './types';
+import type { AgentOperation, AppNotification, Asset, AudioCategory, BlockType, CommandHistoryStorageStats, ConditionOperator, InspectorDock, Project, RecoverySnapshot, ScriptImportPreview, StoryBlock, StoryBlockPatch } from './types';
 
 const SaveAs = Copy;
 
@@ -65,6 +65,7 @@ type AppDialogRequest = {
 
 const makeId = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 const clone = <T,>(value: T): T => structuredClone(value);
+const formatBytes = (bytes: number) => bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 
 function FrontendDialog({ dialog, updateValue, close }: { dialog: AppDialogRequest | null; updateValue: (value: string) => void; close: (value: string | boolean | null) => void }) {
   if (!dialog) return null;
@@ -683,6 +684,7 @@ interface HistoryPageProps {
   project: Project;
   entries: CommandSnapshotEntry<Project>[];
   recovery: RecoverySnapshot | null;
+  storage: CommandHistoryStorageStats | null;
   undoCount: number;
   redoCount: number;
   undo: () => void;
@@ -693,14 +695,16 @@ interface HistoryPageProps {
   refreshRecovery: () => void;
   renameCommand: (entry: CommandSnapshotEntry<Project>) => void;
   toggleCommandPinned: (entry: CommandSnapshotEntry<Project>) => void;
+  refreshStorage: () => void;
+  clearOrdinaryHistory: () => void;
 }
 
-function HistoryPage({ project, entries, recovery, undoCount, redoCount, undo, redo, undoCategory, restoreCommand, restoreRecovery, refreshRecovery, renameCommand, toggleCommandPinned }: HistoryPageProps) {
+function HistoryPage({ project, entries, recovery, storage, undoCount, redoCount, undo, redo, undoCategory, restoreCommand, restoreRecovery, refreshRecovery, renameCommand, toggleCommandPinned, refreshStorage, clearOrdinaryHistory }: HistoryPageProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [recoveryExpanded, setRecoveryExpanded] = useState(false);
   const toggle = (id: string) => setExpanded((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   const recoveryDiff = recovery ? diffProjects(recovery.project, project) : null;
-  return <div className="dashboard-page history-page"><PageHeader title="编辑历史" sub="保留最近 50 个普通 Command；固定快照额外保护，所有恢复操作仍可撤销"><button className="button ghost" disabled={!undoCount} onClick={undo}><Undo2 />撤销</button><button className="button ghost" disabled={!redoCount} onClick={redo}><Redo2 />重做</button></PageHeader><div className="content-pad"><section className={`recovery-card ${recovery?.recoveredDuringLoad ? 'recovered' : ''}`}><div className="recovery-summary"><div className="recovery-icon"><HardDrive /></div><div><strong>{recovery?.recoveredDuringLoad ? '本次启动已执行崩溃恢复' : '崩溃恢复快照'}</strong><small>{recovery ? `${new Date(recovery.updatedAt).toLocaleString()} · ${recoveryDiff?.total ?? 0} 项与当前项目不同` : '当前项目还没有可用的恢复快照'}</small></div><div className="recovery-actions"><button className="button ghost" onClick={refreshRecovery}>刷新</button><button className="button ghost" disabled={!recovery} onClick={() => setRecoveryExpanded((value) => !value)}>{recoveryExpanded ? '收起比较' : '比较快照'}<ChevronDown className={recoveryExpanded ? 'expanded' : ''} /></button><button className="button primary" disabled={!recovery || !recoveryDiff?.total} onClick={restoreRecovery}><Undo2 />恢复此快照</button></div></div>{recovery && recoveryExpanded && <div className="snapshot-detail"><div className="snapshot-stats"><SnapshotStats label="恢复快照" project={recovery.project} /><ArrowRight /><SnapshotStats label="当前项目" project={project} /></div><SnapshotDiff diff={recoveryDiff!} /></div>}</section><div className="history-list">{[...entries].reverse().map((entry) => {
+  return <div className="dashboard-page history-page"><PageHeader title="编辑历史" sub="保留最近 50 个普通 Command；固定快照额外保护，所有恢复操作仍可撤销"><button className="button ghost" disabled={!undoCount} onClick={undo}><Undo2 />撤销</button><button className="button ghost" disabled={!redoCount} onClick={redo}><Redo2 />重做</button></PageHeader><div className="content-pad"><section className={`recovery-card ${recovery?.recoveredDuringLoad ? 'recovered' : ''}`}><div className="recovery-summary"><div className="recovery-icon"><HardDrive /></div><div><strong>{recovery?.recoveredDuringLoad ? '本次启动已执行崩溃恢复' : '崩溃恢复快照'}</strong><small>{recovery ? `${new Date(recovery.updatedAt).toLocaleString()} · ${recoveryDiff?.total ?? 0} 项与当前项目不同` : '当前项目还没有可用的恢复快照'}</small></div><div className="recovery-actions"><button className="button ghost" onClick={refreshRecovery}>刷新</button><button className="button ghost" disabled={!recovery} onClick={() => setRecoveryExpanded((value) => !value)}>{recoveryExpanded ? '收起比较' : '比较快照'}<ChevronDown className={recoveryExpanded ? 'expanded' : ''} /></button><button className="button primary" disabled={!recovery || !recoveryDiff?.total} onClick={restoreRecovery}><Undo2 />恢复此快照</button></div></div>{recovery && recoveryExpanded && <div className="snapshot-detail"><div className="snapshot-stats"><SnapshotStats label="恢复快照" project={recovery.project} /><ArrowRight /><SnapshotStats label="当前项目" project={project} /></div><SnapshotDiff diff={recoveryDiff!} /></div>}</section><section className="history-storage-card"><header><div><PackageCheck /><span><strong>历史存储与清理</strong><small>增量快照 v{storage?.version ?? 2} · .hikari/history/commands.json</small></span></div><div><button className="button ghost" onClick={refreshStorage}>刷新统计</button><button className="button danger" disabled={!entries.some((entry) => !entry.pinned)} onClick={clearOrdinaryHistory}><Trash2 />清理普通历史</button></div></header><div className="history-storage-stats"><div><span>磁盘占用</span><strong>{formatBytes(storage?.bytes ?? 0)}</strong></div><div><span>完整快照估算</span><strong>{formatBytes(storage?.uncompressedBytes ?? 0)}</strong></div><div><span>节省空间</span><strong>{Math.round((storage?.compressionRate ?? 0) * 100)}%</strong></div><div><span>历史记录</span><strong>{storage?.commandCount ?? entries.length}</strong><small>{storage?.pinnedCount ?? entries.filter((entry) => entry.pinned).length} 个固定</small></div></div><div className="compression-meter"><span style={{ width: `${Math.round((storage?.compressionRate ?? 0) * 100)}%` }} /><small>已压缩 {formatBytes(Math.max(0, (storage?.uncompressedBytes ?? 0) - (storage?.bytes ?? 0)))}</small></div></section><div className="history-list">{[...entries].reverse().map((entry) => {
     const isExpanded = expanded.has(entry.id);
     const diff = isExpanded ? diffProjects(entry.before, entry.after) : null;
     return <section className={`history-entry ${entry.categories?.length ? 'semantic' : ''} ${entry.state} ${entry.pinned ? 'pinned' : ''}`} key={entry.id}><button type="button" className="history-item" onClick={() => toggle(entry.id)}><div className="history-icon">{entry.label.startsWith('AI Agent') ? <Sparkles /> : <History />}</div><div><strong>{entry.name ?? entry.label}</strong><small>{entry.name ? `${entry.label} · ` : ''}{entry.state === 'undone' ? '当前位于重做栈 · ' : entry.state === 'archived' ? '固定归档 · ' : ''}{entry.categories?.length ? `${entry.categories.length} 类语义修改` : '完整项目快照'} · 点击比较</small></div><div className="history-badges">{entry.pinned && <span className="history-pin"><Pin />固定</span>}<span className={`history-state ${entry.state}`}>{entry.state === 'applied' ? '已应用' : entry.state === 'undone' ? '已撤销' : '已归档'}</span></div><time>{new Date(entry.timestamp).toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</time><ChevronDown className={isExpanded ? 'expanded' : ''} /></button>{isExpanded && <div className="command-snapshot-detail"><div className="snapshot-toolbar"><div className="snapshot-stats"><SnapshotStats label="修改前" project={entry.before} /><ArrowRight /><SnapshotStats label="修改后" project={entry.after} /></div><div className="snapshot-actions"><button className="button ghost" onClick={() => renameCommand(entry)}><FileText />{entry.name ? '修改名称' : '命名快照'}</button><button className={`button ghost ${entry.pinned ? 'active' : ''}`} onClick={() => toggleCommandPinned(entry)}><Pin />{entry.pinned ? '取消固定' : '固定保护'}</button><button className="button ghost" onClick={() => restoreCommand(entry, 'before')}><Undo2 />恢复修改前</button><button className="button ghost" onClick={() => restoreCommand(entry, 'after')}><Redo2 />恢复修改后</button></div></div><SnapshotDiff diff={diff!} />{entry.categories?.length && <div className="history-category-list">{entry.categories.map((category) => <article className={category.undone ? 'undone' : ''} key={category.id}><header><div><strong>{category.label}</strong><span>{category.count} 项</span></div><button className="button ghost" disabled={entry.state !== 'applied' || category.undone} onClick={() => undoCategory(entry.id, category.id)}>{category.undone ? <CheckCircle2 /> : <Undo2 />}{category.undone ? '已撤销' : '恢复此类别到修改前'}</button></header><ul>{category.items.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}</ul></article>)}</div>}</div>}</section>;
@@ -753,6 +757,7 @@ export default function App() {
   const [scriptImportBusy, setScriptImportBusy] = useState(false);
   const [scriptImportPreview, setScriptImportPreview] = useState<ScriptImportPreview | null>(null);
   const [recoverySnapshot, setRecoverySnapshot] = useState<RecoverySnapshot | null>(null);
+  const [historyStorage, setHistoryStorage] = useState<CommandHistoryStorageStats | null>(null);
   const hydrated = useRef(false);
   const autoSaveTimerRef = useRef<number | null>(null);
   const pendingSaveRef = useRef<Promise<unknown> | null>(null);
@@ -769,7 +774,7 @@ export default function App() {
   const navigatePage = (next: Page) => { if (next === page) return; setBackPages((items) => [...items, page].slice(-40)); setForwardPages([]); setPage(next); };
   const navigateBack = () => { const previous = backPages.at(-1); if (!previous) return; setBackPages((items) => items.slice(0, -1)); setForwardPages((items) => [page, ...items].slice(0, 40)); setPage(previous); };
   const navigateForward = () => { const next = forwardPages[0]; if (!next) return; setForwardPages((items) => items.slice(1)); setBackPages((items) => [...items, page].slice(-40)); setPage(next); };
-  const { commit, commitSaved, replace, reset: resetHistory, restoreHistory, serializeHistory, undo, redo, undoCategory, renameCommand, toggleCommandPinned, undoCount, redoCount, history: commandEntries, historyVersion, dirty, markSaved } = history;
+  const { commit, commitSaved, replace, reset: resetHistory, restoreHistory, serializeHistory, undo, redo, undoCategory, renameCommand, toggleCommandPinned, clearUnpinnedHistory, undoCount, redoCount, history: commandEntries, historyVersion, dirty, markSaved } = history;
   const resetProject = (next: Project, persistedHistory?: PersistedCommandHistory<Project> | null) => {
     const fragmentIds = new Set(next.chapters.flatMap((chapter) => chapter.fragments.map((fragment) => fragment.id)));
     const savedTabs = next.settings.editorSession?.openFragmentIds.filter((id) => fragmentIds.has(id)) ?? [];
@@ -784,7 +789,7 @@ export default function App() {
   const persistCommandHistory = () => {
     if (!historyReadyRef.current) return Promise.resolve();
     const snapshot = serializeHistory(project.meta.id);
-    const request = historySaveQueueRef.current.catch(() => undefined).then(() => saveCommandHistory(snapshot));
+    const request = historySaveQueueRef.current.catch(() => undefined).then(() => saveCommandHistory(snapshot)).then((result) => { setHistoryStorage(result); return result; });
     historySaveQueueRef.current = request;
     return request;
   };
@@ -792,11 +797,14 @@ export default function App() {
   const restoreProjectAndHistory = async (next: Project) => {
     historyReadyRef.current = false;
     setRecoverySnapshot(null);
+    setHistoryStorage(null);
     let persistedHistory: PersistedCommandHistory<Project> | null = null;
     try { persistedHistory = await loadCommandHistory(); }
     catch (error) { log('error', 'history', 'Command 历史损坏或无法读取，项目将不带历史打开', error); }
     try { setRecoverySnapshot(await loadRecoverySnapshot()); }
     catch (error) { log('error', 'history', '崩溃恢复快照无法读取', error); }
+    try { setHistoryStorage(await loadCommandHistoryStats()); }
+    catch (error) { log('error', 'history', '历史存储统计无法读取', error); }
     resetProject(next, persistedHistory);
     historyReadyRef.current = true;
   };
@@ -1012,6 +1020,17 @@ export default function App() {
     if (name === null || !renameCommand(entry.id, name)) return;
     show(name.trim() ? '快照名称已保存' : '快照名称已清除');
   };
+  const refreshHistoryStorage = async () => {
+    try { setHistoryStorage(await loadCommandHistoryStats()); show('历史存储统计已刷新'); }
+    catch (error) { log('error', 'history', '历史存储统计刷新失败', error); show(String(error), 'error'); }
+  };
+  const clearOrdinaryHistory = async () => {
+    const ordinaryCount = commandEntries.filter((entry) => !entry.pinned).length;
+    if (!ordinaryCount || !await requestConfirm({ title: '清理普通历史', message: `将删除 ${ordinaryCount} 条普通 Command 历史并清空撤销/重做栈。固定快照会转入受保护归档，项目内容不会改变。`, confirmText: '清理普通历史', danger: true })) return;
+    const removed = clearUnpinnedHistory();
+    await persistCommandHistory();
+    show(`已清理 ${removed} 条普通历史，固定快照已保留`);
+  };
 
   const activeName = project.chapters.flatMap((chapter) => chapter.fragments).find((fragment) => fragment.id === project.activeFragmentId)?.name ?? '片段';
   const pages: Record<Page, ReactNode> = {
@@ -1021,7 +1040,7 @@ export default function App() {
     map: <NarrativeMap project={project} activate={activate} commit={commit} notify={show} requestText={requestText} />,
     characters: <CharacterManager project={project} commit={commit} notify={show} requestText={requestText} requestConfirm={requestConfirm} />,
     scenes: <SceneManager project={project} commit={commit} notify={show} requestText={requestText} requestConfirm={requestConfirm} activate={activate} />,
-    history: <HistoryPage project={project} entries={commandEntries} recovery={recoverySnapshot} undoCount={undoCount} redoCount={redoCount} undo={undo} redo={redo} undoCategory={undoCategory} restoreCommand={(entry, target) => void restoreCommandSnapshot(entry, target)} restoreRecovery={() => void restoreCrashSnapshot()} refreshRecovery={() => void refreshRecoverySnapshot()} renameCommand={(entry) => void nameCommandSnapshot(entry)} toggleCommandPinned={(entry) => { if (toggleCommandPinned(entry.id)) show(entry.pinned ? '快照已取消固定' : '快照已固定保护'); }} />,
+    history: <HistoryPage project={project} entries={commandEntries} recovery={recoverySnapshot} storage={historyStorage} undoCount={undoCount} redoCount={redoCount} undo={undo} redo={redo} undoCategory={undoCategory} restoreCommand={(entry, target) => void restoreCommandSnapshot(entry, target)} restoreRecovery={() => void restoreCrashSnapshot()} refreshRecovery={() => void refreshRecoverySnapshot()} renameCommand={(entry) => void nameCommandSnapshot(entry)} toggleCommandPinned={(entry) => { if (toggleCommandPinned(entry.id)) show(entry.pinned ? '快照已取消固定' : '快照已固定保护'); }} refreshStorage={() => void refreshHistoryStorage()} clearOrdinaryHistory={() => void clearOrdinaryHistory()} />,
     ai: <AiAgentPanel project={project} applyPlan={applyAgentPlan} requestBuild={(target) => void runBuild(target)} notify={show} navigateTarget={(target) => { if (target.kind === 'fragment' && target.id) activate(target.id); else if (target.kind === 'chapter' && target.id) { const fragment = project.chapters.find((chapter) => chapter.id === target.id)?.fragments[0]; if (fragment) activate(fragment.id); } else if (target.kind === 'character') navigatePage('characters'); else if (target.kind === 'asset') navigatePage('assets'); else if (target.kind === 'variable') navigatePage('map'); else show('该差异项没有可打开的编辑位置'); }} />,
   };
   const openAssetSection = (section: string, target: Page = 'assets') => { setAssetSection(section); navigatePage(target); setAssetMenuOpen(false); };
