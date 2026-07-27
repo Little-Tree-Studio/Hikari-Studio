@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 import hashlib
@@ -147,7 +148,7 @@ class ProjectStoreTests(unittest.TestCase):
             store = ProjectStore(root / "other")
             loaded = store.open(legacy_path)
             self.assertEqual(loaded["version"], 3)
-            self.assertEqual(store.project_path, root / "legacy" / "project.hikari.json")
+            self.assertTrue(os.path.samefile(store.project_path, root / "legacy" / "project.hikari.json"))
             self.assertEqual(len(list(root.glob("legacy.hikari.json.v2-backup-*"))), 1)
 
     def test_corrupt_manifest_recovers_from_snapshot(self) -> None:
@@ -176,7 +177,7 @@ class ProjectStoreTests(unittest.TestCase):
             store = ProjectStore(root)
             store.save(default_project("新的内容"))
             self.assertEqual(len(list(root.glob("star-sea-echo.hikari.json.v2-backup-*"))), 1)
-            self.assertEqual(store.project_path, root / "star-sea-echo" / "project.hikari.json")
+            self.assertTrue(os.path.samefile(store.project_path, root / "star-sea-echo" / "project.hikari.json"))
 
     def test_import_asset_copies_into_project_asset_folder(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -279,7 +280,7 @@ class ProjectStoreTests(unittest.TestCase):
             target = root / "copy"
             result = store.save_as(store.load(), target)
             self.assertTrue(result["ok"])
-            self.assertEqual(store.project_path, target / "project.hikari.json")
+            self.assertTrue(os.path.samefile(store.project_path, target / "project.hikari.json"))
             self.assertTrue((target / "assets" / "files" / "portrait.png").exists())
 
     def test_entry_chapter_cannot_be_migrated_as_disabled(self) -> None:
