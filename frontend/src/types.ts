@@ -338,6 +338,7 @@ export interface DesktopApi {
   open_project_dialog(): Promise<Project | null>;
   list_recent_projects(): Promise<RecentProject[]>;
   open_recent_project(path: string): Promise<Project>;
+  open_project_path(path: string): Promise<Project>;
   set_project_pinned(path: string, pinned: boolean): Promise<RecentProject[]>;
   import_assets(paths?: string[], audioCategory?: AudioCategory): Promise<Asset[]>;
   inspect_assets(assets: Asset[]): Promise<AssetFileStatus[]>;

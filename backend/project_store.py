@@ -111,9 +111,11 @@ def default_project(name: str = "星海回声") -> dict[str, Any]:
 
 
 class ProjectStore:
-    def __init__(self, data_dir: Path) -> None:
+    def __init__(self, data_dir: Path, state_dir: Path | None = None) -> None:
         self.data_dir = data_dir.resolve()
         self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.state_dir = (state_dir or self.data_dir / ".hikari-studio").resolve()
+        self.state_dir.mkdir(parents=True, exist_ok=True)
         legacy = self.data_dir / "star-sea-echo.hikari.json"
         current = self.data_dir / "star-sea-echo" / MANIFEST_NAME
         self.project_path = legacy if legacy.exists() and not current.exists() else current
@@ -142,11 +144,11 @@ class ProjectStore:
 
     @property
     def recent_projects_path(self) -> Path:
-        return self.data_dir / ".hikari-studio" / "recent-projects.json"
+        return self.state_dir / "recent-projects.json"
 
     @property
     def runtime_storage_dir(self) -> Path:
-        folder = self.data_dir / ".hikari-studio" / "runtime-storage"
+        folder = self.state_dir / "runtime-storage"
         folder.mkdir(parents=True, exist_ok=True)
         return folder
 

@@ -20,17 +20,45 @@ LOGGER = logging.getLogger(__name__)
 
 
 class DesktopApi:
-    def __init__(self, store: ProjectStore, root: Path) -> None:
+    def __init__(self, store: ProjectStore, root: Path, state_dir: Path | None = None, output_root: Path | None = None) -> None:
         self._store = store
         self._root = root
+        self._state_dir = (state_dir or store.data_dir).resolve()
+        self._output_root = (output_root or root / "exports").resolve()
         self._window: Any = None
+        self._window_state_store: Any = None
+        self._window_placement: Any = None
+        self._window_maximized = False
+        self._window_state_timer: threading.Timer | None = None
         self._save_lock = threading.Lock()
-        self._ai = AiService(store.data_dir)
+        self._ai = AiService(self._state_dir)
         self._agent_tasks = AgentTaskManager(self._ai)
         self._asr = AsrService()
 
-    def _bind_window(self, window: Any) -> None:
+    def _bind_window(self, window: Any, window_state_store: Any = None, placement: Any = None) -> None:
         self._window = window
+        self._window_state_store = window_state_store
+        self._window_placement = placement
+        self._window_maximized = bool(getattr(placement, "maximized", False))
+
+    def persist_window_state(self, maximized: bool | None = None) -> None:
+        if maximized is not None:
+            self._window_maximized = maximized
+        if self._window is not None and self._window_state_store is not None:
+            try:
+                self._window_placement = self._window_state_store.capture(self._window, maximized=self._window_maximized, previous=self._window_placement)
+            except Exception:
+                LOGGER.exception("Window state persistence failed")
+
+    def schedule_window_state(self, maximized: bool | None = None) -> None:
+        if maximized is not None:
+            self._window_maximized = maximized
+        if self._window_state_timer is not None:
+            self._window_state_timer.cancel()
+        timer = threading.Timer(0.3, self.persist_window_state)
+        timer.daemon = True
+        self._window_state_timer = timer
+        timer.start()
 
     def start_background_services(self) -> None:
         self._ai.start_health_monitor()
@@ -40,7 +68,7 @@ class DesktopApi:
         self._ai.stop_health_monitor()
 
     def get_app_info(self) -> dict[str, Any]:
-        return {"name": "Hikari Studio", "version": "0.3.0", "platform": platform.system(), "projectPath": str(self._store.project_path)}
+        return {"name": "Hikari Studio", "version": "0.3.0", "platform": platform.system(), "projectPath": str(self._store.project_path), "dataPath": str(self._state_dir), "buildPath": str(self._output_root)}
 
     def load_project(self) -> dict[str, Any]:
         LOGGER.info("Project load requested: %s", self._store.project_path)
@@ -117,6 +145,11 @@ class DesktopApi:
     def open_recent_project(self, path: str) -> dict[str, Any]:
         project = self._store.open(Path(path))
         LOGGER.info("Recent project opened: %s", self._store.project_path)
+        return project
+
+    def open_project_path(self, path: str) -> dict[str, Any]:
+        project = self._store.open(Path(path))
+        LOGGER.info("Project opened from desktop request: %s", self._store.project_path)
         return project
 
     def set_project_pinned(self, path: str, pinned: bool) -> list[dict[str, Any]]:
@@ -207,7 +240,7 @@ class DesktopApi:
     def export_renpy(self, project: dict[str, Any]) -> dict[str, Any]:
         with self._save_lock:
             self._store.save(project)
-        output_dir = self._root / "exports" / safe_slug(project["meta"]["name"]) / "renpy"
+        output_dir = self._output_root / safe_slug(project["meta"]["name"]) / "renpy"
         output = export_renpy(project, output_dir)
         LOGGER.info("RenPy export built: %s", output)
         return {"ok": True, "path": str(output)}
@@ -215,7 +248,7 @@ class DesktopApi:
     def build_web(self, project: dict[str, Any]) -> dict[str, Any]:
         with self._save_lock:
             self._store.save(project)
-        output_dir = self._root / "exports" / safe_slug(project["meta"]["name"]) / "web"
+        output_dir = self._output_root / safe_slug(project["meta"]["name"]) / "web"
         output = build_web_game(project, output_dir, self._store.project_path, self._root / "assets", self._store.asset_dir, self._root / "frontend" / "runtime-dist")
         LOGGER.info("Web export built: %s", output)
         return {"ok": True, "path": str(output)}
@@ -223,7 +256,7 @@ class DesktopApi:
     def build_windows(self, project: dict[str, Any]) -> dict[str, Any]:
         with self._save_lock:
             self._store.save(project)
-        output_dir = self._root / "exports" / safe_slug(project["meta"]["name"]) / "windows"
+        output_dir = self._output_root / safe_slug(project["meta"]["name"]) / "windows"
         executable = build_windows_game(
             project,
             output_dir,
@@ -301,10 +334,21 @@ class DesktopApi:
 
     def toggle_maximize(self) -> bool:
         if self._window is not None:
-            self._window.toggle_fullscreen()
+            if self._window_maximized:
+                self._window.restore()
+                self.persist_window_state(False)
+            else:
+                self.persist_window_state(False)
+                self._window_maximized = True
+                self._window.maximize()
+                self.persist_window_state(True)
         return True
 
     def close_window(self) -> bool:
         if self._window is not None:
+            if self._window_state_timer is not None:
+                self._window_state_timer.cancel()
+                self._window_state_timer = None
+            self.persist_window_state()
             self._window.destroy()
         return True

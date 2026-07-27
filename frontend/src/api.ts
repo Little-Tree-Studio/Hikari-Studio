@@ -97,6 +97,12 @@ export async function openRecentProject(path: string): Promise<Project> {
   return withTimeout(api.open_recent_project(path), 30000);
 }
 
+export async function openProjectPath(path: string): Promise<Project> {
+  const api = await waitForDesktopApi();
+  if (!api) throw new Error('项目路径打开仅在桌面应用中可用');
+  return withTimeout(api.open_project_path(path), 30000);
+}
+
 export async function setProjectPinned(path: string, pinned: boolean): Promise<RecentProject[]> {
   const api = await waitForDesktopApi();
   if (!api) throw new Error('固定项目仅在桌面应用中可用');

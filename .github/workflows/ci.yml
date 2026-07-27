@@ -34,4 +34,11 @@ jobs:
         working-directory: frontend
       - run: pnpm run build
         working-directory: frontend
-      - run: dotnet publish launcher/Hikari.GameLauncher/Hikari.GameLauncher.csproj --configuration Release --runtime win-x64 --self-contained false --output launcher-ci
+      - run: python -m pip install -r requirements.txt -r requirements-build.txt
+      - run: dotnet publish launcher/Hikari.GameLauncher/Hikari.GameLauncher.csproj --configuration Release --runtime win-x64 --self-contained true -p:DebugType=None -p:DebugSymbols=false --output launcher/dist/win-x64
+      - run: python -m PyInstaller --noconfirm --clean --workpath build/pyinstaller --distpath dist HikariStudio.spec
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HikariStudio-windows-preview
+          path: dist/HikariStudio/
+          if-no-files-found: error

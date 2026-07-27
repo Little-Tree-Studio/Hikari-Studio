@@ -11,6 +11,8 @@ launcher/**/bin/
 launcher/**/obj/
 launcher/dist/
 exports/
+build/
+dist/
 __pycache__/
 *.pyc
 *.log

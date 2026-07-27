@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import {
   buildWeb, buildWindows, callWindow, exportRenpy, importAssets, loadProject, newProject,
-  applyAiPatch, loadCommandHistory, loadCommandHistoryStats, loadRecoverySnapshot, openProject, openRecentProject, previewScriptImport, replaceAssetFile, saveCommandHistory, saveProject, saveProjectAs,
+  applyAiPatch, loadCommandHistory, loadCommandHistoryStats, loadRecoverySnapshot, openProject, openProjectPath, openRecentProject, previewScriptImport, replaceAssetFile, saveCommandHistory, saveProject, saveProjectAs,
 } from './api';
 import { Preview } from './components/Preview';
 import { AiAgentPanel } from './components/AiAgentPanel';
@@ -815,6 +815,27 @@ export default function App() {
   };
 
   useEffect(() => { void loadProject(fallbackProject).then(restoreProjectAndHistory).catch((error) => { log('error', 'project', '项目加载失败，使用浏览器恢复副本', error); resetProject(fallbackProject); historyReadyRef.current = true; }).finally(() => { hydrated.current = true; setSaveState('已保存'); }); }, []);
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const path = (event as CustomEvent<string>).detail;
+      if (!path) return;
+      void (async () => {
+        try {
+          if (autoSaveTimerRef.current !== null) { window.clearTimeout(autoSaveTimerRef.current); autoSaveTimerRef.current = null; }
+          await pendingSaveRef.current;
+          if (dirty) { await saveProject(project); markSaved(); }
+          await flushCommandHistory();
+          await restoreProjectAndHistory(await openProjectPath(path));
+          setProjectClosed(false);
+          show('已从 Windows 打开项目');
+        } catch (error) {
+          show(String(error), 'error');
+        }
+      })();
+    };
+    window.addEventListener('hikari-open-project-request', handler);
+    return () => window.removeEventListener('hikari-open-project-request', handler);
+  }, [project, dirty, historyVersion]);
   useEffect(() => { if (!historyReadyRef.current) return; void persistCommandHistory().catch((error) => log('error', 'history', 'Command 历史持久化失败', error)); }, [historyVersion]);
   useEffect(() => {
     if (!hydrated.current || !project.settings.autoSave || !dirty) return;

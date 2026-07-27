@@ -140,6 +140,22 @@ python run.py
 
 Windows 用户也可以在依赖安装完成后运行 `start.bat`。
 
+桌面版默认使用 Windows 标准目录：
+
+- 项目：`文档/Hikari Studio/Projects`
+- 构建：`文档/Hikari Studio/Builds`
+- 配置、日志与缓存：`%LOCALAPPDATA%/Hikari Studio`
+
+首次启动会复制旧版仓库 `data/` 中的项目，源文件不会被删除。传入 `--portable` 可改用程序目录旁的 `projects` 与 `user-data`。
+
+### 构建独立 Windows 编辑器
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/build-editor.ps1
+```
+
+产物位于 `dist/HikariStudio/HikariStudio.exe`，运行时不需要用户安装 Python、Node.js 或 pnpm。Windows 游戏构建所需的 WebView2 启动器也会预编译进编辑器目录。
+
 ### 前端开发模式
 
 ```powershell
