@@ -8,7 +8,7 @@
 <img src="https://img.shields.io/badge/React-19-202b33?style=for-the-badge&logo=react&logoColor=61dafb" alt="React 19" />
 <img src="https://img.shields.io/badge/TypeScript-Strict-3178c6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript Strict" />
 <a href="LICENSE"><img src="https://img.shields.io/github/license/kylemarvin884/Hikari-Studio?style=for-the-badge&color=176b5b" alt="MIT License" /></a>
-<a href="https://github.com/kylemarvin884/Hikari-Studio/releases/latest"><img src="https://img.shields.io/github/v/release/kylemarvin884/Hikari-Studio?include_prereleases&style=for-the-badge&color=e56b4f" alt="Latest release" /></a>
+<a href="https://github.com/kylemarvin884/Hikari-Studio/releases"><img src="https://img.shields.io/github/v/release/kylemarvin884/Hikari-Studio?include_prereleases&style=for-the-badge&color=e56b4f" alt="Latest release" /></a>
 
 <br /><br />
 
@@ -16,7 +16,7 @@
 
 **面向创作者的本地 Galgame 可视化编辑器。** 让剧本、演出、素材、调试与构建留在同一个安静、完整的制作环境中。
 
-[下载预览版](https://github.com/kylemarvin884/Hikari-Studio/releases/latest) · [功能概览](#-功能概览) · [快速开始](#-快速开始) · [技术架构](#-技术架构) · [开发进度](#-开发进度)
+[下载预览版](https://github.com/kylemarvin884/Hikari-Studio/releases) · [功能概览](#-功能概览) · [快速开始](#-快速开始) · [技术架构](#-技术架构) · [开发进度](#-开发进度)
 
 </div>
 
@@ -26,7 +26,7 @@
 ## 下载与版本
 
 <p align="center">
-  <a href="https://github.com/kylemarvin884/Hikari-Studio/releases/latest"><img src="https://img.shields.io/badge/下载-最新预览版-e56b4f?style=for-the-badge&logo=github" alt="下载最新预览版" /></a>
+  <a href="https://github.com/kylemarvin884/Hikari-Studio/releases"><img src="https://img.shields.io/badge/下载-最新预览版-e56b4f?style=for-the-badge&logo=github" alt="下载最新预览版" /></a>
   <a href="https://github.com/kylemarvin884/Hikari-Studio/releases"><img src="https://img.shields.io/badge/查看-全部版本-176b5b?style=for-the-badge&logo=github" alt="查看全部版本" /></a>
 </p>
 
