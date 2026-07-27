@@ -1,4 +1,4 @@
-import type { AgentPlan, AgentTask, AiModelDiscovery, AiSettings, AiSettingsInput, Asset, AssetFileStatus, AssetFolderRepairPreview, AssetRepairIssue, AssetRepairMatch, AudioCategory, Project, RecentProject, ScriptImportPreview } from './types';
+import type { AgentPlan, AgentResultComparison, AgentResultRef, AgentTask, AiModelDiscovery, AiSettings, AiSettingsInput, Asset, AssetFileStatus, AssetFolderRepairPreview, AssetRepairIssue, AssetRepairMatch, AudioCategory, Project, RecentProject, ScriptImportPreview } from './types';
 import { readLargeValue, writeLargeValue } from './core/storage';
 
 const waitForDesktopApi = async () => {
@@ -232,6 +232,12 @@ export async function restartAiTaskFromCheckpoint(taskId: string, checkpointId: 
   const api = await waitForDesktopApi();
   if (!api) throw new Error('AI Agent 任务仅在桌面应用中可用');
   return withTimeout(api.restart_ai_task_from_checkpoint(taskId, checkpointId, project), 10000);
+}
+
+export async function compareAiTaskResults(left: AgentResultRef, right: AgentResultRef): Promise<AgentResultComparison> {
+  const api = await waitForDesktopApi();
+  if (!api) throw new Error('Agent 结果比较仅在桌面应用中可用');
+  return withTimeout(api.compare_ai_task_results(left, right), 10000);
 }
 
 export async function cancelAiTask(taskId: string): Promise<AgentTask> {

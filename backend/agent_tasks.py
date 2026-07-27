@@ -160,6 +160,14 @@ class AgentTaskManager:
                     self._write_task(root, task)
         return [self._public_task(task, include_events=False) for task in sorted(loaded.values(), key=lambda item: item.get("createdAt", ""), reverse=True)[:100]]
 
+    def compare_results(self, left: dict[str, Any], right: dict[str, Any], project_root: Path) -> dict[str, Any]:
+        """Compare public structured outcomes without exposing model messages."""
+        root = project_root.resolve()
+        with self._lock:
+            left_snapshot = self._comparison_snapshot_locked(left, root)
+            right_snapshot = self._comparison_snapshot_locked(right, root)
+        return {"left": left_snapshot["ref"], "right": right_snapshot["ref"], "categories": self._diff_snapshots(left_snapshot, right_snapshot)}
+
     def get_task(self, task_id: str, project_root: Path, after_seq: int = 0) -> dict[str, Any]:
         task = self._find_task(task_id, project_root)
         result = self._public_task(task)
@@ -337,6 +345,7 @@ class AgentTaskManager:
                 "round": int(checkpoint.get("nextRound", 0)),
                 "model": task["checkpointModel"],
                 "toolNames": [str(item.get("name", "")) for item in checkpoint.get("registry", {}).get("trace", []) if item.get("name")],
+                "snapshot": self._checkpoint_snapshot(checkpoint),
                 "state": deepcopy(checkpoint),
                 "inherited": False,
             })
@@ -373,6 +382,75 @@ class AgentTaskManager:
         self._roots[task_id] = root
         return self._normalize_task(task)
 
+    def _comparison_snapshot_locked(self, reference: dict[str, Any], root: Path) -> dict[str, Any]:
+        task_id = str(reference.get("taskId", ""))
+        checkpoint_id = reference.get("checkpointId")
+        task = self._find_task_locked(task_id, root)
+        if checkpoint_id:
+            checkpoint = next((item for item in task.get("checkpoints", []) if item.get("id") == checkpoint_id), None)
+            if not checkpoint:
+                raise ValueError("Agent 比较检查点不存在")
+            snapshot = checkpoint.get("snapshot") or self._checkpoint_snapshot(checkpoint.get("state") or {})
+            label = f"检查点 {checkpoint.get('step', 0)}"
+        else:
+            plan = task.get("plan") or {}
+            snapshot = {"operations": deepcopy(plan.get("operations") or []), "builds": deepcopy(plan.get("requestedBuilds") or []), "diagnostics": self._diagnostic_trace(plan.get("toolCalls") or [])}
+            label = "最终结果" if task.get("plan") else "当前任务"
+        return {**snapshot, "ref": {"taskId": task_id, "checkpointId": checkpoint_id, "label": label, "instruction": task.get("instruction", "")}}
+
+    @staticmethod
+    def _checkpoint_snapshot(checkpoint: dict[str, Any]) -> dict[str, Any]:
+        registry = checkpoint.get("registry") or {}
+        return {"operations": deepcopy(registry.get("proposedOperations") or []), "builds": deepcopy(registry.get("requestedBuilds") or []), "diagnostics": AgentTaskManager._diagnostic_trace(registry.get("trace") or [])}
+
+    @staticmethod
+    def _diagnostic_trace(trace: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [deepcopy(item) for item in trace if item.get("permission") == "validate" or item.get("name") in {"get_diagnostics", "validate_patch"}]
+
+    @staticmethod
+    def _diff_snapshots(left: dict[str, Any], right: dict[str, Any]) -> list[dict[str, Any]]:
+        def identity(field: str, value: dict[str, Any], index: int) -> str:
+            if field == "operations":
+                kind = value.get("type")
+                target = value.get("fragmentId") or value.get("chapterId") or "project"
+                return f"{kind}:{target}:{value.get('name', '')}"
+            if field == "builds":
+                return str(value.get("target", index))
+            return str(value.get("name", index))
+
+        def describe(operation: dict[str, Any]) -> tuple[str, str, dict[str, Any] | None]:
+            kind = operation.get("type")
+            if kind == "add_blocks":
+                blocks = operation.get("blocks") or []
+                return "剧本 Block", f"向 {operation.get('fragmentId', '未知片段')} 添加 {len(blocks)} 个 Block", {"kind": "fragment", "id": operation.get("fragmentId")}
+            if kind == "create_fragment":
+                blocks = operation.get("blocks") or []
+                return "章节与 Fragment", f"在章节 {operation.get('chapterId', '未知章节')} 创建 {operation.get('name', '未命名片段')}（{len(blocks)} Blocks）", {"kind": "chapter", "id": operation.get("chapterId")}
+            if kind == "update_project":
+                fields = "、".join(item for item in ("名称" if operation.get("name") else "", "作者" if operation.get("author") else "") if item)
+                return "项目配置", f"更新{fields or '项目信息'}", {"kind": "project", "id": None}
+            return "其他", str(kind or "未知操作"), None
+
+        categories: dict[str, list[dict[str, Any]]] = {}
+        for field, fixed_category in (("operations", None), ("builds", "构建请求"), ("diagnostics", "诊断结果")):
+            left_values = {identity(field, item, index): item for index, item in enumerate(left.get(field, []))}
+            right_values = {identity(field, item, index): item for index, item in enumerate(right.get(field, []))}
+            changes = [("removed", item_id) for item_id in left_values.keys() - right_values.keys()]
+            changes += [("added", item_id) for item_id in right_values.keys() - left_values.keys()]
+            changes += [("modified", item_id) for item_id in left_values.keys() & right_values.keys() if left_values[item_id] != right_values[item_id]]
+            for status, item_id in changes:
+                source = left_values if status == "removed" else right_values
+                item = source[item_id]
+                if field == "operations":
+                    category, summary, target = describe(item)
+                elif field == "builds":
+                    category, summary, target = fixed_category, f"{item.get('target', '未知')} 构建请求", None
+                else:
+                    category, summary, target = fixed_category, f"{item.get('name', '诊断')}：{item.get('summary') or ('通过' if item.get('ok') else '失败')}", None
+                categories.setdefault(str(category), []).append({"status": status, "summary": summary, "target": target, "value": item})
+        order = ["剧本 Block", "章节与 Fragment", "角色配置", "素材引用", "变量与分支", "项目配置", "诊断结果", "构建请求", "其他"]
+        return [{"name": name, "items": categories[name]} for name in order if categories.get(name)]
+
     def _write_task(self, project_root: Path, task: dict[str, Any]) -> None:
         sessions = self._sessions_dir(project_root)
         sessions.mkdir(parents=True, exist_ok=True)
@@ -396,6 +474,7 @@ class AgentTaskManager:
     @staticmethod
     def _public_task(task: dict[str, Any], include_events: bool = True) -> dict[str, Any]:
         result = deepcopy(task)
+        result["hasPlan"] = bool(result.get("plan"))
         result.pop("executionCheckpoint", None)
         result["checkpoints"] = [{key: item.get(key) for key in ("id", "createdAt", "attempt", "step", "round", "model", "toolNames", "inherited")} for item in result.get("checkpoints", [])]
         if not include_events:
@@ -420,6 +499,7 @@ class AgentTaskManager:
                 "round": int(checkpoint.get("nextRound", 0)),
                 "model": task.get("checkpointModel"),
                 "toolNames": [str(item.get("name", "")) for item in checkpoint.get("registry", {}).get("trace", []) if item.get("name")],
+                "snapshot": AgentTaskManager._checkpoint_snapshot(checkpoint),
                 "state": deepcopy(checkpoint),
                 "inherited": False,
             })

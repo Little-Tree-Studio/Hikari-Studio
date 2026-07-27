@@ -234,6 +234,28 @@ class AgentTaskManagerTests(unittest.TestCase):
         self.assertEqual(original["status"], "paused")
         self.assertEqual(len(original["checkpoints"]), 2)
 
+    def test_structured_result_diff_classifies_modified_added_and_diagnostics(self) -> None:
+        left = {
+            "operations": [{"type": "add_blocks", "fragmentId": "opening", "blocks": [{"type": "narration", "text": "旧文本"}]}],
+            "builds": [],
+            "diagnostics": [{"name": "get_diagnostics", "permission": "validate", "ok": True, "summary": "1 warning"}],
+        }
+        right = {
+            "operations": [
+                {"type": "add_blocks", "fragmentId": "opening", "blocks": [{"type": "narration", "text": "新文本"}]},
+                {"type": "create_fragment", "chapterId": "start", "name": "分支", "blocks": []},
+            ],
+            "builds": [{"target": "web", "blocked": False, "requiresConfirmation": True}],
+            "diagnostics": [{"name": "get_diagnostics", "permission": "validate", "ok": True, "summary": "clean"}],
+        }
+        categories = AgentTaskManager._diff_snapshots(left, right)
+        by_name = {category["name"]: category["items"] for category in categories}
+        self.assertEqual(by_name["剧本 Block"][0]["status"], "modified")
+        self.assertEqual(by_name["剧本 Block"][0]["target"], {"kind": "fragment", "id": "opening"})
+        self.assertEqual(by_name["章节与 Fragment"][0]["status"], "added")
+        self.assertEqual(by_name["诊断结果"][0]["status"], "modified")
+        self.assertEqual(by_name["构建请求"][0]["status"], "added")
+
 
 if __name__ == "__main__":
     unittest.main()

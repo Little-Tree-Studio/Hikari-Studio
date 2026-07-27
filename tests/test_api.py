@@ -102,6 +102,10 @@ class DesktopApiTests(unittest.TestCase):
                     source = api.get_ai_task(source["id"])
                 summary = source["checkpoints"][0]
                 self.assertNotIn("state", summary)
+                comparison = api.compare_ai_task_results({"taskId": source["id"], "checkpointId": summary["id"]}, {"taskId": source["id"]})
+                self.assertEqual(comparison["left"]["label"], "检查点 1")
+                self.assertEqual(comparison["right"]["label"], "最终结果")
+                self.assertNotIn("state", json.loads(json.dumps(comparison)))
                 branch = api.restart_ai_task_from_checkpoint(source["id"], summary["id"], project)
                 self.assertEqual(branch["parentTaskId"], source["id"])
                 self.assertNotIn("state", json.loads(json.dumps(branch))["checkpoints"][0])

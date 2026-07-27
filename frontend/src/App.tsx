@@ -910,7 +910,7 @@ export default function App() {
     characters: <CharacterManager project={project} commit={commit} notify={show} requestText={requestText} requestConfirm={requestConfirm} />,
     scenes: <SceneManager project={project} commit={commit} notify={show} requestText={requestText} requestConfirm={requestConfirm} activate={activate} />,
     history: <HistoryPage entries={commandEntries} undoCount={undoCount} redoCount={redoCount} undo={undo} redo={redo} />,
-    ai: <AiAgentPanel project={project} applyPlan={applyAgentPlan} requestBuild={(target) => void runBuild(target)} notify={show} />,
+    ai: <AiAgentPanel project={project} applyPlan={applyAgentPlan} requestBuild={(target) => void runBuild(target)} notify={show} navigateTarget={(target) => { if (target.kind === 'fragment' && target.id) activate(target.id); else if (target.kind === 'chapter' && target.id) { const fragment = project.chapters.find((chapter) => chapter.id === target.id)?.fragments[0]; if (fragment) activate(fragment.id); } else show('该差异项没有可打开的编辑位置'); }} />,
   };
   const openAssetSection = (section: string, target: Page = 'assets') => { setAssetSection(section); navigatePage(target); setAssetMenuOpen(false); };
   const openAudioSection = (category: AudioCategory) => { setAudioCategory(category); navigatePage('audio'); setAssetMenuOpen(false); };

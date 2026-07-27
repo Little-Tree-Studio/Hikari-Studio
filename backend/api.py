@@ -250,6 +250,9 @@ class DesktopApi:
     def restart_ai_task_from_checkpoint(self, task_id: str, checkpoint_id: str, project: dict[str, Any]) -> dict[str, Any]:
         return self._agent_tasks.restart_from_checkpoint(task_id, checkpoint_id, project, self._store.project_root)
 
+    def compare_ai_task_results(self, left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
+        return self._agent_tasks.compare_results(left, right, self._store.project_root)
+
     def cancel_ai_task(self, task_id: str) -> dict[str, Any]:
         return self._agent_tasks.cancel_task(task_id, self._store.project_root)
 

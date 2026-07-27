@@ -322,6 +322,7 @@ export interface DesktopApi {
   pause_ai_task(taskId: string): Promise<AgentTask>;
   resume_ai_task(taskId: string, project: Project): Promise<AgentTask>;
   restart_ai_task_from_checkpoint(taskId: string, checkpointId: string, project: Project): Promise<AgentTask>;
+  compare_ai_task_results(left: AgentResultRef, right: AgentResultRef): Promise<AgentResultComparison>;
   cancel_ai_task(taskId: string): Promise<AgentTask>;
 }
 
@@ -494,7 +495,18 @@ export interface AgentTask {
   lastEventSeq: number;
   events?: AgentTaskEvent[];
   plan?: AgentPlan | null;
+  hasPlan?: boolean;
   error?: string | null;
+}
+
+export interface AgentResultRef { taskId: string; checkpointId?: string | null }
+export interface AgentComparisonTarget { kind: 'fragment' | 'chapter' | 'character' | 'asset' | 'project'; id?: string | null }
+export interface AgentComparisonItem { status: 'added' | 'removed' | 'modified'; summary: string; target?: AgentComparisonTarget | null; value: Record<string, unknown> }
+export interface AgentComparisonCategory { name: string; items: AgentComparisonItem[] }
+export interface AgentResultComparison {
+  left: AgentResultRef & { label: string; instruction: string };
+  right: AgentResultRef & { label: string; instruction: string };
+  categories: AgentComparisonCategory[];
 }
 
 declare global {
