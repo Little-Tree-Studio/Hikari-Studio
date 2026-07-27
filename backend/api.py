@@ -57,6 +57,15 @@ class DesktopApi:
             LOGGER.info("Project saved: %s", result["path"])
             return result
 
+    def load_command_history(self) -> dict[str, Any] | None:
+        return self._store.load_command_history()
+
+    def save_command_history(self, history: dict[str, Any]) -> dict[str, Any]:
+        with self._save_lock:
+            result = self._store.save_command_history(history)
+            LOGGER.info("Command history saved: commands=%s", result["commandCount"])
+            return result
+
     def read_runtime_value(self, key: str) -> str | None:
         return self._store.read_runtime_value(key)
 

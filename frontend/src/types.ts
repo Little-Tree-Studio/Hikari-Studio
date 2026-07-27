@@ -288,6 +288,8 @@ export interface DesktopApi {
   load_project(): Promise<Project>;
   load_project_json(): Promise<string>;
   save_project(project: Project): Promise<{ ok: boolean; path: string; bytes: number }>;
+  load_command_history(): Promise<import('./hooks/useCommandHistory').PersistedCommandHistory<Project> | null>;
+  save_command_history(history: import('./hooks/useCommandHistory').PersistedCommandHistory<Project>): Promise<{ ok: boolean; path: string; bytes: number; commandCount: number }>;
   read_runtime_value(key: string): Promise<string | null>;
   write_runtime_value(key: string, value: string): Promise<boolean>;
   delete_runtime_value(key: string): Promise<boolean>;

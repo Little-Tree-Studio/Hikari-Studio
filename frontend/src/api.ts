@@ -1,5 +1,6 @@
 import type { AgentPatchApplyResult, AgentPatchPreconditionResult, AgentPlan, AgentResultComparison, AgentResultRef, AgentTask, AiModelDiscovery, AiSettings, AiSettingsInput, Asset, AssetFileStatus, AssetFolderRepairPreview, AssetRepairIssue, AssetRepairMatch, AudioCategory, Project, RecentProject, ScriptImportPreview } from './types';
 import { readLargeValue, writeLargeValue } from './core/storage';
+import type { PersistedCommandHistory } from './hooks/useCommandHistory';
 
 const waitForDesktopApi = async () => {
   if (window.pywebview?.api) return window.pywebview.api;
@@ -232,6 +233,18 @@ export async function restartAiTaskFromCheckpoint(taskId: string, checkpointId: 
   const api = await waitForDesktopApi();
   if (!api) throw new Error('AI Agent 任务仅在桌面应用中可用');
   return withTimeout(api.restart_ai_task_from_checkpoint(taskId, checkpointId, project), 10000);
+}
+
+export async function loadCommandHistory(): Promise<PersistedCommandHistory<Project> | null> {
+  const api = await waitForDesktopApi();
+  if (!api) return null;
+  return withTimeout(api.load_command_history(), 10000);
+}
+
+export async function saveCommandHistory(history: PersistedCommandHistory<Project>) {
+  const api = await waitForDesktopApi();
+  if (!api) return { ok: true, path: 'browser-memory', bytes: 0, commandCount: history.undo.length + history.redo.length };
+  return withTimeout(api.save_command_history(history), 30000);
 }
 
 export async function retryAiTaskOperations(taskId: string, operationIndexes: number[], project: Project): Promise<AgentTask> {

@@ -2,12 +2,80 @@ import os
 import tempfile
 import unittest
 import hashlib
+import json
 from pathlib import Path
 
 from backend.project_store import ProjectStore, default_project
 
 
 class ProjectStoreTests(unittest.TestCase):
+    @staticmethod
+    def _command_history(project: dict) -> dict:
+        return {
+            "version": 1,
+            "projectId": project["meta"]["id"],
+            "undo": [{
+                "id": "command-1",
+                "label": "AI Agent：测试",
+                "timestamp": 1,
+                "before": project,
+                "after": project,
+                "options": {
+                    "categories": [{"id": "characters", "label": "角色配置", "count": 1, "items": ["林澄"]}],
+                    "persistence": {"strategy": "agent-patch", "payload": {"categories": [], "operations": []}},
+                },
+                "undoneCategoryIds": [],
+            }],
+            "redo": [],
+        }
+
+    def test_command_history_survives_store_recreation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = ProjectStore(root)
+            project = store.load()
+            history = self._command_history(project)
+            result = store.save_command_history(history)
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["commandCount"], 1)
+            self.assertTrue((store.project_root / ".hikari" / "history" / "commands.json").exists())
+            reopened = ProjectStore(root).load_command_history()
+            self.assertEqual(reopened, history)
+            json.loads(json.dumps(reopened, ensure_ascii=False))
+
+    def test_command_history_rejects_wrong_project_and_invalid_stacks(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = ProjectStore(Path(directory))
+            project = store.load()
+            wrong_project = self._command_history(project)
+            wrong_project["projectId"] = "another-project"
+            with self.assertRaises(ValueError):
+                store.save_command_history(wrong_project)
+
+            invalid_version = self._command_history(project)
+            invalid_version["version"] = 2
+            with self.assertRaises(ValueError):
+                store.save_command_history(invalid_version)
+
+            oversized = self._command_history(project)
+            oversized["undo"] = oversized["undo"] * 51
+            with self.assertRaises(ValueError):
+                store.save_command_history(oversized)
+
+    def test_command_history_from_copied_project_is_ignored(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = ProjectStore(root / "source")
+            source_project = source.load()
+            source.save_command_history(self._command_history(source_project))
+
+            target = ProjectStore(root / "target")
+            target.load()
+            target.command_history_path.parent.mkdir(parents=True, exist_ok=True)
+            target.command_history_path.write_bytes(source.command_history_path.read_bytes())
+            self.assertIsNone(target.load_command_history())
+
     def test_round_trip_project(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = ProjectStore(Path(directory))

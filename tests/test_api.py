@@ -10,6 +10,22 @@ from backend.project_store import ProjectStore
 
 
 class DesktopApiTests(unittest.TestCase):
+    def test_command_history_bridge_persists_serializable_history(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            api = DesktopApi(ProjectStore(root / "data"), root)
+            project = api.load_project()
+            history = {
+                "version": 1,
+                "projectId": project["meta"]["id"],
+                "undo": [{"id": "command-1", "label": "AI Agent：测试", "timestamp": 1, "before": project, "after": project}],
+                "redo": [],
+            }
+            result = api.save_command_history(history)
+            self.assertTrue(result["ok"])
+            self.assertIn(str(Path(".hikari") / "history" / "commands.json"), result["path"])
+            self.assertEqual(json.loads(json.dumps(api.load_command_history(), ensure_ascii=False)), history)
+
     def test_project_json_bridge_returns_serializable_v3_project(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

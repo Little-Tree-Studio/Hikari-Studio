@@ -43,6 +43,14 @@ describe('Agent Patch semantic history', () => {
     expect(record.categories[3].items).toContain('好感度 (affection)');
   });
 
+  it('survives the JSON round trip used by persisted Command history', () => {
+    const record = buildAgentPatchSemanticRecord(operations);
+    const restored = JSON.parse(JSON.stringify(record));
+    const project = restoreAgentPatchCategory(afterProject(), beforeProject(), afterProject(), 'characters', restored);
+    expect(project.characters[0].color).toBe('#111111');
+    expect(project.assets[0].name).toBe('夜色湖畔');
+  });
+
   it('restores one category without reverting other Agent changes', () => {
     const before = beforeProject();
     const after = afterProject();

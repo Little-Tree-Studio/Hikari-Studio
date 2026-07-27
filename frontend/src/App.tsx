@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import {
   buildWeb, buildWindows, callWindow, exportRenpy, importAssets, loadProject, newProject,
-  applyAiPatch, openProject, openRecentProject, previewScriptImport, replaceAssetFile, saveProject, saveProjectAs,
+  applyAiPatch, loadCommandHistory, openProject, openRecentProject, previewScriptImport, replaceAssetFile, saveCommandHistory, saveProject, saveProjectAs,
 } from './api';
 import { Preview } from './components/Preview';
 import { AiAgentPanel } from './components/AiAgentPanel';
@@ -29,15 +29,19 @@ import { EditorAssetImportDialog, type EditorImportAction } from './components/E
 import { analyzeAssetReferences } from './core/assetReferences';
 import { audioCategoryOf, matchingVoice } from './core/audio';
 import { log } from './core/logger';
-import { buildAgentPatchSemanticRecord, restoreAgentPatchCategory } from './core/agentPatchHistory';
+import { buildAgentPatchSemanticRecord, restoreAgentPatchCategory, type AgentPatchSemanticRecord } from './core/agentPatchHistory';
 import { readSmallValue, removeSmallValue, writeSmallValue } from './core/storage';
 import { projectScenes, sceneBlockSnapshot } from './core/scenes';
 import { createBlock } from './engine-core/blocks';
 import { diagnosticSummary } from './engine-core/diagnostics';
-import { useCommandHistory, type CommandEntry } from './hooks/useCommandHistory';
+import { useCommandHistory, type CommandEntry, type CommandRestoreStrategies, type PersistedCommandHistory } from './hooks/useCommandHistory';
 import type { AgentOperation, AppNotification, Asset, AudioCategory, BlockType, ConditionOperator, InspectorDock, Project, ScriptImportPreview, StoryBlock, StoryBlockPatch } from './types';
 
 const SaveAs = Copy;
+
+const commandRestoreStrategies: CommandRestoreStrategies<Project> = {
+  'agent-patch': (current, before, after, categoryId, payload) => restoreAgentPatchCategory(current, before, after, categoryId, payload as AgentPatchSemanticRecord),
+};
 
 type Page = 'script' | 'assets' | 'audio' | 'map' | 'characters' | 'scenes' | 'history' | 'ai';
 type View = 'cards' | 'plain' | 'code' | 'json';
@@ -130,11 +134,11 @@ function useToast() {
   return { toast, show };
 }
 
-function WindowChrome() {
+function WindowChrome({ onClose }: { onClose: () => void }) {
   return <div className="window-controls">
     <button title="最小化" onClick={() => void callWindow('minimize_window')}><Minus /></button>
     <button title="最大化" onClick={() => void callWindow('toggle_maximize')}><Square /></button>
-    <button className="window-close" title="关闭" onClick={() => void callWindow('close_window')}><X /></button>
+    <button className="window-close" title="关闭" onClick={onClose}><X /></button>
   </div>;
 }
 
@@ -719,6 +723,8 @@ export default function App() {
   const hydrated = useRef(false);
   const autoSaveTimerRef = useRef<number | null>(null);
   const pendingSaveRef = useRef<Promise<unknown> | null>(null);
+  const historyReadyRef = useRef(false);
+  const historySaveQueueRef = useRef<Promise<unknown>>(Promise.resolve());
   const { toast, show: showToast } = useToast();
   const show = (text: string, tone: 'error' | 'success' = 'success') => {
     showToast(text, tone);
@@ -730,18 +736,42 @@ export default function App() {
   const navigatePage = (next: Page) => { if (next === page) return; setBackPages((items) => [...items, page].slice(-40)); setForwardPages([]); setPage(next); };
   const navigateBack = () => { const previous = backPages.at(-1); if (!previous) return; setBackPages((items) => items.slice(0, -1)); setForwardPages((items) => [page, ...items].slice(0, 40)); setPage(previous); };
   const navigateForward = () => { const next = forwardPages[0]; if (!next) return; setForwardPages((items) => items.slice(1)); setBackPages((items) => [...items, page].slice(-40)); setPage(next); };
-  const { commit, commitSaved, replace, reset: resetHistory, undo, redo, undoCategory, undoCount, redoCount, history: commandEntries, dirty, markSaved } = history;
-  const resetProject = (next: Project) => {
+  const { commit, commitSaved, replace, reset: resetHistory, restoreHistory, serializeHistory, undo, redo, undoCategory, undoCount, redoCount, history: commandEntries, historyVersion, dirty, markSaved } = history;
+  const resetProject = (next: Project, persistedHistory?: PersistedCommandHistory<Project> | null) => {
     const fragmentIds = new Set(next.chapters.flatMap((chapter) => chapter.fragments.map((fragment) => fragment.id)));
     const savedTabs = next.settings.editorSession?.openFragmentIds.filter((id) => fragmentIds.has(id)) ?? [];
-    resetHistory(next);
+    if (persistedHistory?.projectId === next.meta.id) restoreHistory(next, persistedHistory, commandRestoreStrategies);
+    else resetHistory(next);
     setSelected(next.settings.editorSession?.selectedBlockByFragment?.[next.activeFragmentId] ?? 0);
     setOpenFragmentIds(savedTabs.length ? savedTabs : [next.activeFragmentId]);
     setInspectorDock(next.settings.editorSession?.inspectorDock ?? 'preview');
     setView(next.settings.editorSession?.scriptView ?? 'cards');
   };
 
-  useEffect(() => { void loadProject(fallbackProject).then(resetProject).catch((error) => { log('error', 'project', '项目加载失败，使用浏览器恢复副本', error); resetProject(fallbackProject); }).finally(() => { hydrated.current = true; setSaveState('已保存'); }); }, []);
+  const persistCommandHistory = () => {
+    if (!historyReadyRef.current) return Promise.resolve();
+    const snapshot = serializeHistory(project.meta.id);
+    const request = historySaveQueueRef.current.catch(() => undefined).then(() => saveCommandHistory(snapshot));
+    historySaveQueueRef.current = request;
+    return request;
+  };
+
+  const restoreProjectAndHistory = async (next: Project) => {
+    historyReadyRef.current = false;
+    let persistedHistory: PersistedCommandHistory<Project> | null = null;
+    try { persistedHistory = await loadCommandHistory(); }
+    catch (error) { log('error', 'history', 'Command 历史损坏或无法读取，项目将不带历史打开', error); }
+    resetProject(next, persistedHistory);
+    historyReadyRef.current = true;
+  };
+
+  const flushCommandHistory = async () => {
+    if (historyReadyRef.current) await persistCommandHistory();
+    await historySaveQueueRef.current;
+  };
+
+  useEffect(() => { void loadProject(fallbackProject).then(restoreProjectAndHistory).catch((error) => { log('error', 'project', '项目加载失败，使用浏览器恢复副本', error); resetProject(fallbackProject); historyReadyRef.current = true; }).finally(() => { hydrated.current = true; setSaveState('已保存'); }); }, []);
+  useEffect(() => { if (!historyReadyRef.current) return; void persistCommandHistory().catch((error) => log('error', 'history', 'Command 历史持久化失败', error)); }, [historyVersion]);
   useEffect(() => {
     if (!hydrated.current || !project.settings.autoSave || !dirty) return;
     setSaveState('保存中');
@@ -846,12 +876,17 @@ export default function App() {
     setScriptImportPreview(null);
     show(`已从 ${scriptImportPreview.sourceName} 导入 ${blocks.length} 个 Block`);
   };
-  const doNew = async () => { const name = await requestText({ title: '新建项目', message: '创建新的 Hikari Studio 项目。', placeholder: '项目名称', confirmText: '创建项目' }); if (!name) return; try { resetProject(await newProject(name)); setProjectClosed(false); show('新项目已创建'); } catch (error) { show(String(error), 'error'); } };
-  const doOpen = async () => { try { const opened = await openProject(); if (opened) { resetProject(opened); setProjectClosed(false); show('项目已打开'); } } catch (error) { show(String(error), 'error'); } };
-  const doOpenRecent = async (path: string) => { try { resetProject(await openRecentProject(path)); setProjectClosed(false); show('最近项目已打开'); } catch (error) { show(String(error), 'error'); throw error; } };
+  const doNew = async () => { const name = await requestText({ title: '新建项目', message: '创建新的 Hikari Studio 项目。', placeholder: '项目名称', confirmText: '创建项目' }); if (!name) return; try { await flushCommandHistory(); await restoreProjectAndHistory(await newProject(name)); setProjectClosed(false); show('新项目已创建'); } catch (error) { show(String(error), 'error'); } };
+  const doOpen = async () => { try { await flushCommandHistory(); const opened = await openProject(); if (opened) { await restoreProjectAndHistory(opened); setProjectClosed(false); show('项目已打开'); } } catch (error) { show(String(error), 'error'); } };
+  const doOpenRecent = async (path: string) => { try { await flushCommandHistory(); await restoreProjectAndHistory(await openRecentProject(path)); setProjectClosed(false); show('最近项目已打开'); } catch (error) { show(String(error), 'error'); throw error; } };
   const renameProject = async () => { const name = await requestText({ title: '重命名项目', initialValue: project.meta.name, confirmText: '重命名' }); if (!name || name === project.meta.name) return; commit((current) => ({ ...current, meta: { ...current.meta, name } }), `重命名项目为 ${name}`); show('项目已重命名'); };
   const doSaveAs = async () => { try { const result = await saveProjectAs(project); if (result) show(`项目副本已保存：${result.path}`); } catch (error) { show(String(error), 'error'); } };
-  const closeProject = async () => { if (!await requestConfirm({ title: '关闭项目', message: `关闭“${project.meta.name}”？未保存修改会先由自动保存处理。`, confirmText: '关闭项目' })) return; setProjectClosed(true); setProjectMenuOpen(false); };
+  const closeProject = async () => { if (!await requestConfirm({ title: '关闭项目', message: `关闭“${project.meta.name}”？未保存修改会先由自动保存处理。`, confirmText: '关闭项目' })) return; await flushCommandHistory(); setProjectClosed(true); setProjectMenuOpen(false); };
+  const exitApplication = async () => {
+    try { await flushCommandHistory(); }
+    catch (error) { log('error', 'history', '退出前保存 Command 历史失败', error); }
+    await callWindow('close_window');
+  };
   const loginCreator = async () => { const name = await requestText({ title: creatorName ? '账号设置' : '创作者账号', message: '输入创作者显示名。', initialValue: creatorName, placeholder: '创作者名称', confirmText: creatorName ? '保存' : '登录' }); if (!name) return; writeSmallValue('hikari-creator-name', name); setCreatorName(name); setAccountMenuOpen(false); };
   const logoutCreator = () => { removeSmallValue('hikari-creator-name'); setCreatorName(''); setAccountMenuOpen(false); };
   const runBuild = async (kind: 'web' | 'windows' | 'renpy') => { try { const diagnostics = diagnosticSummary(project); if (diagnostics.errors) { show(`构建被阻止：请先修复 ${diagnostics.errors} 个错误`, 'error'); return; } setModal(null); setSaveState('构建中'); const result = kind === 'web' ? await buildWeb(project) : kind === 'windows' ? await buildWindows(project) : await exportRenpy(project); setSaveState('已保存'); show(`${kind === 'web' ? 'Web 游戏' : kind === 'windows' ? 'Windows 游戏' : "Ren'Py 脚本"}已生成：${result.path}`); } catch (error) { setSaveState('构建失败'); show(String(error), 'error'); } };
@@ -913,7 +948,8 @@ export default function App() {
     const result = await applyAiPatch(taskId, operationIndexes, project);
     if (result.ok && result.project) {
       const semantic = buildAgentPatchSemanticRecord(operations);
-      commitSaved(() => result.project!, `AI Agent：${result.summary ?? '应用 Patch'}`, { categories: semantic.categories, restoreCategory: (current, before, after, categoryId) => restoreAgentPatchCategory(current, before, after, categoryId, semantic) });
+      commitSaved(() => result.project!, `AI Agent：${result.summary ?? '应用 Patch'}`, { categories: semantic.categories, restoreCategory: (current, before, after, categoryId) => restoreAgentPatchCategory(current, before, after, categoryId, semantic), persistence: { strategy: 'agent-patch', payload: semantic } });
+      await persistCommandHistory();
       setSaveState('已保存');
     }
     return result;
@@ -933,7 +969,7 @@ export default function App() {
   const openAssetSection = (section: string, target: Page = 'assets') => { setAssetSection(section); navigatePage(target); setAssetMenuOpen(false); };
   const openAudioSection = (category: AudioCategory) => { setAudioCategory(category); navigatePage('audio'); setAssetMenuOpen(false); };
 
-  return <div className={`app-shell desktop-app ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}><header className="topbar titlebar-drag pywebview-drag-region"><div className="brand-lockup"><div className="brand-mark">H</div><div><strong>Hikari Studio</strong><span>{projectClosed ? '未打开项目' : project.meta.name}</span></div></div><div className="navigation-controls titlebar-no-drag"><button className="icon-button" disabled={!backPages.length} title="后退" onClick={navigateBack}><ArrowLeft /></button><button className="icon-button" disabled={!forwardPages.length} title="前进" onClick={navigateForward}><ArrowRight /></button></div><div className="top-project-menu titlebar-no-drag"><button className="project-menu-trigger" aria-expanded={projectMenuOpen} onClick={() => setProjectMenuOpen((value) => !value)}><Menu /><span>{project.meta.name}</span><ChevronDown /></button>{projectMenuOpen && <div className="top-dropdown project-actions-menu"><button onClick={() => { setProjectMenuOpen(false); void doOpen(); }}><FolderOpen />打开项目</button><button onClick={() => { setProjectMenuOpen(false); void renameProject(); }}><FileText />重命名</button><button onClick={() => { setProjectMenuOpen(false); void doSaveAs(); }}><SaveAs />另存为</button><button onClick={() => { setProjectMenuOpen(false); navigatePage('history'); }}><History />项目历史</button><button onClick={() => void closeProject()}><X />关闭项目</button><button onClick={() => void callWindow('close_window')}><LogOut />退出应用</button></div>}</div><button className="search-trigger titlebar-no-drag" onClick={() => setModal('search')}><Search /><span>搜索台词、指令和资源...</span><kbd>Ctrl K</kbd></button><div className="top-actions titlebar-no-drag"><div className="save-state"><span />{saveState}</div><button className="icon-button notification-trigger" title="通知" onClick={() => setNotificationsOpen((value) => !value)}><Bell />{notifications.some((item) => !item.read) && <span />}</button><div className="account-entry"><button className="avatar-button" title="创作者账号" onClick={() => setAccountMenuOpen((value) => !value)}>{creatorName ? creatorName.slice(0, 1).toUpperCase() : <UserRound />}</button>{accountMenuOpen && <div className="top-dropdown account-menu">{creatorName ? <><strong>{creatorName}</strong><button onClick={() => void loginCreator()}><Settings2 />账号设置</button><button onClick={logoutCreator}><LogOut />退出账号</button></> : <button onClick={() => void loginCreator()}><UserRound />登录创作者账号</button>}</div>}</div><WindowChrome /></div></header>
+  return <div className={`app-shell desktop-app ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}><header className="topbar titlebar-drag pywebview-drag-region"><div className="brand-lockup"><div className="brand-mark">H</div><div><strong>Hikari Studio</strong><span>{projectClosed ? '未打开项目' : project.meta.name}</span></div></div><div className="navigation-controls titlebar-no-drag"><button className="icon-button" disabled={!backPages.length} title="后退" onClick={navigateBack}><ArrowLeft /></button><button className="icon-button" disabled={!forwardPages.length} title="前进" onClick={navigateForward}><ArrowRight /></button></div><div className="top-project-menu titlebar-no-drag"><button className="project-menu-trigger" aria-expanded={projectMenuOpen} onClick={() => setProjectMenuOpen((value) => !value)}><Menu /><span>{project.meta.name}</span><ChevronDown /></button>{projectMenuOpen && <div className="top-dropdown project-actions-menu"><button onClick={() => { setProjectMenuOpen(false); void doOpen(); }}><FolderOpen />打开项目</button><button onClick={() => { setProjectMenuOpen(false); void renameProject(); }}><FileText />重命名</button><button onClick={() => { setProjectMenuOpen(false); void doSaveAs(); }}><SaveAs />另存为</button><button onClick={() => { setProjectMenuOpen(false); navigatePage('history'); }}><History />项目历史</button><button onClick={() => void closeProject()}><X />关闭项目</button><button onClick={() => void exitApplication()}><LogOut />退出应用</button></div>}</div><button className="search-trigger titlebar-no-drag" onClick={() => setModal('search')}><Search /><span>搜索台词、指令和资源...</span><kbd>Ctrl K</kbd></button><div className="top-actions titlebar-no-drag"><div className="save-state"><span />{saveState}</div><button className="icon-button notification-trigger" title="通知" onClick={() => setNotificationsOpen((value) => !value)}><Bell />{notifications.some((item) => !item.read) && <span />}</button><div className="account-entry"><button className="avatar-button" title="创作者账号" onClick={() => setAccountMenuOpen((value) => !value)}>{creatorName ? creatorName.slice(0, 1).toUpperCase() : <UserRound />}</button>{accountMenuOpen && <div className="top-dropdown account-menu">{creatorName ? <><strong>{creatorName}</strong><button onClick={() => void loginCreator()}><Settings2 />账号设置</button><button onClick={logoutCreator}><LogOut />退出账号</button></> : <button onClick={() => void loginCreator()}><UserRound />登录创作者账号</button>}</div>}</div><WindowChrome onClose={() => void exitApplication()} /></div></header>
     <nav className="module-nav"><div className="module-links"><button className={`module-link ${page === 'script' ? 'active' : ''}`} onClick={() => navigatePage('script')}><NotebookPen />{debugRunning ? '调试' : '剧本'}</button><div className="asset-nav-menu"><button className={`module-link ${page === 'assets' || page === 'characters' || page === 'scenes' || page === 'audio' ? 'active' : ''}`} aria-expanded={assetMenuOpen} onClick={() => setAssetMenuOpen((value) => !value)}><FolderOpen />资产<ChevronDown /></button>{assetMenuOpen && <div className="top-dropdown asset-submenu"><button onClick={() => openAssetSection('全部')}><PackageCheck />资源总览</button><button onClick={() => openAssetSection('全部', 'characters')}><Users />角色</button><button onClick={() => openAssetSection('全部', 'scenes')}><Image />场景</button><button onClick={() => openAudioSection('bgm')}><Music2 />BGM</button><button onClick={() => openAudioSection('sfx')}><AudioLines />SE</button><button onClick={() => openAudioSection('voice')}><MessageSquareText />语音</button></div>}</div><button className={`module-link ${page === 'map' ? 'active' : ''}`} onClick={() => navigatePage('map')}><GitBranch />叙事地图</button><button className={`module-link ${themeOpen ? 'active' : ''}`} onClick={() => setThemeOpen(true)}><Palette />个性化</button><button className={`module-link ${page === 'ai' ? 'active' : ''}`} onClick={() => navigatePage('ai')}><Sparkles />AI Agent</button></div><div className="module-actions"><button className={`button ghost ${debugRunning ? 'active' : ''}`} onClick={() => { setDebugRunning((value) => !value); navigatePage('script'); setSelected(0); show(debugRunning ? '已退出调试运行' : '已进入调试运行'); }}><BugPlay />{debugRunning ? '停止调试' : '调试运行'}</button><button className="button primary" onClick={() => setModal('publish')}><Rocket />发布游戏</button><button className="icon-button" title="设置" onClick={() => setSettingsOpen(true)}><Settings2 /></button></div></nav>
     <main className={`workspace ${page === 'map' || page === 'characters' || page === 'scenes' || page === 'audio' ? 'map-workspace' : ''}`}>{!projectClosed && !['map', 'characters', 'scenes', 'audio'].includes(page) && !sidebarCollapsed && <Sidebar project={project} activate={activate} addChapter={addChapter} addFragment={addFragment} removeFragment={removeFragment} openSettings={() => setChapterSettingsOpen(true)} toggleChapterDisabled={toggleChapterDisabled} collapseSidebar={() => setSidebarCollapsed(true)} structureAction={(action, chapterId, fragmentId) => void structureAction(action, chapterId, fragmentId)} />}{!projectClosed && !['map', 'characters', 'scenes', 'audio'].includes(page) && sidebarCollapsed && <button className="sidebar-expand" title="展开章节列表" onClick={() => setSidebarCollapsed(false)}><ArrowRight /></button>}<section className="page-content">{projectClosed ? <div className="closed-project"><FolderOpen /><strong>没有打开的项目</strong><span>新建项目或打开本地 Hikari v3 项目继续创作。</span><div><button className="button primary" onClick={() => void doNew()}><FilePlus2 />新建项目</button><button className="button ghost" onClick={() => void doOpen()}><FolderOpen />打开项目</button></div></div> : pages[page]}</section></main>
     <ModalLayer modal={modal} project={project} close={() => setModal(null)} addBlock={addBlock} runBuild={(kind) => void runBuild(kind)} />

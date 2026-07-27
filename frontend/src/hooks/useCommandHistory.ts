@@ -9,9 +9,27 @@ export interface CommandEntry {
 
 export interface CommandCategory { id: string; label: string; count: number; items: string[]; undone?: boolean }
 
+export interface PersistedCommandHistory<T> {
+  version: 1;
+  projectId: string;
+  undo: PersistedCommand<T>[];
+  redo: PersistedCommand<T>[];
+}
+
+interface PersistedCommand<T> extends CommandEntry {
+  before: T;
+  after: T;
+  options?: { categories?: CommandCategory[]; persistence?: { strategy: string; payload: unknown } };
+  undoneCategoryIds?: string[];
+  categoryEffect?: { sourceCommandId: string; categoryId: string };
+}
+
+export type CommandRestoreStrategies<T> = Record<string, (current: T, before: T, after: T, categoryId: string, payload: unknown) => T>;
+
 interface CommandOptions<T> {
   categories?: CommandCategory[];
   restoreCategory?: (current: T, before: T, after: T, categoryId: string) => T;
+  persistence?: { strategy: string; payload: unknown };
 }
 
 interface SnapshotCommand<T> extends CommandEntry {
@@ -21,6 +39,7 @@ interface SnapshotCommand<T> extends CommandEntry {
   undoneCategoryIds?: string[];
   onUndo?: () => void;
   onRedo?: () => void;
+  categoryEffect?: { sourceCommandId: string; categoryId: string };
 }
 
 const clone = <T,>(value: T): T => structuredClone(value);
@@ -60,6 +79,57 @@ export function useCommandHistory<T>(initial: T, limit = 50) {
     setSavedRevision(0);
     syncCounts();
   }, [publish, syncCounts]);
+
+  const serializeHistory = useCallback((projectId: string): PersistedCommandHistory<T> => {
+    const serialize = (command: SnapshotCommand<T>): PersistedCommand<T> => ({
+      id: command.id,
+      label: command.label,
+      timestamp: command.timestamp,
+      before: clone(command.before),
+      after: clone(command.after),
+      options: command.options ? { categories: command.options.categories ? clone(command.options.categories) : undefined, persistence: command.options.persistence ? clone(command.options.persistence) : undefined } : undefined,
+      undoneCategoryIds: [...(command.undoneCategoryIds ?? [])],
+      categoryEffect: command.categoryEffect ? { ...command.categoryEffect } : undefined,
+    });
+    return { version: 1, projectId, undo: undoRef.current.map(serialize), redo: redoRef.current.map(serialize) };
+  }, []);
+
+  const restoreHistory = useCallback((next: T, state: PersistedCommandHistory<T> | null | undefined, strategies: CommandRestoreStrategies<T>) => {
+    if (!state || state.version !== 1 || !Array.isArray(state.undo) || !Array.isArray(state.redo)) {
+      reset(next);
+      return;
+    }
+    const restore = (command: PersistedCommand<T>): SnapshotCommand<T> => {
+      const persistence = command.options?.persistence;
+      const strategy = persistence ? strategies[persistence.strategy] : undefined;
+      return {
+        ...command,
+        before: clone(command.before),
+        after: clone(command.after),
+        options: command.options ? {
+          categories: command.options.categories ? clone(command.options.categories) : undefined,
+          persistence: persistence ? clone(persistence) : undefined,
+          restoreCategory: strategy && persistence ? (current, before, after, categoryId) => strategy(current, before, after, categoryId, persistence.payload) : undefined,
+        } : undefined,
+      };
+    };
+    undoRef.current = state.undo.slice(-limit).map(restore);
+    redoRef.current = state.redo.slice(-limit).map(restore);
+    const commands = [...undoRef.current, ...redoRef.current];
+    for (const command of commands) {
+      const effect = command.categoryEffect;
+      if (!effect) continue;
+      const source = commands.find((candidate) => candidate.id === effect.sourceCommandId);
+      if (!source) continue;
+      command.onUndo = () => { source.undoneCategoryIds = (source.undoneCategoryIds ?? []).filter((id) => id !== effect.categoryId); };
+      command.onRedo = () => { source.undoneCategoryIds = [...new Set([...(source.undoneCategoryIds ?? []), effect.categoryId])]; };
+    }
+    publish(next);
+    revisionRef.current = 0;
+    setRevision(0);
+    setSavedRevision(0);
+    syncCounts();
+  }, [limit, publish, reset, syncCounts]);
 
   const commit = useCallback((updater: (current: T) => T, label = '编辑项目') => {
     const before = valueRef.current;
@@ -136,7 +206,7 @@ export function useCommandHistory<T>(initial: T, limit = 50) {
     undoRef.current = [...undoRef.current, {
       id: `command-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       label: `撤销 ${source.label} · ${category?.label ?? categoryId}`,
-      timestamp: Date.now(), before: clone(before), after: clone(after), onUndo: markActive, onRedo: markUndone,
+      timestamp: Date.now(), before: clone(before), after: clone(after), onUndo: markActive, onRedo: markUndone, categoryEffect: { sourceCommandId: source.id, categoryId },
     }].slice(-limit);
     redoRef.current = [];
     publish(after);
@@ -149,6 +219,8 @@ export function useCommandHistory<T>(initial: T, limit = 50) {
   return {
     value,
     reset,
+    restoreHistory,
+    serializeHistory,
     commit,
     commitSaved,
     replace,
@@ -158,6 +230,7 @@ export function useCommandHistory<T>(initial: T, limit = 50) {
     undoCount: counts.undo,
     redoCount: counts.redo,
     history,
+    historyVersion: revision,
     dirty: revision !== savedRevision,
     markSaved,
   };

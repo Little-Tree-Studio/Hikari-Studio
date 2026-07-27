@@ -22,6 +22,7 @@ VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov"}
 FONT_EXTENSIONS = {".ttf", ".otf", ".woff", ".woff2"}
 SUPPORTED_ASSET_EXTENSIONS = IMAGE_EXTENSIONS | AUDIO_EXTENSIONS | VIDEO_EXTENSIONS | FONT_EXTENSIONS
 MAX_RUNTIME_VALUE_BYTES = 64 * 1024 * 1024
+MAX_COMMAND_HISTORY_BYTES = 128 * 1024 * 1024
 
 
 def new_id(prefix: str) -> str:
@@ -130,6 +131,10 @@ class ProjectStore:
         return self.project_root / ".hikari" / "recovery.json"
 
     @property
+    def command_history_path(self) -> Path:
+        return self.project_root / ".hikari" / "history" / "commands.json"
+
+    @property
     def recent_projects_path(self) -> Path:
         return self.data_dir / ".hikari-studio" / "recent-projects.json"
 
@@ -179,6 +184,48 @@ class ProjectStore:
         with self._lock:
             path.unlink(missing_ok=True)
         return True
+
+    def load_command_history(self) -> dict[str, Any] | None:
+        with self._lock:
+            path = self.command_history_path
+            if not path.exists():
+                return None
+            if path.stat().st_size > MAX_COMMAND_HISTORY_BYTES:
+                raise ValueError("Command history exceeds the 128 MiB limit")
+            value = self._validate_command_history(self._read_json(path))
+            manifest = self._read_json(self.project_path)
+            return value if value.get("projectId") == manifest.get("meta", {}).get("id") else None
+
+    def save_command_history(self, history: dict[str, Any]) -> dict[str, Any]:
+        value = self._validate_command_history(history)
+        manifest = self._read_json(self.project_path)
+        if value.get("projectId") != manifest.get("meta", {}).get("id"):
+            raise ValueError("Command history belongs to another project")
+        encoded_size = len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+        if encoded_size > MAX_COMMAND_HISTORY_BYTES:
+            raise ValueError("Command history exceeds the 128 MiB limit")
+        with self._lock:
+            self._write_json_atomic(self.command_history_path, value)
+        return {"ok": True, "path": str(self.command_history_path), "bytes": self.command_history_path.stat().st_size, "commandCount": len(value["undo"]) + len(value["redo"])}
+
+    @staticmethod
+    def _validate_command_history(history: Any) -> dict[str, Any]:
+        if not isinstance(history, dict) or history.get("version") != 1:
+            raise ValueError("Unsupported Command history version")
+        if not isinstance(history.get("projectId"), str) or not history["projectId"]:
+            raise ValueError("Command history project id is invalid")
+        undo = history.get("undo")
+        redo = history.get("redo")
+        if not isinstance(undo, list) or not isinstance(redo, list) or len(undo) > 50 or len(redo) > 50:
+            raise ValueError("Command history stack is invalid")
+        for command in [*undo, *redo]:
+            if not isinstance(command, dict) or not isinstance(command.get("id"), str) or not command["id"].startswith("command-"):
+                raise ValueError("Command history entry is invalid")
+            if not isinstance(command.get("label"), str) or not isinstance(command.get("timestamp"), (int, float)):
+                raise ValueError("Command history metadata is invalid")
+            if not isinstance(command.get("before"), dict) or not isinstance(command.get("after"), dict):
+                raise ValueError("Command history snapshot is invalid")
+        return deepcopy(history)
 
     def list_recent_projects(self) -> list[dict[str, Any]]:
         entries = self._read_json(self.recent_projects_path, default=[])
