@@ -9,6 +9,12 @@ export interface CommandEntry {
 
 export interface CommandCategory { id: string; label: string; count: number; items: string[]; undone?: boolean }
 
+export interface CommandSnapshotEntry<T> extends CommandEntry {
+  before: T;
+  after: T;
+  state: 'applied' | 'undone';
+}
+
 export interface PersistedCommandHistory<T> {
   version: 1;
   projectId: string;
@@ -214,7 +220,19 @@ export function useCommandHistory<T>(initial: T, limit = 50) {
     syncCounts();
     return true;
   }, [bumpRevision, limit, publish, syncCounts]);
-  const history = undoRef.current.map(({ id, label, timestamp, options, undoneCategoryIds }) => ({ id, label, timestamp, categories: options?.categories?.map((category) => ({ ...category, undone: undoneCategoryIds?.includes(category.id) })) }));
+  const snapshotEntry = (state: CommandSnapshotEntry<T>['state']) => ({ id, label, timestamp, before, after, options, undoneCategoryIds }: SnapshotCommand<T>): CommandSnapshotEntry<T> => ({
+    id,
+    label,
+    timestamp,
+    before,
+    after,
+    state,
+    categories: options?.categories?.map((category) => ({ ...category, undone: undoneCategoryIds?.includes(category.id) })),
+  });
+  const history = [
+    ...undoRef.current.map(snapshotEntry('applied')),
+    ...redoRef.current.map(snapshotEntry('undone')),
+  ].sort((left, right) => left.timestamp - right.timestamp);
 
   return {
     value,

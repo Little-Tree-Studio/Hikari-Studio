@@ -60,6 +60,9 @@ class DesktopApi:
     def load_command_history(self) -> dict[str, Any] | None:
         return self._store.load_command_history()
 
+    def load_recovery_snapshot(self) -> dict[str, Any] | None:
+        return self._store.load_recovery_snapshot()
+
     def save_command_history(self, history: dict[str, Any]) -> dict[str, Any]:
         with self._save_lock:
             result = self._store.save_command_history(history)

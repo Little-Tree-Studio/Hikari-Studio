@@ -76,6 +76,33 @@ class ProjectStoreTests(unittest.TestCase):
             target.command_history_path.write_bytes(source.command_history_path.read_bytes())
             self.assertIsNone(target.load_command_history())
 
+    def test_recovery_snapshot_is_validated_and_reports_automatic_recovery(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = ProjectStore(root)
+            project = store.load()
+            snapshot = store.load_recovery_snapshot()
+            self.assertIsNotNone(snapshot)
+            self.assertEqual(snapshot["project"]["meta"]["id"], project["meta"]["id"])
+            self.assertFalse(snapshot["recoveredDuringLoad"])
+            self.assertTrue(snapshot["updatedAt"])
+
+            store.project_path.write_text("{broken", encoding="utf-8")
+            recovered = store.load()
+            self.assertEqual(recovered["meta"]["id"], project["meta"]["id"])
+            self.assertTrue(store.load_recovery_snapshot()["recoveredDuringLoad"])
+
+    def test_recovery_snapshot_from_another_project_is_ignored(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = ProjectStore(root / "source")
+            source.load()
+            target = ProjectStore(root / "target")
+            target.load()
+            target.recovery_path.parent.mkdir(parents=True, exist_ok=True)
+            target.recovery_path.write_bytes(source.recovery_path.read_bytes())
+            self.assertIsNone(target.load_recovery_snapshot())
+
     def test_round_trip_project(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = ProjectStore(Path(directory))

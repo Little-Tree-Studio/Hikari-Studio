@@ -26,6 +26,16 @@ class DesktopApiTests(unittest.TestCase):
             self.assertIn(str(Path(".hikari") / "history" / "commands.json"), result["path"])
             self.assertEqual(json.loads(json.dumps(api.load_command_history(), ensure_ascii=False)), history)
 
+    def test_recovery_snapshot_bridge_returns_validated_project(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            api = DesktopApi(ProjectStore(root / "data"), root)
+            project = api.load_project()
+            snapshot = api.load_recovery_snapshot()
+            self.assertEqual(snapshot["project"]["meta"]["id"], project["meta"]["id"])
+            self.assertFalse(snapshot["recoveredDuringLoad"])
+            json.loads(json.dumps(snapshot, ensure_ascii=False))
+
     def test_project_json_bridge_returns_serializable_v3_project(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

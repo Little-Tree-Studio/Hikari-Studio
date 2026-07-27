@@ -283,6 +283,12 @@ export interface DesktopApiResult<T> {
   error?: { code: string; message: string; diagnostics?: unknown[] };
 }
 
+export interface RecoverySnapshot {
+  project: Project;
+  updatedAt: string;
+  recoveredDuringLoad: boolean;
+}
+
 export interface DesktopApi {
   get_app_info(): Promise<{ name: string; version: string; platform: string; projectPath: string }>;
   load_project(): Promise<Project>;
@@ -290,6 +296,7 @@ export interface DesktopApi {
   save_project(project: Project): Promise<{ ok: boolean; path: string; bytes: number }>;
   load_command_history(): Promise<import('./hooks/useCommandHistory').PersistedCommandHistory<Project> | null>;
   save_command_history(history: import('./hooks/useCommandHistory').PersistedCommandHistory<Project>): Promise<{ ok: boolean; path: string; bytes: number; commandCount: number }>;
+  load_recovery_snapshot(): Promise<RecoverySnapshot | null>;
   read_runtime_value(key: string): Promise<string | null>;
   write_runtime_value(key: string, value: string): Promise<boolean>;
   delete_runtime_value(key: string): Promise<boolean>;

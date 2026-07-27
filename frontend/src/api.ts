@@ -1,4 +1,4 @@
-import type { AgentPatchApplyResult, AgentPatchPreconditionResult, AgentPlan, AgentResultComparison, AgentResultRef, AgentTask, AiModelDiscovery, AiSettings, AiSettingsInput, Asset, AssetFileStatus, AssetFolderRepairPreview, AssetRepairIssue, AssetRepairMatch, AudioCategory, Project, RecentProject, ScriptImportPreview } from './types';
+import type { AgentPatchApplyResult, AgentPatchPreconditionResult, AgentPlan, AgentResultComparison, AgentResultRef, AgentTask, AiModelDiscovery, AiSettings, AiSettingsInput, Asset, AssetFileStatus, AssetFolderRepairPreview, AssetRepairIssue, AssetRepairMatch, AudioCategory, Project, RecentProject, RecoverySnapshot, ScriptImportPreview } from './types';
 import { readLargeValue, writeLargeValue } from './core/storage';
 import type { PersistedCommandHistory } from './hooks/useCommandHistory';
 
@@ -239,6 +239,12 @@ export async function loadCommandHistory(): Promise<PersistedCommandHistory<Proj
   const api = await waitForDesktopApi();
   if (!api) return null;
   return withTimeout(api.load_command_history(), 10000);
+}
+
+export async function loadRecoverySnapshot(): Promise<RecoverySnapshot | null> {
+  const api = await waitForDesktopApi();
+  if (!api) return null;
+  return withTimeout(api.load_recovery_snapshot(), 10000);
 }
 
 export async function saveCommandHistory(history: PersistedCommandHistory<Project>) {

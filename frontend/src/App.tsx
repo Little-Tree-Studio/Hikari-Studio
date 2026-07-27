@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import {
   buildWeb, buildWindows, callWindow, exportRenpy, importAssets, loadProject, newProject,
-  applyAiPatch, loadCommandHistory, openProject, openRecentProject, previewScriptImport, replaceAssetFile, saveCommandHistory, saveProject, saveProjectAs,
+  applyAiPatch, loadCommandHistory, loadRecoverySnapshot, openProject, openRecentProject, previewScriptImport, replaceAssetFile, saveCommandHistory, saveProject, saveProjectAs,
 } from './api';
 import { Preview } from './components/Preview';
 import { AiAgentPanel } from './components/AiAgentPanel';
@@ -30,12 +30,13 @@ import { analyzeAssetReferences } from './core/assetReferences';
 import { audioCategoryOf, matchingVoice } from './core/audio';
 import { log } from './core/logger';
 import { buildAgentPatchSemanticRecord, restoreAgentPatchCategory, type AgentPatchSemanticRecord } from './core/agentPatchHistory';
+import { diffProjects, type ProjectDiff } from './core/projectDiff';
 import { readSmallValue, removeSmallValue, writeSmallValue } from './core/storage';
 import { projectScenes, sceneBlockSnapshot } from './core/scenes';
 import { createBlock } from './engine-core/blocks';
 import { diagnosticSummary } from './engine-core/diagnostics';
-import { useCommandHistory, type CommandEntry, type CommandRestoreStrategies, type PersistedCommandHistory } from './hooks/useCommandHistory';
-import type { AgentOperation, AppNotification, Asset, AudioCategory, BlockType, ConditionOperator, InspectorDock, Project, ScriptImportPreview, StoryBlock, StoryBlockPatch } from './types';
+import { useCommandHistory, type CommandRestoreStrategies, type CommandSnapshotEntry, type PersistedCommandHistory } from './hooks/useCommandHistory';
+import type { AgentOperation, AppNotification, Asset, AudioCategory, BlockType, ConditionOperator, InspectorDock, Project, RecoverySnapshot, ScriptImportPreview, StoryBlock, StoryBlockPatch } from './types';
 
 const SaveAs = Copy;
 
@@ -669,10 +670,39 @@ function CharactersPage({ project, commit, notify, requestText, requestConfirm }
   })}</div></div></div>;
 }
 
-function HistoryPage({ entries, undoCount, redoCount, undo, redo, undoCategory }: { entries: CommandEntry[]; undoCount: number; redoCount: number; undo: () => void; redo: () => void; undoCategory: (commandId: string, categoryId: string) => boolean }) {
+function SnapshotDiff({ diff }: { diff: ProjectDiff }) {
+  if (!diff.total) return <div className="snapshot-identical"><CheckCircle2 /><span>两个快照内容一致</span></div>;
+  return <div className="snapshot-diff-grid">{diff.categories.map((category) => <article key={category.id}><header><strong>{category.label}</strong><div>{category.added > 0 && <span className="added">+{category.added}</span>}{category.removed > 0 && <span className="removed">-{category.removed}</span>}{category.changed > 0 && <span className="changed">~{category.changed}</span>}</div></header><ul>{category.items.slice(0, 8).map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}{category.items.length > 8 && <li>另有 {category.items.length - 8} 项变化</li>}</ul></article>)}</div>;
+}
+
+function SnapshotStats({ label, project }: { label: string; project: Project }) {
+  return <div className="snapshot-stat"><strong>{label}</strong><span>{project.chapters.length} 章</span><span>{Object.values(project.scripts).flat().length} Blocks</span><span>{project.characters.length} 角色</span><span>{project.assets.length} 素材</span></div>;
+}
+
+interface HistoryPageProps {
+  project: Project;
+  entries: CommandSnapshotEntry<Project>[];
+  recovery: RecoverySnapshot | null;
+  undoCount: number;
+  redoCount: number;
+  undo: () => void;
+  redo: () => void;
+  undoCategory: (commandId: string, categoryId: string) => boolean;
+  restoreCommand: (entry: CommandSnapshotEntry<Project>, target: 'before' | 'after') => void;
+  restoreRecovery: () => void;
+  refreshRecovery: () => void;
+}
+
+function HistoryPage({ project, entries, recovery, undoCount, redoCount, undo, redo, undoCategory, restoreCommand, restoreRecovery, refreshRecovery }: HistoryPageProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [recoveryExpanded, setRecoveryExpanded] = useState(false);
   const toggle = (id: string) => setExpanded((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
-  return <div className="dashboard-page"><PageHeader title="编辑历史" sub="本次会话最多保留 50 个可撤销步骤"><button className="button ghost" disabled={!undoCount} onClick={undo}><Undo2 />撤销</button><button className="button ghost" disabled={!redoCount} onClick={redo}><Redo2 />重做</button></PageHeader><div className="content-pad"><div className="history-list">{[...entries].reverse().map((entry) => <section className={`history-entry ${entry.categories?.length ? 'semantic' : ''}`} key={entry.id}><button type="button" className="history-item" onClick={() => entry.categories?.length && toggle(entry.id)}><div className="history-icon">{entry.label.startsWith('AI Agent') ? <Sparkles /> : <History />}</div><div><strong>{entry.label}</strong><small>{entry.categories?.length ? `${entry.categories.length} 类语义修改 · 点击查看详情` : '可撤销项目修改'}</small></div><time>{new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>{entry.categories?.length ? <ChevronDown className={expanded.has(entry.id) ? 'expanded' : ''} /> : null}</button>{entry.categories?.length && expanded.has(entry.id) && <div className="history-category-list">{entry.categories.map((category) => <article className={category.undone ? 'undone' : ''} key={category.id}><header><div><strong>{category.label}</strong><span>{category.count} 项</span></div><button className="button ghost" disabled={category.undone} onClick={() => undoCategory(entry.id, category.id)}>{category.undone ? <CheckCircle2 /> : <Undo2 />}{category.undone ? '已撤销' : '撤销此类别'}</button></header><ul>{category.items.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}</ul></article>)}</div>}</section>)}{!entries.length && <div className="empty-state large"><History /><strong>还没有编辑记录</strong><span>修改项目后会在这里出现</span></div>}<div className="history-item static"><div className="history-icon"><Save /></div><div><strong>自动保存</strong><small>项目修改会写入本地 v3 目录</small></div><time>450 ms</time></div></div></div></div>;
+  const recoveryDiff = recovery ? diffProjects(recovery.project, project) : null;
+  return <div className="dashboard-page history-page"><PageHeader title="编辑历史" sub="跨会话保留 50 个 Command 快照，所有恢复操作仍可撤销"><button className="button ghost" disabled={!undoCount} onClick={undo}><Undo2 />撤销</button><button className="button ghost" disabled={!redoCount} onClick={redo}><Redo2 />重做</button></PageHeader><div className="content-pad"><section className={`recovery-card ${recovery?.recoveredDuringLoad ? 'recovered' : ''}`}><div className="recovery-summary"><div className="recovery-icon"><HardDrive /></div><div><strong>{recovery?.recoveredDuringLoad ? '本次启动已执行崩溃恢复' : '崩溃恢复快照'}</strong><small>{recovery ? `${new Date(recovery.updatedAt).toLocaleString()} · ${recoveryDiff?.total ?? 0} 项与当前项目不同` : '当前项目还没有可用的恢复快照'}</small></div><div className="recovery-actions"><button className="button ghost" onClick={refreshRecovery}>刷新</button><button className="button ghost" disabled={!recovery} onClick={() => setRecoveryExpanded((value) => !value)}>{recoveryExpanded ? '收起比较' : '比较快照'}<ChevronDown className={recoveryExpanded ? 'expanded' : ''} /></button><button className="button primary" disabled={!recovery || !recoveryDiff?.total} onClick={restoreRecovery}><Undo2 />恢复此快照</button></div></div>{recovery && recoveryExpanded && <div className="snapshot-detail"><div className="snapshot-stats"><SnapshotStats label="恢复快照" project={recovery.project} /><ArrowRight /><SnapshotStats label="当前项目" project={project} /></div><SnapshotDiff diff={recoveryDiff!} /></div>}</section><div className="history-list">{[...entries].reverse().map((entry) => {
+    const isExpanded = expanded.has(entry.id);
+    const diff = isExpanded ? diffProjects(entry.before, entry.after) : null;
+    return <section className={`history-entry ${entry.categories?.length ? 'semantic' : ''} ${entry.state}`} key={entry.id}><button type="button" className="history-item" onClick={() => toggle(entry.id)}><div className="history-icon">{entry.label.startsWith('AI Agent') ? <Sparkles /> : <History />}</div><div><strong>{entry.label}</strong><small>{entry.state === 'undone' ? '当前位于重做栈 · ' : ''}{entry.categories?.length ? `${entry.categories.length} 类语义修改` : '完整项目快照'} · 点击比较</small></div><span className={`history-state ${entry.state}`}>{entry.state === 'applied' ? '已应用' : '已撤销'}</span><time>{new Date(entry.timestamp).toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</time><ChevronDown className={isExpanded ? 'expanded' : ''} /></button>{isExpanded && <div className="command-snapshot-detail"><div className="snapshot-toolbar"><div className="snapshot-stats"><SnapshotStats label="修改前" project={entry.before} /><ArrowRight /><SnapshotStats label="修改后" project={entry.after} /></div><div className="snapshot-actions"><button className="button ghost" onClick={() => restoreCommand(entry, 'before')}><Undo2 />恢复修改前</button><button className="button ghost" onClick={() => restoreCommand(entry, 'after')}><Redo2 />恢复修改后</button></div></div><SnapshotDiff diff={diff!} />{entry.categories?.length && <div className="history-category-list">{entry.categories.map((category) => <article className={category.undone ? 'undone' : ''} key={category.id}><header><div><strong>{category.label}</strong><span>{category.count} 项</span></div><button className="button ghost" disabled={entry.state === 'undone' || category.undone} onClick={() => undoCategory(entry.id, category.id)}>{category.undone ? <CheckCircle2 /> : <Undo2 />}{category.undone ? '已撤销' : '恢复此类别到修改前'}</button></header><ul>{category.items.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}</ul></article>)}</div>}</div>}</section>;
+  })}{!entries.length && <div className="empty-state large"><History /><strong>还没有编辑记录</strong><span>修改项目后会在这里出现，关闭软件也不会清空</span></div>}<div className="history-item static"><div className="history-icon"><Save /></div><div><strong>自动保存与历史持久化</strong><small>项目写入 v3 目录，Command 快照写入 .hikari/history</small></div><time>450 ms</time></div></div></div></div>;
 }
 
 interface ModalLayerProps {
@@ -720,6 +750,7 @@ export default function App() {
   const [scriptImportOpen, setScriptImportOpen] = useState(false);
   const [scriptImportBusy, setScriptImportBusy] = useState(false);
   const [scriptImportPreview, setScriptImportPreview] = useState<ScriptImportPreview | null>(null);
+  const [recoverySnapshot, setRecoverySnapshot] = useState<RecoverySnapshot | null>(null);
   const hydrated = useRef(false);
   const autoSaveTimerRef = useRef<number | null>(null);
   const pendingSaveRef = useRef<Promise<unknown> | null>(null);
@@ -758,9 +789,12 @@ export default function App() {
 
   const restoreProjectAndHistory = async (next: Project) => {
     historyReadyRef.current = false;
+    setRecoverySnapshot(null);
     let persistedHistory: PersistedCommandHistory<Project> | null = null;
     try { persistedHistory = await loadCommandHistory(); }
     catch (error) { log('error', 'history', 'Command 历史损坏或无法读取，项目将不带历史打开', error); }
+    try { setRecoverySnapshot(await loadRecoverySnapshot()); }
+    catch (error) { log('error', 'history', '崩溃恢复快照无法读取', error); }
     resetProject(next, persistedHistory);
     historyReadyRef.current = true;
   };
@@ -955,6 +989,23 @@ export default function App() {
     return result;
   };
 
+  const refreshRecoverySnapshot = async () => {
+    try { setRecoverySnapshot(await loadRecoverySnapshot()); show('崩溃恢复快照已刷新'); }
+    catch (error) { log('error', 'history', '崩溃恢复快照刷新失败', error); show(String(error), 'error'); }
+  };
+  const restoreCommandSnapshot = async (entry: CommandSnapshotEntry<Project>, target: 'before' | 'after') => {
+    const side = target === 'before' ? '修改前' : '修改后';
+    if (!await requestConfirm({ title: `恢复到${side}`, message: `将整个项目恢复到“${entry.label}”的${side}状态。当前状态会先记录为新的 Command，因此仍可撤销。`, confirmText: `恢复${side}`, danger: target === 'before' })) return;
+    commit(() => clone(entry[target]), `快照恢复：${entry.label} · ${side}`);
+    show(`已恢复到“${entry.label}”的${side}状态`);
+  };
+  const restoreCrashSnapshot = async () => {
+    if (!recoverySnapshot) return;
+    if (!await requestConfirm({ title: '恢复崩溃快照', message: `将项目恢复到 ${new Date(recoverySnapshot.updatedAt).toLocaleString()} 的最后安全状态。当前状态会保留在 Command 历史中。`, confirmText: '恢复快照', danger: true })) return;
+    commit(() => clone(recoverySnapshot.project), '恢复崩溃快照');
+    show('崩溃恢复快照已应用，可通过撤销返回');
+  };
+
   const activeName = project.chapters.flatMap((chapter) => chapter.fragments).find((fragment) => fragment.id === project.activeFragmentId)?.name ?? '片段';
   const pages: Record<Page, ReactNode> = {
     script: <ScriptPage project={project} commit={commit} selected={selected} setSelected={setSelected} view={view} setView={setView} openBlocks={() => setModal('blocks')} openImport={() => setScriptImportOpen(true)} requestConfirm={requestConfirm} openFragmentIds={openFragmentIds} activateFragment={activate} closeFragment={closeFragment} reorderFragmentTabs={reorderFragmentTabs} inspectorDock={inspectorDock} setInspectorDock={setInspectorDock} initialScrollTop={project.settings.editorSession?.scrollTopByFragment?.[project.activeFragmentId] ?? 0} saveScrollTop={saveFragmentScrollTop} debugRunning={debugRunning} notify={show} />,
@@ -963,7 +1014,7 @@ export default function App() {
     map: <NarrativeMap project={project} activate={activate} commit={commit} notify={show} requestText={requestText} />,
     characters: <CharacterManager project={project} commit={commit} notify={show} requestText={requestText} requestConfirm={requestConfirm} />,
     scenes: <SceneManager project={project} commit={commit} notify={show} requestText={requestText} requestConfirm={requestConfirm} activate={activate} />,
-    history: <HistoryPage entries={commandEntries} undoCount={undoCount} redoCount={redoCount} undo={undo} redo={redo} undoCategory={undoCategory} />,
+    history: <HistoryPage project={project} entries={commandEntries} recovery={recoverySnapshot} undoCount={undoCount} redoCount={redoCount} undo={undo} redo={redo} undoCategory={undoCategory} restoreCommand={(entry, target) => void restoreCommandSnapshot(entry, target)} restoreRecovery={() => void restoreCrashSnapshot()} refreshRecovery={() => void refreshRecoverySnapshot()} />,
     ai: <AiAgentPanel project={project} applyPlan={applyAgentPlan} requestBuild={(target) => void runBuild(target)} notify={show} navigateTarget={(target) => { if (target.kind === 'fragment' && target.id) activate(target.id); else if (target.kind === 'chapter' && target.id) { const fragment = project.chapters.find((chapter) => chapter.id === target.id)?.fragments[0]; if (fragment) activate(fragment.id); } else if (target.kind === 'character') navigatePage('characters'); else if (target.kind === 'asset') navigatePage('assets'); else if (target.kind === 'variable') navigatePage('map'); else show('该差异项没有可打开的编辑位置'); }} />,
   };
   const openAssetSection = (section: string, target: Page = 'assets') => { setAssetSection(section); navigatePage(target); setAssetMenuOpen(false); };

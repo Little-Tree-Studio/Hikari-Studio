@@ -113,6 +113,7 @@ class ProjectStore:
         current = self.data_dir / "star-sea-echo" / MANIFEST_NAME
         self.project_path = legacy if legacy.exists() and not current.exists() else current
         self._lock = threading.RLock()
+        self._last_recovery_used = False
         if not self.project_path.exists():
             self.save(default_project())
 
@@ -195,6 +196,19 @@ class ProjectStore:
             value = self._validate_command_history(self._read_json(path))
             manifest = self._read_json(self.project_path)
             return value if value.get("projectId") == manifest.get("meta", {}).get("id") else None
+
+    def load_recovery_snapshot(self) -> dict[str, Any] | None:
+        with self._lock:
+            if not self.recovery_path.exists():
+                return None
+            project = self._load_recovery()
+            if project is None:
+                return None
+            manifest = self._read_json(self.project_path)
+            if project.get("meta", {}).get("id") != manifest.get("meta", {}).get("id"):
+                return None
+            modified = datetime.fromtimestamp(self.recovery_path.stat().st_mtime, timezone.utc).isoformat()
+            return {"project": project, "updatedAt": modified, "recoveredDuringLoad": self._last_recovery_used}
 
     def save_command_history(self, history: dict[str, Any]) -> dict[str, Any]:
         value = self._validate_command_history(history)
@@ -319,6 +333,7 @@ class ProjectStore:
 
     def load(self, recover: bool = True) -> dict[str, Any]:
         with self._lock:
+            self._last_recovery_used = False
             try:
                 if self.project_path.name == MANIFEST_NAME:
                     project = self._load_v3()
@@ -331,6 +346,7 @@ class ProjectStore:
                     raise
                 recovered = self._load_recovery()
                 if recovered is not None:
+                    self._last_recovery_used = True
                     self.save(recovered)
                     return recovered
                 raise
