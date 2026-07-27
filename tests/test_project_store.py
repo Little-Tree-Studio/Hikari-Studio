@@ -313,6 +313,20 @@ class ProjectStoreTests(unittest.TestCase):
             self.assertTrue(os.path.samefile(store.project_path, root / "legacy" / "project.hikari.json"))
             self.assertEqual(len(list(root.glob("legacy.hikari.json.v2-backup-*"))), 1)
 
+    def test_opening_associated_hikari_file_migrates_to_v3_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            associated_path = root / "visual-novel.hikari"
+            import json
+            legacy = default_project("文件关联项目")
+            legacy["version"] = 2
+            associated_path.write_text(json.dumps(legacy, ensure_ascii=False), encoding="utf-8")
+            store = ProjectStore(root / "other")
+            loaded = store.open(associated_path)
+            self.assertEqual(loaded["meta"]["name"], "文件关联项目")
+            self.assertTrue(os.path.samefile(store.project_path, root / "visual-novel" / "project.hikari.json"))
+            self.assertEqual(len(list(root.glob("visual-novel.hikari.v2-backup-*"))), 1)
+
     def test_corrupt_manifest_recovers_from_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = ProjectStore(Path(directory))

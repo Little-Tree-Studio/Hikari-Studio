@@ -14,6 +14,7 @@ from .desktop_paths import DesktopPaths, migrate_legacy_desktop_data, resolve_de
 from .logging_config import configure_logging
 from .project_store import ProjectStore
 from .single_instance import SingleInstance
+from .webview2_runtime import installed_webview2_version, show_missing_webview2_message
 from .window_state import WindowStateStore
 
 
@@ -43,6 +44,14 @@ def main() -> None:
     logger.info("Starting Hikari Studio; log=%s data=%s projects=%s portable=%s", log_path, paths.app_data_dir, paths.projects_dir, paths.portable)
     if migrated:
         logger.info("Migrated legacy projects: %s", [str(path) for path in migrated])
+
+    if os.name == "nt":
+        webview2_version = installed_webview2_version()
+        if webview2_version is None:
+            logger.error("Microsoft Edge WebView2 Runtime is missing")
+            show_missing_webview2_message()
+            raise SystemExit(2)
+        logger.info("Microsoft Edge WebView2 Runtime detected: %s", webview2_version)
 
     frontend_dist = paths.resource_root / "frontend" / "dist"
     if not frontend_dist.joinpath("desktop.html").exists():

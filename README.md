@@ -156,6 +156,16 @@ powershell -ExecutionPolicy Bypass -File scripts/build-editor.ps1
 
 产物位于 `dist/HikariStudio/HikariStudio.exe`，运行时不需要用户安装 Python、Node.js 或 pnpm。Windows 游戏构建所需的 WebView2 启动器也会预编译进编辑器目录。
 
+### 构建 Windows 安装程序
+
+安装 [Inno Setup 6 或更高版本](https://jrsoftware.org/isinfo.php) 后运行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/build-installer.ps1
+```
+
+安装程序输出到 `dist/installer/`，采用当前用户安装，不要求管理员权限。它会检查并按需安装 Microsoft Edge WebView2 Runtime，创建开始菜单快捷方式、标准卸载入口，并将 `.hikari` 项目文件关联到 Hikari Studio。CI 也会生成可下载的安装程序 Artifact。
+
 ### 前端开发模式
 
 ```powershell

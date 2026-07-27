@@ -131,7 +131,7 @@ class DesktopApi:
         if self._window is None:
             return None
         import webview
-        result = self._window.create_file_dialog(webview.OPEN_DIALOG, allow_multiple=False, file_types=("Hikari 项目 (project.hikari.json;*.hikari.json)",))
+        result = self._window.create_file_dialog(webview.OPEN_DIALOG, allow_multiple=False, file_types=("Hikari 项目 (project.hikari.json;*.hikari;*.hikari.json)",))
         if not result:
             return None
         path = result[0] if isinstance(result, (tuple, list)) else result

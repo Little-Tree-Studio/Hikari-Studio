@@ -367,9 +367,9 @@ class ProjectStore:
         resolved = path.expanduser().resolve()
         if resolved.is_dir():
             resolved = resolved / MANIFEST_NAME
-        is_legacy = resolved.is_file() and resolved.name.endswith(".hikari.json") and resolved.name != MANIFEST_NAME
+        is_legacy = resolved.is_file() and (resolved.suffix.lower() == ".hikari" or resolved.name.endswith(".hikari.json")) and resolved.name != MANIFEST_NAME
         if not resolved.is_file() or (resolved.name != MANIFEST_NAME and not is_legacy):
-            raise ValueError("请选择 project.hikari.json 或旧版 .hikari.json 项目文件")
+            raise ValueError("请选择 project.hikari.json、.hikari 或旧版 .hikari.json 项目文件")
         previous = self.project_path
         self.project_path = resolved
         try:
@@ -644,7 +644,7 @@ class ProjectStore:
         return self._load_v3()
 
     def _upgrade_destination(self, legacy_path: Path) -> Path:
-        stem = legacy_path.name.removesuffix(".hikari.json")
+        stem = legacy_path.name.removesuffix(".hikari.json").removesuffix(".hikari")
         return legacy_path.parent / _safe_name(stem, "hikari-project") / MANIFEST_NAME
 
     @staticmethod

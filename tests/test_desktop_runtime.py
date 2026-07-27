@@ -11,10 +11,16 @@ from unittest.mock import patch
 from backend.desktop_paths import migrate_legacy_desktop_data, resolve_desktop_paths
 from backend.project_store import ProjectStore
 from backend.single_instance import SingleInstance
+from backend.webview2_runtime import _valid_version
 from backend.window_state import WindowPlacement, WindowStateStore
 
 
 class DesktopRuntimeTests(unittest.TestCase):
+    def test_webview2_version_validation_rejects_missing_runtime_marker(self) -> None:
+        self.assertFalse(_valid_version(None))
+        self.assertFalse(_valid_version("0.0.0.0"))
+        self.assertTrue(_valid_version("126.0.2592.87"))
+
     def test_standard_paths_support_overrides_and_keep_state_outside_projects(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
