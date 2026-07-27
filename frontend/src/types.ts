@@ -319,6 +319,7 @@ export interface DesktopApi {
   start_ai_task(instruction: string, project: Project): Promise<AgentTask>;
   retry_ai_task_operations(taskId: string, operationIndexes: number[], project: Project): Promise<AgentTask>;
   check_ai_patch_preconditions(taskId: string, operationIndexes: number[], project: Project): Promise<AgentPatchPreconditionResult>;
+  apply_ai_patch(taskId: string, operationIndexes: number[], project: Project): Promise<AgentPatchApplyResult>;
   rebase_ai_patch(taskId: string, operationIndexes: number[], project: Project): Promise<AgentTask>;
   list_ai_tasks(): Promise<AgentTask[]>;
   get_ai_task(taskId: string, afterSeq?: number): Promise<AgentTask>;
@@ -501,6 +502,7 @@ export interface AgentTask {
   parentTaskId?: string | null;
   sourceCheckpointId?: string | null;
   remainingOperationIndexes?: number[];
+  appliedOperationIndexes?: number[];
   projectVersion?: { fingerprint: string; capturedAt: string } | null;
   lastEventSeq: number;
   events?: AgentTaskEvent[];
@@ -511,6 +513,7 @@ export interface AgentTask {
 
 export interface AgentPatchConflict { operationIndex: number; operationType: AgentOperation['type'] | 'unknown'; scope: string; expectedHash?: string; currentHash?: string; message: string }
 export interface AgentPatchPreconditionResult { taskId: string; stale: boolean; canApply: boolean; baseFingerprint?: string | null; currentFingerprint: string; conflicts: AgentPatchConflict[] }
+export interface AgentPatchApplyResult extends AgentPatchPreconditionResult { ok: boolean; project?: Project; appliedOperationIndexes: number[]; summary?: string; save?: { ok: boolean; path: string; bytes: number; version: number } }
 
 export interface AgentResultRef { taskId: string; checkpointId?: string | null }
 export interface AgentComparisonTarget { kind: 'fragment' | 'chapter' | 'character' | 'asset' | 'variable' | 'project'; id?: string | null }

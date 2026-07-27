@@ -81,6 +81,7 @@ class AgentTaskManager:
             "parentTaskId": parent_task_id,
             "sourceCheckpointId": None,
             "remainingOperationIndexes": remaining_operation_indexes or [],
+            "appliedOperationIndexes": [],
             "projectVersion": self._project_version(project),
             "patchPreconditions": [],
             "events": [],
@@ -150,6 +151,39 @@ class AgentTaskManager:
                     conflicts.append({"operationIndex": index, "operationType": operation.get("type", "unknown"), "scope": scope, "expectedHash": expected, "currentHash": actual, "message": self._conflict_message(operation, scope)})
         return {"taskId": task_id, "stale": baseline.get("fingerprint") != current["fingerprint"], "canApply": not conflicts, "baseFingerprint": baseline.get("fingerprint"), "currentFingerprint": current["fingerprint"], "conflicts": conflicts}
 
+    def apply_patch_to_project(self, task_id: str, operation_indexes: list[int], project: dict[str, Any], project_root: Path) -> dict[str, Any]:
+        root = project_root.resolve()
+        with self._lock:
+            task = deepcopy(self._find_task_locked(task_id, root))
+        operations = (task.get("plan") or {}).get("operations") or []
+        indexes = self._validated_operation_indexes(operation_indexes, len(operations))
+        already_applied = set(task.get("appliedOperationIndexes") or [])
+        duplicates = [index for index in indexes if index in already_applied]
+        if duplicates:
+            conflicts = [{"operationIndex": index, "operationType": operations[index].get("type", "unknown"), "scope": "agent-task", "message": "该 Patch 操作已经应用，不能重复写入"} for index in duplicates]
+            current = self._project_version(project)
+            return {"taskId": task_id, "stale": True, "canApply": False, "ok": False, "baseFingerprint": (task.get("projectVersion") or {}).get("fingerprint"), "currentFingerprint": current["fingerprint"], "conflicts": conflicts, "appliedOperationIndexes": []}
+        precondition = self.check_patch_preconditions(task_id, indexes, project, root)
+        if not precondition["canApply"]:
+            return {**precondition, "ok": False, "appliedOperationIndexes": []}
+        selected = [operations[index] for index in indexes]
+        updated = self._apply_operations(project, selected)
+        return {
+            **precondition,
+            "ok": True,
+            "project": updated,
+            "appliedOperationIndexes": indexes,
+            "summary": str((task.get("plan") or {}).get("summary") or "Agent 修改"),
+        }
+
+    def mark_patch_applied(self, task_id: str, operation_indexes: list[int], project_root: Path) -> None:
+        root = project_root.resolve()
+        with self._lock:
+            task = self._find_task_locked(task_id, root)
+            applied = sorted(set(task.get("appliedOperationIndexes") or []) | set(operation_indexes))
+            task["appliedOperationIndexes"] = applied
+            self._append_event_locked(task_id, "patch_applied", f"已原子应用并保存 {len(operation_indexes)} 项修改", {"operationIndexes": operation_indexes})
+
     def rebase_patch(self, task_id: str, operation_indexes: list[int], project: dict[str, Any], project_root: Path) -> dict[str, Any]:
         root = project_root.resolve()
         with self._lock:
@@ -205,6 +239,7 @@ class AgentTaskManager:
                 "parentTaskId": source["id"],
                 "sourceCheckpointId": checkpoint_id,
                 "remainingOperationIndexes": [],
+                "appliedOperationIndexes": [],
                 "projectVersion": self._project_version(project),
                 "patchPreconditions": [],
                 "events": [],
@@ -541,6 +576,102 @@ class AgentTaskManager:
         return indexes
 
     @staticmethod
+    def _apply_operations(project: dict[str, Any], operations: list[dict[str, Any]]) -> dict[str, Any]:
+        next_project = deepcopy(project)
+        chapters = next_project.setdefault("chapters", [])
+        scripts = next_project.setdefault("scripts", {})
+        characters = next_project.setdefault("characters", [])
+        assets = next_project.setdefault("assets", [])
+        chapter_ids = {str(chapter.get("id")) for chapter in chapters}
+        fragment_ids = {str(fragment.get("id")) for chapter in chapters for fragment in chapter.get("fragments", [])}
+        character_ids = {str(character.get("id")) for character in characters}
+        asset_ids = {str(asset.get("id")) for asset in assets}
+
+        for operation in operations:
+            kind = operation.get("type")
+            if kind == "add_blocks":
+                fragment_id = str(operation.get("fragmentId") or "")
+                if fragment_id not in fragment_ids or not isinstance(operation.get("blocks"), list):
+                    raise ValueError("Agent Patch 引用了无效的目标 Fragment")
+            elif kind == "create_fragment":
+                if str(operation.get("chapterId") or "") not in chapter_ids or not isinstance(operation.get("blocks"), list):
+                    raise ValueError("Agent Patch 引用了无效的目标章节")
+            elif kind == "upsert_character":
+                character_id = operation.get("characterId")
+                if character_id and str(character_id) not in character_ids:
+                    raise ValueError("Agent Patch 引用了不存在的角色")
+                portraits = operation.get("portraits") or {}
+                if not isinstance(portraits, dict) or any(str(asset_id) not in asset_ids for asset_id in portraits.values()):
+                    raise ValueError("Agent Patch 的角色立绘引用无效")
+            elif kind == "update_asset":
+                if str(operation.get("assetId") or "") not in asset_ids:
+                    raise ValueError("Agent Patch 引用了不存在的素材")
+                voice_character_id = operation.get("voiceCharacterId")
+                if voice_character_id and str(voice_character_id) not in character_ids:
+                    raise ValueError("Agent Patch 的语音角色引用无效")
+            elif kind == "upsert_variable":
+                value = operation.get("defaultValue")
+                value_type = operation.get("valueType")
+                valid = (value_type == "boolean" and isinstance(value, bool)) or (value_type == "number" and isinstance(value, (int, float)) and not isinstance(value, bool)) or (value_type == "string" and isinstance(value, str))
+                if not valid:
+                    raise ValueError("Agent Patch 的变量默认值类型无效")
+            elif kind == "update_branch":
+                fragment_id = str(operation.get("fragmentId") or "")
+                block_id = str(operation.get("blockId") or "")
+                block = next((item for item in scripts.get(fragment_id, []) if str(item.get("id")) == block_id and item.get("type") == "branch"), None)
+                options = operation.get("options")
+                if block is None or not isinstance(options, list) or any(str(option.get("target") or "") not in fragment_ids for option in options):
+                    raise ValueError("Agent Patch 的分支引用无效")
+            elif kind != "update_project":
+                raise ValueError(f"Agent Patch 包含不支持的操作: {kind}")
+
+        for operation in operations:
+            kind = operation["type"]
+            if kind == "update_project":
+                if operation.get("name"):
+                    next_project["meta"]["name"] = operation["name"]
+                if operation.get("author"):
+                    next_project["meta"]["author"] = operation["author"]
+            elif kind == "add_blocks":
+                fragment_id = operation["fragmentId"]
+                scripts[fragment_id] = [*scripts.get(fragment_id, []), *[{**block, "id": f"block-{uuid.uuid4().hex[:10]}"} for block in operation["blocks"]]]
+            elif kind == "create_fragment":
+                fragment_id = f"fragment-{uuid.uuid4().hex[:10]}"
+                chapter = next(item for item in chapters if item.get("id") == operation["chapterId"])
+                chapter.setdefault("fragments", []).append({"id": fragment_id, "name": operation["name"]})
+                scripts[fragment_id] = [{**block, "id": f"block-{uuid.uuid4().hex[:10]}"} for block in operation["blocks"]]
+                fragment_ids.add(fragment_id)
+            elif kind == "upsert_character":
+                existing = next((item for item in characters if item.get("id") == operation.get("characterId")), None) if operation.get("characterId") else next((item for item in characters if item.get("name") == operation.get("name")), None)
+                character = deepcopy(existing) if existing else {"id": f"character-{uuid.uuid4().hex[:10]}", "color": "#2f8b78", "expressions": ["默认"]}
+                character["name"] = operation["name"]
+                for key in ("color", "description", "expressions", "portraits", "defaultPosition", "defaultScale"):
+                    if key in operation:
+                        character[key] = deepcopy(operation[key])
+                if existing:
+                    characters[characters.index(existing)] = character
+                else:
+                    characters.append(character)
+                    character_ids.add(str(character["id"]))
+            elif kind == "update_asset":
+                asset = next(item for item in assets if item.get("id") == operation["assetId"])
+                for key in ("name", "forceBundle", "audioCategory", "voiceCharacterId"):
+                    if key in operation:
+                        asset[key] = operation[key]
+            elif kind == "upsert_variable":
+                name = operation["name"]
+                next_project.setdefault("variables", {})[name] = operation["defaultValue"]
+                definition = {"type": operation["valueType"], "scope": "project", "persistence": operation["persistence"]}
+                for key in ("displayName", "description"):
+                    if key in operation:
+                        definition[key] = operation[key]
+                next_project.setdefault("variableDefinitions", {})[name] = definition
+            elif kind == "update_branch":
+                fragment_id = operation["fragmentId"]
+                scripts[fragment_id] = [{**block, "title": operation["title"], "options": deepcopy(operation["options"])} if block.get("id") == operation["blockId"] and block.get("type") == "branch" else block for block in scripts[fragment_id]]
+        return next_project
+
+    @staticmethod
     def _checkpoint_snapshot(checkpoint: dict[str, Any]) -> dict[str, Any]:
         registry = checkpoint.get("registry") or {}
         return {"operations": deepcopy(registry.get("proposedOperations") or []), "builds": deepcopy(registry.get("requestedBuilds") or []), "diagnostics": AgentTaskManager._diagnostic_trace(registry.get("trace") or [])}
@@ -646,6 +777,7 @@ class AgentTaskManager:
         task.setdefault("parentTaskId", None)
         task.setdefault("sourceCheckpointId", None)
         task.setdefault("remainingOperationIndexes", [])
+        task.setdefault("appliedOperationIndexes", [])
         task.setdefault("displayInstruction", task.get("instruction", ""))
         task.setdefault("executionInstruction", None)
         task.setdefault("projectVersion", None)

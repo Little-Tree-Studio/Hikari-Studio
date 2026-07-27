@@ -355,6 +355,45 @@ class AgentTaskManagerTests(unittest.TestCase):
         after = AgentTaskManager._project_version(project)
         self.assertNotEqual(before["scopes"]["variable:player_name"], after["scopes"]["variable:player_name"])
 
+    def test_patch_operation_interpreter_applies_supported_operations_without_mutating_source(self) -> None:
+        project = sample_project()
+        project["scripts"]["opening"].append({"id": "choice", "type": "branch", "title": "旧选择", "options": [{"text": "继续", "target": "opening"}]})
+        operations = [
+            {"type": "update_project", "name": "Agent 项目", "author": "Hikari"},
+            {"type": "add_blocks", "fragmentId": "opening", "blocks": [{"type": "narration", "text": "新增文本"}]},
+            {"type": "create_fragment", "chapterId": "start", "name": "新片段", "blocks": [{"type": "narration", "text": "片段文本"}]},
+            {"type": "upsert_character", "characterId": "hero", "name": "林澄", "color": "#123456", "portraits": {"默认": "lake"}},
+            {"type": "update_asset", "assetId": "lake", "name": "湖面", "forceBundle": True},
+            {"type": "upsert_variable", "name": "route", "defaultValue": False, "valueType": "boolean", "displayName": "路线", "persistence": "shared"},
+            {"type": "update_branch", "fragmentId": "opening", "blockId": "choice", "title": "新选择", "options": [{"text": "留下", "target": "opening"}]},
+        ]
+        updated = AgentTaskManager._apply_operations(project, operations)
+        self.assertEqual(project["meta"]["name"], "测试项目")
+        self.assertEqual(updated["meta"], {"name": "Agent 项目", "author": "Hikari"})
+        self.assertEqual(updated["scripts"]["opening"][-1]["text"], "新增文本")
+        self.assertTrue(updated["scripts"]["opening"][-1]["id"].startswith("block-"))
+        created = next(fragment for fragment in updated["chapters"][0]["fragments"] if fragment["name"] == "新片段")
+        self.assertEqual(updated["scripts"][created["id"]][0]["text"], "片段文本")
+        self.assertEqual(updated["characters"][0]["portraits"], {"默认": "lake"})
+        self.assertTrue(updated["assets"][0]["forceBundle"])
+        self.assertFalse(updated["variables"]["route"])
+        self.assertEqual(updated["variableDefinitions"]["route"]["persistence"], "shared")
+        choice = next(block for block in updated["scripts"]["opening"] if block["id"] == "choice")
+        self.assertEqual(choice["title"], "新选择")
+
+    def test_atomic_patch_result_rejects_duplicate_operation(self) -> None:
+        manager = self.manager(PartialRetryAi())
+        source = manager.start_task("配置角色和分支", sample_project(), self.root)
+        source = wait_status(manager, self.root, source["id"], {"completed"})
+        result = manager.apply_patch_to_project(source["id"], [0], sample_project(), self.root)
+        self.assertTrue(result["ok"])
+        manager.mark_patch_applied(source["id"], [0], self.root)
+        duplicate = manager.apply_patch_to_project(source["id"], [0], result["project"], self.root)
+        self.assertFalse(duplicate["ok"])
+        self.assertEqual(duplicate["conflicts"][0]["scope"], "agent-task")
+        task = manager.get_task(source["id"], self.root)
+        self.assertEqual(task["appliedOperationIndexes"], [0])
+
 
 if __name__ == "__main__":
     unittest.main()

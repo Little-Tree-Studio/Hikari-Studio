@@ -1,4 +1,4 @@
-import type { AgentPatchPreconditionResult, AgentPlan, AgentResultComparison, AgentResultRef, AgentTask, AiModelDiscovery, AiSettings, AiSettingsInput, Asset, AssetFileStatus, AssetFolderRepairPreview, AssetRepairIssue, AssetRepairMatch, AudioCategory, Project, RecentProject, ScriptImportPreview } from './types';
+import type { AgentPatchApplyResult, AgentPatchPreconditionResult, AgentPlan, AgentResultComparison, AgentResultRef, AgentTask, AiModelDiscovery, AiSettings, AiSettingsInput, Asset, AssetFileStatus, AssetFolderRepairPreview, AssetRepairIssue, AssetRepairMatch, AudioCategory, Project, RecentProject, ScriptImportPreview } from './types';
 import { readLargeValue, writeLargeValue } from './core/storage';
 
 const waitForDesktopApi = async () => {
@@ -244,6 +244,12 @@ export async function checkAiPatchPreconditions(taskId: string, operationIndexes
   const api = await waitForDesktopApi();
   if (!api) throw new Error('Agent Patch 冲突检测仅在桌面应用中可用');
   return withTimeout(api.check_ai_patch_preconditions(taskId, operationIndexes, project), 10000);
+}
+
+export async function applyAiPatch(taskId: string, operationIndexes: number[], project: Project): Promise<AgentPatchApplyResult> {
+  const api = await waitForDesktopApi();
+  if (!api) throw new Error('Agent Patch 原子应用仅在桌面应用中可用');
+  return withTimeout(api.apply_ai_patch(taskId, operationIndexes, project), 30000);
 }
 
 export async function rebaseAiPatch(taskId: string, operationIndexes: number[], project: Project): Promise<AgentTask> {

@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import {
   buildWeb, buildWindows, callWindow, exportRenpy, importAssets, loadProject, newProject,
-  openProject, openRecentProject, previewScriptImport, replaceAssetFile, saveProject, saveProjectAs,
+  applyAiPatch, openProject, openRecentProject, previewScriptImport, replaceAssetFile, saveProject, saveProjectAs,
 } from './api';
 import { Preview } from './components/Preview';
 import { AiAgentPanel } from './components/AiAgentPanel';
@@ -34,7 +34,7 @@ import { projectScenes, sceneBlockSnapshot } from './core/scenes';
 import { createBlock } from './engine-core/blocks';
 import { diagnosticSummary } from './engine-core/diagnostics';
 import { useCommandHistory, type CommandEntry } from './hooks/useCommandHistory';
-import type { AgentPlan, AppNotification, Asset, AudioCategory, BlockType, ConditionOperator, InspectorDock, Project, ScriptImportPreview, StoryBlock, StoryBlockPatch } from './types';
+import type { AppNotification, Asset, AudioCategory, BlockType, ConditionOperator, InspectorDock, Project, ScriptImportPreview, StoryBlock, StoryBlockPatch } from './types';
 
 const SaveAs = Copy;
 
@@ -714,6 +714,8 @@ export default function App() {
   const [scriptImportBusy, setScriptImportBusy] = useState(false);
   const [scriptImportPreview, setScriptImportPreview] = useState<ScriptImportPreview | null>(null);
   const hydrated = useRef(false);
+  const autoSaveTimerRef = useRef<number | null>(null);
+  const pendingSaveRef = useRef<Promise<unknown> | null>(null);
   const { toast, show: showToast } = useToast();
   const show = (text: string, tone: 'error' | 'success' = 'success') => {
     showToast(text, tone);
@@ -725,7 +727,7 @@ export default function App() {
   const navigatePage = (next: Page) => { if (next === page) return; setBackPages((items) => [...items, page].slice(-40)); setForwardPages([]); setPage(next); };
   const navigateBack = () => { const previous = backPages.at(-1); if (!previous) return; setBackPages((items) => items.slice(0, -1)); setForwardPages((items) => [page, ...items].slice(0, 40)); setPage(previous); };
   const navigateForward = () => { const next = forwardPages[0]; if (!next) return; setForwardPages((items) => items.slice(1)); setBackPages((items) => [...items, page].slice(-40)); setPage(next); };
-  const { commit, replace, reset: resetHistory, undo, redo, undoCount, redoCount, history: commandEntries, dirty, markSaved } = history;
+  const { commit, commitSaved, replace, reset: resetHistory, undo, redo, undoCount, redoCount, history: commandEntries, dirty, markSaved } = history;
   const resetProject = (next: Project) => {
     const fragmentIds = new Set(next.chapters.flatMap((chapter) => chapter.fragments.map((fragment) => fragment.id)));
     const savedTabs = next.settings.editorSession?.openFragmentIds.filter((id) => fragmentIds.has(id)) ?? [];
@@ -737,7 +739,29 @@ export default function App() {
   };
 
   useEffect(() => { void loadProject(fallbackProject).then(resetProject).catch((error) => { log('error', 'project', '项目加载失败，使用浏览器恢复副本', error); resetProject(fallbackProject); }).finally(() => { hydrated.current = true; setSaveState('已保存'); }); }, []);
-  useEffect(() => { if (!hydrated.current || !project.settings.autoSave || !dirty) return; setSaveState('保存中'); const timer = window.setTimeout(() => void saveProject(project).then(() => { markSaved(); setSaveState('已保存'); setNotifications((items) => [{ id: makeId('notice'), title: '自动保存', detail: `${project.meta.name} 已写入本地项目`, tone: 'success' as const, createdAt: Date.now(), read: false }, ...items].slice(0, 80)); }).catch((error) => { log('error', 'project', '项目自动保存失败', error); setSaveState('保存失败'); show(String(error), 'error'); }), 450); return () => window.clearTimeout(timer); }, [dirty, markSaved, project]);
+  useEffect(() => {
+    if (!hydrated.current || !project.settings.autoSave || !dirty) return;
+    setSaveState('保存中');
+    autoSaveTimerRef.current = window.setTimeout(() => {
+      autoSaveTimerRef.current = null;
+      const request = saveProject(project).then(() => {
+        markSaved();
+        setSaveState('已保存');
+        setNotifications((items) => [{ id: makeId('notice'), title: '自动保存', detail: `${project.meta.name} 已写入本地项目`, tone: 'success' as const, createdAt: Date.now(), read: false }, ...items].slice(0, 80));
+      }).catch((error) => {
+        log('error', 'project', '项目自动保存失败', error);
+        setSaveState('保存失败');
+        show(String(error), 'error');
+      }).finally(() => {
+        if (pendingSaveRef.current === request) pendingSaveRef.current = null;
+      });
+      pendingSaveRef.current = request;
+    }, 450);
+    return () => {
+      if (autoSaveTimerRef.current !== null) window.clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    };
+  }, [dirty, markSaved, project]);
   useEffect(() => { const handler = (event: KeyboardEvent) => { const target = event.target as HTMLElement | null; const editingText = target?.matches('input,textarea,[contenteditable="true"]'); if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); setModal('search'); } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !editingText) { event.preventDefault(); event.shiftKey ? redo() : undo(); } else if (event.key === 'Escape') setModal(null); }; window.addEventListener('keydown', handler); return () => window.removeEventListener('keydown', handler); }, [redo, undo]);
   useEffect(() => { if (!appDialog) return; const handler = (event: KeyboardEvent) => { if (event.key !== 'Escape') return; event.preventDefault(); event.stopImmediatePropagation(); closeAppDialog(appDialog.kind === 'text' ? null : false); }; window.addEventListener('keydown', handler, true); return () => window.removeEventListener('keydown', handler, true); }, [appDialog]);
   useEffect(() => { if (!hydrated.current) return; replace((current) => ({ ...current, settings: { ...current.settings, editorSession: { ...current.settings.editorSession, openFragmentIds, selectedBlockByFragment: current.settings.editorSession?.selectedBlockByFragment ?? {}, scrollTopByFragment: current.settings.editorSession?.scrollTopByFragment ?? {}, inspectorDock, scriptView: view } } })); }, [openFragmentIds, inspectorDock, view]);
@@ -872,68 +896,23 @@ export default function App() {
     if (count) { commit(() => next, `全局替换“${query}”为“${replacement}”`); show(`已替换 ${count} 处文本`); }
     return count;
   };
-  const applyAgentPlan = (plan: AgentPlan) => {
-    const chapterIds = new Set(project.chapters.map((chapter) => chapter.id));
-    const fragmentIds = new Set(project.chapters.flatMap((chapter) => chapter.fragments.map((fragment) => fragment.id)));
-    const characterIds = new Set(project.characters.map((character) => character.id));
-    const assetIds = new Set(project.assets.map((asset) => asset.id));
-    const invalid = plan.operations.find((operation) => {
-      if (operation.type === 'add_blocks') return !fragmentIds.has(operation.fragmentId);
-      if (operation.type === 'create_fragment') return !chapterIds.has(operation.chapterId);
-      if (operation.type === 'upsert_character') return Boolean(operation.characterId && !characterIds.has(operation.characterId)) || Object.values(operation.portraits ?? {}).some((assetId) => !assetIds.has(assetId));
-      if (operation.type === 'update_asset') return !assetIds.has(operation.assetId) || Boolean(operation.voiceCharacterId && !characterIds.has(operation.voiceCharacterId));
-      if (operation.type === 'upsert_variable') return (operation.valueType === 'boolean' && typeof operation.defaultValue !== 'boolean') || (operation.valueType === 'number' && typeof operation.defaultValue !== 'number') || (operation.valueType === 'string' && typeof operation.defaultValue !== 'string');
-      if (operation.type === 'update_branch') return !fragmentIds.has(operation.fragmentId) || !project.scripts[operation.fragmentId]?.some((block) => block.id === operation.blockId && block.type === 'branch') || operation.options.some((option) => !fragmentIds.has(option.target));
-      return false;
-    });
-    if (invalid) {
-      show('Agent 计划包含无效的项目引用，已拒绝应用', 'error');
-      return false;
+  const applyAgentPlan = async (taskId: string, operationIndexes: number[]) => {
+    if (autoSaveTimerRef.current !== null) {
+      window.clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
     }
-    commit((current) => {
-      const next = clone(current);
-      for (const operation of plan.operations) {
-        if (operation.type === 'update_project') {
-          if (operation.name) next.meta.name = operation.name;
-          if (operation.author) next.meta.author = operation.author;
-        } else if (operation.type === 'add_blocks') {
-          next.scripts[operation.fragmentId] = [...(next.scripts[operation.fragmentId] ?? []), ...operation.blocks.map((block) => ({ ...block, id: makeId('block') } as StoryBlock))];
-        } else if (operation.type === 'create_fragment') {
-          const fragmentId = makeId('fragment');
-          const chapter = next.chapters.find((item) => item.id === operation.chapterId);
-          if (!chapter) continue;
-          chapter.fragments.push({ id: fragmentId, name: operation.name });
-          next.scripts[fragmentId] = operation.blocks.map((block) => ({ ...block, id: makeId('block') } as StoryBlock));
-        } else if (operation.type === 'upsert_character') {
-          const existingIndex = operation.characterId ? next.characters.findIndex((character) => character.id === operation.characterId) : next.characters.findIndex((character) => character.name === operation.name);
-          const existing = existingIndex >= 0 ? next.characters[existingIndex] : undefined;
-          const character = {
-            ...(existing ?? { id: makeId('character'), color: '#2f8b78', expressions: ['默认'] }),
-            name: operation.name,
-            ...(operation.color !== undefined && { color: operation.color }),
-            ...(operation.description !== undefined && { description: operation.description }),
-            ...(operation.expressions !== undefined && { expressions: operation.expressions }),
-            ...(operation.portraits !== undefined && { portraits: operation.portraits }),
-            ...(operation.defaultPosition !== undefined && { defaultPosition: operation.defaultPosition }),
-            ...(operation.defaultScale !== undefined && { defaultScale: operation.defaultScale }),
-          };
-          if (existingIndex >= 0) next.characters[existingIndex] = character;
-          else next.characters.push(character);
-        } else if (operation.type === 'update_asset') {
-          const assetIndex = next.assets.findIndex((asset) => asset.id === operation.assetId);
-          if (assetIndex < 0) continue;
-          next.assets[assetIndex] = { ...next.assets[assetIndex], ...(operation.name !== undefined && { name: operation.name }), ...(operation.forceBundle !== undefined && { forceBundle: operation.forceBundle }), ...(operation.audioCategory !== undefined && { audioCategory: operation.audioCategory }), ...(operation.voiceCharacterId !== undefined && { voiceCharacterId: operation.voiceCharacterId }) };
-        } else if (operation.type === 'upsert_variable') {
-          next.variables[operation.name] = operation.defaultValue;
-          next.variableDefinitions = { ...(next.variableDefinitions ?? {}), [operation.name]: { type: operation.valueType, scope: 'project', persistence: operation.persistence, ...(operation.displayName !== undefined && { displayName: operation.displayName }), ...(operation.description !== undefined && { description: operation.description }) } };
-        } else if (operation.type === 'update_branch') {
-          next.scripts[operation.fragmentId] = (next.scripts[operation.fragmentId] ?? []).map((block) => block.id === operation.blockId && block.type === 'branch' ? { ...block, title: operation.title, options: operation.options } : block);
-        }
-      }
-      return next;
-    }, `AI Agent：${plan.summary}`);
-    show(`已应用 ${plan.operations.length} 项 Agent 修改`);
-    return true;
+    await pendingSaveRef.current;
+    if (dirty) {
+      setSaveState('保存中');
+      await saveProject(project);
+      markSaved();
+    }
+    const result = await applyAiPatch(taskId, operationIndexes, project);
+    if (result.ok && result.project) {
+      commitSaved(() => result.project!, `AI Agent：${result.summary ?? '应用 Patch'}`);
+      setSaveState('已保存');
+    }
+    return result;
   };
 
   const activeName = project.chapters.flatMap((chapter) => chapter.fragments).find((fragment) => fragment.id === project.activeFragmentId)?.name ?? '片段';

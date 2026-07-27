@@ -129,6 +129,55 @@ class DesktopApiTests(unittest.TestCase):
                 self.assertNotIn("state", json.loads(json.dumps(branch))["checkpoints"][0])
             api.stop_background_services()
 
+    def test_agent_patch_apply_is_atomic_persisted_and_not_repeatable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            api = DesktopApi(ProjectStore(root / "data"), root)
+            project = api.load_project()
+            fragment_id = project["activeFragmentId"]
+            before_count = len(project["scripts"][fragment_id])
+            plan = {"summary": "追加旁白", "assumptions": [], "operations": [{"type": "add_blocks", "fragmentId": fragment_id, "blocks": [{"type": "narration", "text": "原子写入"}]}], "toolCalls": [], "requestedBuilds": [], "usage": {}}
+            with patch.object(api._agent_tasks.ai_service, "run", return_value=plan):
+                started = api.start_ai_task("追加旁白", project)
+                deadline = time.time() + 2
+                task = started
+                while task["status"] != "completed" and time.time() < deadline:
+                    time.sleep(0.01)
+                    task = api.get_ai_task(started["id"])
+                applied = api.apply_ai_patch(started["id"], [0], project)
+                self.assertTrue(applied["ok"])
+                self.assertEqual(applied["appliedOperationIndexes"], [0])
+                self.assertEqual(len(api.load_project()["scripts"][fragment_id]), before_count + 1)
+                self.assertEqual(api.get_ai_task(started["id"])["appliedOperationIndexes"], [0])
+
+                duplicate = api.apply_ai_patch(started["id"], [0], applied["project"])
+                self.assertFalse(duplicate["ok"])
+                self.assertEqual(len(api.load_project()["scripts"][fragment_id]), before_count + 1)
+            api.stop_background_services()
+
+    def test_agent_patch_conflict_does_not_write_project(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            api = DesktopApi(ProjectStore(root / "data"), root)
+            project = api.load_project()
+            fragment_id = project["activeFragmentId"]
+            plan = {"summary": "追加旁白", "assumptions": [], "operations": [{"type": "add_blocks", "fragmentId": fragment_id, "blocks": [{"type": "narration", "text": "不应写入"}]}], "toolCalls": [], "requestedBuilds": [], "usage": {}}
+            with patch.object(api._agent_tasks.ai_service, "run", return_value=plan):
+                started = api.start_ai_task("追加旁白", project)
+                deadline = time.time() + 2
+                task = started
+                while task["status"] != "completed" and time.time() < deadline:
+                    time.sleep(0.01)
+                    task = api.get_ai_task(started["id"])
+                changed = json.loads(json.dumps(project))
+                changed["scripts"][fragment_id][0]["text"] = "用户修改"
+                before_disk = api.load_project()
+                rejected = api.apply_ai_patch(started["id"], [0], changed)
+                self.assertFalse(rejected["ok"])
+                self.assertEqual(rejected["conflicts"][0]["scope"], f"script:{fragment_id}")
+                self.assertEqual(api.load_project(), before_disk)
+            api.stop_background_services()
+
     def test_transcription_rejects_non_audio_and_missing_files(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

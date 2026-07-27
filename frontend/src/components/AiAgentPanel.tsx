@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Activity, AlertTriangle, ArrowRight, Bot, Box, Check, Clock3, Database, GitCompare, GitFork, KeyRound, ListTodo, LoaderCircle, Pause, Play, RefreshCw, RotateCcw, Settings2, Sparkles, Star, Wrench, XCircle } from 'lucide-react';
-import { cancelAiTask, checkAiPatchPreconditions, compareAiTaskResults, discoverAiModels, getAiSettings, getAiTask, listAiTasks, pauseAiTask, rebaseAiPatch, restartAiTaskFromCheckpoint, resumeAiTask, retryAiTaskOperations, saveAiSettings, startAiTask } from '../api';
-import type { AgentComparisonTarget, AgentOperation, AgentPatchPreconditionResult, AgentPlan, AgentResultComparison, AgentResultRef, AgentTask, AgentTaskEvent, AgentTaskStatus, AiModelDiscovery, AiSettingsInput, Project } from '../types';
+import { cancelAiTask, compareAiTaskResults, discoverAiModels, getAiSettings, getAiTask, listAiTasks, pauseAiTask, rebaseAiPatch, restartAiTaskFromCheckpoint, resumeAiTask, retryAiTaskOperations, saveAiSettings, startAiTask } from '../api';
+import type { AgentComparisonTarget, AgentOperation, AgentPatchApplyResult, AgentPatchPreconditionResult, AgentPlan, AgentResultComparison, AgentResultRef, AgentTask, AgentTaskEvent, AgentTaskStatus, AiModelDiscovery, AiSettingsInput, Project } from '../types';
 import { groupModels, MODEL_CATEGORY_LABEL, recommendedModelId } from './aiModelCatalog';
 
 interface AiAgentPanelProps {
   project: Project;
-  applyPlan: (plan: AgentPlan) => boolean;
+  applyPlan: (taskId: string, operationIndexes: number[]) => Promise<AgentPatchApplyResult>;
   requestBuild: (target: 'web' | 'windows' | 'renpy') => void;
   notify: (message: string, tone?: 'error' | 'success') => void;
   navigateTarget?: (target: AgentComparisonTarget) => void;
@@ -109,7 +109,7 @@ export function AiAgentPanel({ project, applyPlan, requestBuild, notify, navigat
             if (planOwnerRef.current !== snapshot.id) {
               planOwnerRef.current = snapshot.id;
               setSelectedOperationIndexes(new Set(snapshot.plan.operations.map((_, index) => index)));
-              setAppliedOperationIndexes(new Set());
+              setAppliedOperationIndexes(new Set(snapshot.appliedOperationIndexes ?? []));
               setPatchCheck(null);
             }
             setPlan(snapshot.plan);
@@ -253,15 +253,13 @@ export function AiAgentPanel({ project, applyPlan, requestBuild, notify, navigat
     if (!plan || !activeTask || !selectedPendingIndexes.length) return;
     try {
       setCheckingPatch(true);
-      const check = await checkAiPatchPreconditions(activeTask.id, selectedPendingIndexes, project);
-      setPatchCheck(check);
-      if (!check.canApply) { notify(`检测到 ${check.conflicts.length} 项过期冲突，Patch 尚未应用`, 'error'); return; }
-      const acceptedPlan = { ...plan, operations: selectedPendingIndexes.map((index) => plan.operations[index]) };
-      if (!applyPlan(acceptedPlan)) return;
-      setAppliedOperationIndexes((current) => new Set([...current, ...selectedPendingIndexes]));
+      const result = await applyPlan(activeTask.id, selectedPendingIndexes);
+      setPatchCheck(result);
+      if (!result.ok) { notify(`检测到 ${result.conflicts.length} 项过期冲突，Patch 尚未应用`, 'error'); return; }
+      setAppliedOperationIndexes((current) => new Set([...current, ...result.appliedOperationIndexes]));
       setSelectedOperationIndexes(new Set());
       setPatchCheck(null);
-      notify(`已接受并应用 ${selectedPendingIndexes.length} 项修改`, 'success');
+      notify(`已原子应用并保存 ${result.appliedOperationIndexes.length} 项修改`, 'success');
     } catch (error) { notify(String(error), 'error'); }
     finally { setCheckingPatch(false); }
   };

@@ -190,21 +190,24 @@ class DesktopApi:
         return preview_script_import(Path(selected))
 
     def export_renpy(self, project: dict[str, Any]) -> dict[str, Any]:
-        self._store.save(project)
+        with self._save_lock:
+            self._store.save(project)
         output_dir = self._root / "exports" / safe_slug(project["meta"]["name"]) / "renpy"
         output = export_renpy(project, output_dir)
         LOGGER.info("RenPy export built: %s", output)
         return {"ok": True, "path": str(output)}
 
     def build_web(self, project: dict[str, Any]) -> dict[str, Any]:
-        self._store.save(project)
+        with self._save_lock:
+            self._store.save(project)
         output_dir = self._root / "exports" / safe_slug(project["meta"]["name"]) / "web"
         output = build_web_game(project, output_dir, self._store.project_path, self._root / "assets", self._store.asset_dir, self._root / "frontend" / "runtime-dist")
         LOGGER.info("Web export built: %s", output)
         return {"ok": True, "path": str(output)}
 
     def build_windows(self, project: dict[str, Any]) -> dict[str, Any]:
-        self._store.save(project)
+        with self._save_lock:
+            self._store.save(project)
         output_dir = self._root / "exports" / safe_slug(project["meta"]["name"]) / "windows"
         executable = build_windows_game(
             project,
@@ -240,6 +243,17 @@ class DesktopApi:
 
     def check_ai_patch_preconditions(self, task_id: str, operation_indexes: list[int], project: dict[str, Any]) -> dict[str, Any]:
         return self._agent_tasks.check_patch_preconditions(task_id, operation_indexes, project, self._store.project_root)
+
+    def apply_ai_patch(self, task_id: str, operation_indexes: list[int], project: dict[str, Any]) -> dict[str, Any]:
+        with self._save_lock:
+            result = self._agent_tasks.apply_patch_to_project(task_id, operation_indexes, project, self._store.project_root)
+            if not result["ok"]:
+                return result
+            save_result = self._store.save(result["project"])
+            persisted = self._store.load(recover=False)
+            self._agent_tasks.mark_patch_applied(task_id, result["appliedOperationIndexes"], self._store.project_root)
+            LOGGER.info("Agent Patch applied atomically: task=%s operations=%s", task_id, operation_indexes)
+            return {**result, "project": persisted, "save": save_result}
 
     def rebase_ai_patch(self, task_id: str, operation_indexes: list[int], project: dict[str, Any]) -> dict[str, Any]:
         return self._agent_tasks.rebase_patch(task_id, operation_indexes, project, self._store.project_root)
