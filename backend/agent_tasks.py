@@ -412,7 +412,7 @@ class AgentTaskManager:
         def identity(field: str, value: dict[str, Any], index: int) -> str:
             if field == "operations":
                 kind = value.get("type")
-                target = value.get("fragmentId") or value.get("chapterId") or "project"
+                target = value.get("fragmentId") or value.get("chapterId") or value.get("characterId") or value.get("assetId") or value.get("name") or "project"
                 return f"{kind}:{target}:{value.get('name', '')}"
             if field == "builds":
                 return str(value.get("target", index))
@@ -429,6 +429,16 @@ class AgentTaskManager:
             if kind == "update_project":
                 fields = "、".join(item for item in ("名称" if operation.get("name") else "", "作者" if operation.get("author") else "") if item)
                 return "项目配置", f"更新{fields or '项目信息'}", {"kind": "project", "id": None}
+            if kind == "upsert_character":
+                portraits = operation.get("portraits") or {}
+                return "角色配置", f"配置角色 {operation.get('name', '未命名')}（{len(portraits)} 个立绘引用）", {"kind": "character", "id": operation.get("characterId")}
+            if kind == "update_asset":
+                return "素材引用", f"更新素材 {operation.get('assetId', '未知素材')} 的元数据与打包策略", {"kind": "asset", "id": operation.get("assetId")}
+            if kind == "upsert_variable":
+                return "变量与分支", f"配置变量 {operation.get('name', '未命名')}（{operation.get('valueType', '未知类型')}）", {"kind": "variable", "id": operation.get("name")}
+            if kind == "update_branch":
+                options = operation.get("options") or []
+                return "变量与分支", f"修改分支 {operation.get('blockId', '未知 Block')}（{len(options)} 个选项）", {"kind": "fragment", "id": operation.get("fragmentId")}
             return "其他", str(kind or "未知操作"), None
 
         categories: dict[str, list[dict[str, Any]]] = {}

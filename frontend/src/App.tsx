@@ -875,9 +875,19 @@ export default function App() {
   const applyAgentPlan = (plan: AgentPlan) => {
     const chapterIds = new Set(project.chapters.map((chapter) => chapter.id));
     const fragmentIds = new Set(project.chapters.flatMap((chapter) => chapter.fragments.map((fragment) => fragment.id)));
-    const invalid = plan.operations.find((operation) => operation.type === 'add_blocks' ? !fragmentIds.has(operation.fragmentId) : operation.type === 'create_fragment' ? !chapterIds.has(operation.chapterId) : false);
+    const characterIds = new Set(project.characters.map((character) => character.id));
+    const assetIds = new Set(project.assets.map((asset) => asset.id));
+    const invalid = plan.operations.find((operation) => {
+      if (operation.type === 'add_blocks') return !fragmentIds.has(operation.fragmentId);
+      if (operation.type === 'create_fragment') return !chapterIds.has(operation.chapterId);
+      if (operation.type === 'upsert_character') return Boolean(operation.characterId && !characterIds.has(operation.characterId)) || Object.values(operation.portraits ?? {}).some((assetId) => !assetIds.has(assetId));
+      if (operation.type === 'update_asset') return !assetIds.has(operation.assetId) || Boolean(operation.voiceCharacterId && !characterIds.has(operation.voiceCharacterId));
+      if (operation.type === 'upsert_variable') return (operation.valueType === 'boolean' && typeof operation.defaultValue !== 'boolean') || (operation.valueType === 'number' && typeof operation.defaultValue !== 'number') || (operation.valueType === 'string' && typeof operation.defaultValue !== 'string');
+      if (operation.type === 'update_branch') return !fragmentIds.has(operation.fragmentId) || !project.scripts[operation.fragmentId]?.some((block) => block.id === operation.blockId && block.type === 'branch') || operation.options.some((option) => !fragmentIds.has(option.target));
+      return false;
+    });
     if (invalid) {
-      show('Agent 计划包含无效的章节或片段引用，已拒绝应用', 'error');
+      show('Agent 计划包含无效的项目引用，已拒绝应用', 'error');
       return;
     }
     commit((current) => {
@@ -888,12 +898,36 @@ export default function App() {
           if (operation.author) next.meta.author = operation.author;
         } else if (operation.type === 'add_blocks') {
           next.scripts[operation.fragmentId] = [...(next.scripts[operation.fragmentId] ?? []), ...operation.blocks.map((block) => ({ ...block, id: makeId('block') } as StoryBlock))];
-        } else {
+        } else if (operation.type === 'create_fragment') {
           const fragmentId = makeId('fragment');
           const chapter = next.chapters.find((item) => item.id === operation.chapterId);
           if (!chapter) continue;
           chapter.fragments.push({ id: fragmentId, name: operation.name });
           next.scripts[fragmentId] = operation.blocks.map((block) => ({ ...block, id: makeId('block') } as StoryBlock));
+        } else if (operation.type === 'upsert_character') {
+          const existingIndex = operation.characterId ? next.characters.findIndex((character) => character.id === operation.characterId) : next.characters.findIndex((character) => character.name === operation.name);
+          const existing = existingIndex >= 0 ? next.characters[existingIndex] : undefined;
+          const character = {
+            ...(existing ?? { id: makeId('character'), color: '#2f8b78', expressions: ['默认'] }),
+            name: operation.name,
+            ...(operation.color !== undefined && { color: operation.color }),
+            ...(operation.description !== undefined && { description: operation.description }),
+            ...(operation.expressions !== undefined && { expressions: operation.expressions }),
+            ...(operation.portraits !== undefined && { portraits: operation.portraits }),
+            ...(operation.defaultPosition !== undefined && { defaultPosition: operation.defaultPosition }),
+            ...(operation.defaultScale !== undefined && { defaultScale: operation.defaultScale }),
+          };
+          if (existingIndex >= 0) next.characters[existingIndex] = character;
+          else next.characters.push(character);
+        } else if (operation.type === 'update_asset') {
+          const assetIndex = next.assets.findIndex((asset) => asset.id === operation.assetId);
+          if (assetIndex < 0) continue;
+          next.assets[assetIndex] = { ...next.assets[assetIndex], ...(operation.name !== undefined && { name: operation.name }), ...(operation.forceBundle !== undefined && { forceBundle: operation.forceBundle }), ...(operation.audioCategory !== undefined && { audioCategory: operation.audioCategory }), ...(operation.voiceCharacterId !== undefined && { voiceCharacterId: operation.voiceCharacterId }) };
+        } else if (operation.type === 'upsert_variable') {
+          next.variables[operation.name] = operation.defaultValue;
+          next.variableDefinitions = { ...(next.variableDefinitions ?? {}), [operation.name]: { type: operation.valueType, scope: 'project', persistence: operation.persistence, ...(operation.displayName !== undefined && { displayName: operation.displayName }), ...(operation.description !== undefined && { description: operation.description }) } };
+        } else if (operation.type === 'update_branch') {
+          next.scripts[operation.fragmentId] = (next.scripts[operation.fragmentId] ?? []).map((block) => block.id === operation.blockId && block.type === 'branch' ? { ...block, title: operation.title, options: operation.options } : block);
         }
       }
       return next;
@@ -910,7 +944,7 @@ export default function App() {
     characters: <CharacterManager project={project} commit={commit} notify={show} requestText={requestText} requestConfirm={requestConfirm} />,
     scenes: <SceneManager project={project} commit={commit} notify={show} requestText={requestText} requestConfirm={requestConfirm} activate={activate} />,
     history: <HistoryPage entries={commandEntries} undoCount={undoCount} redoCount={redoCount} undo={undo} redo={redo} />,
-    ai: <AiAgentPanel project={project} applyPlan={applyAgentPlan} requestBuild={(target) => void runBuild(target)} notify={show} navigateTarget={(target) => { if (target.kind === 'fragment' && target.id) activate(target.id); else if (target.kind === 'chapter' && target.id) { const fragment = project.chapters.find((chapter) => chapter.id === target.id)?.fragments[0]; if (fragment) activate(fragment.id); } else show('该差异项没有可打开的编辑位置'); }} />,
+    ai: <AiAgentPanel project={project} applyPlan={applyAgentPlan} requestBuild={(target) => void runBuild(target)} notify={show} navigateTarget={(target) => { if (target.kind === 'fragment' && target.id) activate(target.id); else if (target.kind === 'chapter' && target.id) { const fragment = project.chapters.find((chapter) => chapter.id === target.id)?.fragments[0]; if (fragment) activate(fragment.id); } else if (target.kind === 'character') navigatePage('characters'); else if (target.kind === 'asset') navigatePage('assets'); else if (target.kind === 'variable') navigatePage('map'); else show('该差异项没有可打开的编辑位置'); }} />,
   };
   const openAssetSection = (section: string, target: Page = 'assets') => { setAssetSection(section); navigatePage(target); setAssetMenuOpen(false); };
   const openAudioSection = (category: AudioCategory) => { setAudioCategory(category); navigatePage('audio'); setAssetMenuOpen(false); };

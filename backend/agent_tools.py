@@ -56,6 +56,10 @@ class AgentToolRegistry:
             AgentTool("propose_add_blocks", "提出向已有 Fragment 追加 Block 的结构化修改。修改只会进入待确认差异。", "edit", object_schema({"fragmentId": {"type": "string"}, "blocks": {"type": "array", "items": {"type": "object"}}}, ("fragmentId", "blocks")), self._propose_add_blocks, True),
             AgentTool("propose_create_fragment", "提出创建 Fragment 的结构化修改。修改只会进入待确认差异。", "edit", object_schema({"chapterId": {"type": "string"}, "name": {"type": "string"}, "blocks": {"type": "array", "items": {"type": "object"}}}, ("chapterId", "name", "blocks")), self._propose_create_fragment, True),
             AgentTool("propose_update_project", "提出修改项目名称或作者。修改只会进入待确认差异。", "edit", object_schema({"name": {"type": "string"}, "author": {"type": "string"}}), self._propose_update_project, True),
+            AgentTool("propose_upsert_character", "提出新增角色或更新角色设定，可配置表情对应的素材 ID。", "edit", object_schema({"characterId": {"type": "string"}, "name": {"type": "string"}, "color": {"type": "string"}, "description": {"type": "string"}, "expressions": {"type": "array", "items": {"type": "string"}}, "portraits": {"type": "object", "additionalProperties": {"type": "string"}}, "defaultPosition": {"type": "string", "enum": ["farLeft", "left", "center", "right", "farRight", "custom"]}, "defaultScale": {"type": "number"}}, ("name",)), self._propose_upsert_character, True),
+            AgentTool("propose_update_asset", "提出更新已有素材的名称、打包策略或音频归属；不能创建或读取本地文件。", "edit", object_schema({"assetId": {"type": "string"}, "name": {"type": "string"}, "forceBundle": {"type": "boolean"}, "audioCategory": {"type": "string", "enum": ["bgm", "sfx", "voice"]}, "voiceCharacterId": {"type": "string"}}, ("assetId",)), self._propose_update_asset, True),
+            AgentTool("propose_upsert_variable", "提出新增或更新项目变量及类型、显示名、说明和持久化设置。", "edit", object_schema({"name": {"type": "string"}, "defaultValue": {"oneOf": [{"type": "string"}, {"type": "number"}, {"type": "boolean"}]}, "displayName": {"type": "string"}, "description": {"type": "string"}, "valueType": {"type": "string", "enum": ["boolean", "number", "string"]}, "persistence": {"type": "string", "enum": ["slot", "shared"]}}, ("name", "defaultValue")), self._propose_upsert_variable, True),
+            AgentTool("propose_update_branch", "提出修改已有分支 Block 的标题和选项，每个目标必须是有效 Fragment。", "edit", object_schema({"fragmentId": {"type": "string"}, "blockId": {"type": "string"}, "title": {"type": "string"}, "options": {"type": "array", "items": {"type": "object", "properties": {"text": {"type": "string"}, "target": {"type": "string"}}, "required": ["text", "target"], "additionalProperties": False}}}, ("fragmentId", "blockId", "options")), self._propose_update_branch, True),
             AgentTool("validate_patch", "验证当前待确认修改中的引用和 Block 类型。", "validate", object_schema({}), self._validate_patch, False),
             AgentTool("request_build", "请求在用户单独确认后构建 Web、Windows 或 Ren'Py 测试包。", "build", object_schema({"target": {"type": "string", "enum": ["web", "windows", "renpy"]}}, ("target",)), self._request_build, False),
         ]
@@ -122,6 +126,92 @@ class AgentToolRegistry:
             raise ValueError("至少提供 name 或 author")
         self.proposed_operations.append(operation)
         return {"proposalIndex": len(self.proposed_operations) - 1, "requiresConfirmation": True}
+
+    def _propose_upsert_character(self, args: dict[str, Any]) -> dict[str, Any]:
+        character_id = str(args.get("characterId") or "").strip()
+        if character_id and not any(item.get("id") == character_id for item in self.project.get("characters", [])):
+            raise ValueError(f"角色不存在：{character_id}")
+        name = str(args.get("name") or "").strip()
+        if not name:
+            raise ValueError("角色名称不能为空")
+        if not character_id:
+            character_id = str(next((item.get("id") for item in self.project.get("characters", []) if item.get("name") == name), ""))
+        portraits = args.get("portraits") or {}
+        if not isinstance(portraits, dict):
+            raise ValueError("portraits 必须是表情名到素材 ID 的对象")
+        expressions = args.get("expressions")
+        if expressions is not None and (not isinstance(expressions, list) or any(not isinstance(item, str) or not item.strip() for item in expressions)):
+            raise ValueError("expressions 必须是非空表情名称数组")
+        if any(not isinstance(expression, str) or not expression.strip() or not isinstance(asset_id, str) for expression, asset_id in portraits.items()):
+            raise ValueError("角色立绘引用格式无效")
+        asset_ids = {item.get("id") for item in self.project.get("assets", [])}
+        missing = [asset_id for asset_id in portraits.values() if asset_id not in asset_ids]
+        if missing:
+            raise ValueError(f"角色立绘素材不存在：{missing[0]}")
+        operation = {"type": "upsert_character", "name": name}
+        if character_id:
+            operation["characterId"] = character_id
+        for key in ("color", "description", "expressions", "portraits", "defaultPosition", "defaultScale"):
+            if key in args:
+                operation[key] = args[key]
+        self.proposed_operations.append(operation)
+        return {"proposalIndex": len(self.proposed_operations) - 1, "requiresConfirmation": True, "assetReferenceCount": len(portraits)}
+
+    def _propose_update_asset(self, args: dict[str, Any]) -> dict[str, Any]:
+        asset_id = str(args.get("assetId") or "").strip()
+        asset = next((item for item in self.project.get("assets", []) if item.get("id") == asset_id), None)
+        if not asset:
+            raise ValueError(f"素材不存在：{asset_id}")
+        character_id = str(args.get("voiceCharacterId") or "").strip()
+        if character_id and not any(item.get("id") == character_id for item in self.project.get("characters", [])):
+            raise ValueError(f"语音角色不存在：{character_id}")
+        operation = {"type": "update_asset", "assetId": asset_id}
+        for key in ("name", "forceBundle", "audioCategory", "voiceCharacterId"):
+            if key in args:
+                operation[key] = args[key]
+        if len(operation) == 2:
+            raise ValueError("至少提供一项素材修改")
+        if "name" in operation and not str(operation["name"]).strip():
+            raise ValueError("素材名称不能为空")
+        self.proposed_operations.append(operation)
+        return {"proposalIndex": len(self.proposed_operations) - 1, "requiresConfirmation": True}
+
+    def _propose_upsert_variable(self, args: dict[str, Any]) -> dict[str, Any]:
+        name = str(args.get("name") or "").strip()
+        if not name or not name.replace("_", "a").isalnum() or name[0].isdigit():
+            raise ValueError("变量名只能包含字母、数字、下划线且不能以数字开头")
+        value = args.get("defaultValue")
+        inferred = "boolean" if isinstance(value, bool) else "number" if isinstance(value, (int, float)) else "string"
+        value_type = str(args.get("valueType") or inferred)
+        if value_type != inferred:
+            raise ValueError("变量默认值与 valueType 不一致")
+        operation = {"type": "upsert_variable", "name": name, "defaultValue": value, "valueType": value_type, "persistence": args.get("persistence", "slot")}
+        for key in ("displayName", "description"):
+            if key in args:
+                operation[key] = str(args[key]).strip()
+        self.proposed_operations.append(operation)
+        return {"proposalIndex": len(self.proposed_operations) - 1, "requiresConfirmation": True}
+
+    def _propose_update_branch(self, args: dict[str, Any]) -> dict[str, Any]:
+        fragment_id = str(args.get("fragmentId") or "")
+        block_id = str(args.get("blockId") or "")
+        block = next((item for item in self.project.get("scripts", {}).get(fragment_id, []) if item.get("id") == block_id), None)
+        if not block or block.get("type") != "branch":
+            raise ValueError("指定 Block 不是有效的分支")
+        fragments = {item.get("id") for chapter in self.project.get("chapters", []) for item in chapter.get("fragments", [])}
+        options = args.get("options")
+        if not isinstance(options, list) or not options:
+            raise ValueError("分支至少需要一个选项")
+        clean_options = []
+        for option in options:
+            text = str(option.get("text") or "").strip() if isinstance(option, dict) else ""
+            target = str(option.get("target") or "") if isinstance(option, dict) else ""
+            if not text or target not in fragments:
+                raise ValueError(f"分支选项无效或目标不存在：{target}")
+            clean_options.append({"text": text, "target": target})
+        operation = {"type": "update_branch", "fragmentId": fragment_id, "blockId": block_id, "title": str(args.get("title") or block.get("title") or "").strip(), "options": clean_options}
+        self.proposed_operations.append(operation)
+        return {"proposalIndex": len(self.proposed_operations) - 1, "optionCount": len(clean_options), "requiresConfirmation": True}
 
     def _validate_patch(self, _: dict[str, Any]) -> dict[str, Any]:
         return {"valid": True, "operationCount": len(self.proposed_operations), "diagnostics": self._collect_diagnostics()[:30]}

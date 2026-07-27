@@ -15,6 +15,7 @@ def sample_project() -> dict:
         "characters": [{"id": "hero", "name": "林澄"}],
         "assets": [{"id": "lake", "kind": "scene", "name": "湖畔", "path": "lake.png"}],
         "variables": {"affection": 0},
+        "variableDefinitions": {"affection": {"type": "number", "scope": "project", "persistence": "slot"}},
     }
 
 
@@ -44,6 +45,26 @@ class AgentToolRegistryTests(unittest.TestCase):
         self.assertFalse(invalid["ok"])
         self.assertTrue(build["requiresConfirmation"])
         self.assertEqual(registry.requested_builds[0]["target"], "web")
+
+    def test_character_asset_variable_and_branch_tools_create_valid_proposals(self) -> None:
+        project = sample_project()
+        project["scripts"]["opening"].append({"id": "choice", "type": "branch", "title": "选择", "options": [{"text": "继续", "target": "opening"}]})
+        original = copy.deepcopy(project)
+        registry = AgentToolRegistry(project)
+        character = registry.invoke("propose_upsert_character", {"characterId": "hero", "name": "林澄", "expressions": ["默认"], "portraits": {"默认": "lake"}})
+        asset = registry.invoke("propose_update_asset", {"assetId": "lake", "name": "湖畔背景", "forceBundle": True})
+        variable = registry.invoke("propose_upsert_variable", {"name": "route_unlocked", "defaultValue": False, "valueType": "boolean", "displayName": "路线解锁", "persistence": "shared"})
+        branch = registry.invoke("propose_update_branch", {"fragmentId": "opening", "blockId": "choice", "title": "新的选择", "options": [{"text": "留下", "target": "opening"}]})
+        self.assertTrue(all(result["ok"] and result["requiresConfirmation"] for result in (character, asset, variable, branch)))
+        self.assertEqual([operation["type"] for operation in registry.proposed_operations], ["upsert_character", "update_asset", "upsert_variable", "update_branch"])
+        self.assertEqual(project, original)
+
+    def test_extended_edit_tools_reject_missing_references_and_type_mismatch(self) -> None:
+        registry = AgentToolRegistry(sample_project())
+        self.assertFalse(registry.invoke("propose_upsert_character", {"name": "新角色", "portraits": {"默认": "missing"}})["ok"])
+        self.assertFalse(registry.invoke("propose_update_asset", {"assetId": "missing", "forceBundle": True})["ok"])
+        self.assertFalse(registry.invoke("propose_upsert_variable", {"name": "score", "defaultValue": "zero", "valueType": "number"})["ok"])
+        self.assertFalse(registry.invoke("propose_update_branch", {"fragmentId": "opening", "blockId": "b1", "options": [{"text": "继续", "target": "opening"}]})["ok"])
 
 
 if __name__ == "__main__":

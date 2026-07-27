@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Activity, ArrowRight, Bot, Box, Check, Clock3, Database, GitCompare, GitFork, KeyRound, ListTodo, LoaderCircle, Pause, Play, RefreshCw, RotateCcw, Settings2, Sparkles, Star, Wrench, XCircle } from 'lucide-react';
 import { cancelAiTask, compareAiTaskResults, discoverAiModels, getAiSettings, getAiTask, listAiTasks, pauseAiTask, restartAiTaskFromCheckpoint, resumeAiTask, saveAiSettings, startAiTask } from '../api';
-import type { AgentComparisonTarget, AgentPlan, AgentResultComparison, AgentResultRef, AgentTask, AgentTaskEvent, AgentTaskStatus, AiModelDiscovery, AiSettingsInput, Project } from '../types';
+import type { AgentComparisonTarget, AgentOperation, AgentPlan, AgentResultComparison, AgentResultRef, AgentTask, AgentTaskEvent, AgentTaskStatus, AiModelDiscovery, AiSettingsInput, Project } from '../types';
 import { groupModels, MODEL_CATEGORY_LABEL, recommendedModelId } from './aiModelCatalog';
 
 interface AiAgentPanelProps {
@@ -13,7 +13,7 @@ interface AiAgentPanelProps {
   navigateTarget?: (target: AgentComparisonTarget) => void;
 }
 
-const operationName = { add_blocks: '添加 Block', create_fragment: '创建片段', update_project: '更新项目信息' };
+const operationName: Record<AgentOperation['type'], string> = { add_blocks: '添加 Block', create_fragment: '创建片段', update_project: '更新项目信息', upsert_character: '配置角色', update_asset: '更新素材引用', upsert_variable: '配置变量', update_branch: '修改分支' };
 const taskStatusName: Record<AgentTaskStatus, string> = { queued: '排队中', running: '执行中', pausing: '正在暂停', paused: '已暂停', cancelling: '正在取消', completed: '已完成', failed: '失败', cancelled: '已取消', interrupted: '已中断' };
 const pausableTaskStatuses: AgentTaskStatus[] = ['queued', 'running', 'pausing'];
 const resumableTaskStatuses: AgentTaskStatus[] = ['paused', 'interrupted'];
@@ -35,6 +35,15 @@ function eventIcon(event: AgentTaskEvent) {
 }
 
 function refValue(reference: AgentResultRef) { return `${reference.taskId}:${reference.checkpointId ?? 'result'}`; }
+function operationDetail(operation: AgentOperation) {
+  if (operation.type === 'add_blocks') return `${operation.fragmentId} · ${operation.blocks.length} Blocks`;
+  if (operation.type === 'create_fragment') return `${operation.name} · ${operation.blocks.length} Blocks`;
+  if (operation.type === 'update_project') return [operation.name, operation.author].filter(Boolean).join(' / ');
+  if (operation.type === 'upsert_character') return `${operation.name} · ${operation.expressions?.length ?? 0} 个表情 · ${Object.keys(operation.portraits ?? {}).length} 个立绘引用`;
+  if (operation.type === 'update_asset') return `${operation.assetId}${operation.forceBundle !== undefined ? ` · ${operation.forceBundle ? '强制打包' : '按引用打包'}` : ''}`;
+  if (operation.type === 'upsert_variable') return `${operation.name} · ${operation.valueType} · ${String(operation.defaultValue)}`;
+  return `${operation.fragmentId} · ${operation.options.length} 个选项`;
+}
 
 export function AiAgentPanel({ project, applyPlan, requestBuild, notify, navigateTarget }: AiAgentPanelProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -248,7 +257,7 @@ export function AiAgentPanel({ project, applyPlan, requestBuild, notify, navigat
         {comparison && <section className="agent-comparison-result"><header><GitCompare /><div><strong>{comparison.left.label} → {comparison.right.label}</strong><span>{comparison.categories.reduce((sum, category) => sum + category.items.length, 0)} 项结构化差异</span></div></header>{comparison.categories.length === 0 ? <div className="agent-no-changes">两个结果没有结构化差异</div> : comparison.categories.map((category) => <div className="agent-diff-category" key={category.name}><strong>{category.name}<span>{category.items.length}</span></strong>{category.items.map((item, index) => <article className={`diff-${item.status}`} key={`${category.name}-${index}`}><i>{item.status === 'added' ? '+' : item.status === 'removed' ? '−' : '~'}</i><span>{item.summary}</span>{item.target && navigateTarget && <button type="button" className="icon-button" title="在编辑器中打开" onClick={() => navigateTarget(item.target!)}><ArrowRight /></button>}</article>)}</div>)}</section>}
         {!plan && !activeTask && <div className="agent-empty"><Bot /><strong>等待制作任务</strong><span>Agent 的修改不会自动写入项目。</span></div>}{!plan && activeTask && !activeTask.events?.length && <div className="agent-empty compact"><LoaderCircle className="spin" /><strong>正在准备任务</strong><span>状态更新会在这里实时显示。</span></div>}{plan && <><div className="plan-summary"><strong>{plan.summary}</strong>{plan.model && <span>实际模型：{plan.model}{plan.failoverHistory?.length ? ` · 已自动切换 ${plan.failoverHistory.length} 次` : ''}</span>}{plan.assumptions.map((item) => <span key={item}>{item}</span>)}</div>
         {!!plan.toolCalls?.length && <div className="agent-tool-trace"><header><Wrench /><strong>工具执行记录</strong><small>{plan.toolCalls.length} 次</small></header>{plan.toolCalls.map((call, index) => <div className={call.ok ? '' : 'failed'} key={`${call.name}-${index}`}><span>{call.name}</span><em>{call.permission}</em><small>{call.ok ? call.summary ?? '完成' : call.summary ?? '失败'}</small></div>)}</div>}
-        <div className="operation-list">{plan.operations.map((operation, index) => <article key={index}><span>{index + 1}</span><div><strong>{operationName[operation.type]}</strong><small>{operation.type === 'add_blocks' ? `${operation.fragmentId} · ${operation.blocks.length} Blocks` : operation.type === 'create_fragment' ? `${operation.name} · ${operation.blocks.length} Blocks` : [operation.name, operation.author].filter(Boolean).join(' / ')}</small></div></article>)}</div>
+        <div className="operation-list">{plan.operations.map((operation, index) => <article key={index}><span>{index + 1}</span><div><strong>{operationName[operation.type]}</strong><small>{operationDetail(operation)}</small></div></article>)}</div>
         {!!plan.requestedBuilds?.length && <div className="agent-build-requests">{plan.requestedBuilds.map((request) => <article key={request.target}><Box /><div><strong>{request.target === 'web' ? 'Web 游戏' : request.target === 'windows' ? 'Windows 游戏' : "Ren'Py"} 构建请求</strong><small>{request.blocked ? '诊断存在错误，暂时无法构建' : plan.operations.length ? '请先确认并应用项目修改' : '需要单独确认，不会随项目修改自动执行'}</small></div><button className="button ghost" disabled={request.blocked || plan.operations.length > 0} onClick={() => requestBuild(request.target)}>确认构建</button></article>)}</div>}
         {plan.operations.length > 0 ? <button className="button primary apply-plan" onClick={() => { applyPlan(plan); setPlan((current) => current ? { ...current, operations: [] } : null); }}><Check />确认并应用 {plan.operations.length} 项修改</button> : <div className="agent-no-changes">Agent 未请求项目写入</div>}</>}</section>
     </div>

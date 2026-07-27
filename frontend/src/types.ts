@@ -428,7 +428,11 @@ export interface AiModelDiscovery {
 export type AgentOperation =
   | { type: 'add_blocks'; fragmentId: string; blocks: StoryBlockInput[] }
   | { type: 'create_fragment'; chapterId: string; name: string; blocks: StoryBlockInput[] }
-  | { type: 'update_project'; name?: string; author?: string };
+  | { type: 'update_project'; name?: string; author?: string }
+  | { type: 'upsert_character'; characterId?: string; name: string; color?: string; description?: string; expressions?: string[]; portraits?: Record<string, string>; defaultPosition?: CharacterPosition; defaultScale?: number }
+  | { type: 'update_asset'; assetId: string; name?: string; forceBundle?: boolean; audioCategory?: AudioCategory; voiceCharacterId?: string }
+  | { type: 'upsert_variable'; name: string; defaultValue: string | number | boolean; valueType: VariableType; displayName?: string; description?: string; persistence: VariablePersistence }
+  | { type: 'update_branch'; fragmentId: string; blockId: string; title: string; options: BranchOption[] };
 
 export interface AgentPlan {
   summary: string;
@@ -500,7 +504,7 @@ export interface AgentTask {
 }
 
 export interface AgentResultRef { taskId: string; checkpointId?: string | null }
-export interface AgentComparisonTarget { kind: 'fragment' | 'chapter' | 'character' | 'asset' | 'project'; id?: string | null }
+export interface AgentComparisonTarget { kind: 'fragment' | 'chapter' | 'character' | 'asset' | 'variable' | 'project'; id?: string | null }
 export interface AgentComparisonItem { status: 'added' | 'removed' | 'modified'; summary: string; target?: AgentComparisonTarget | null; value: Record<string, unknown> }
 export interface AgentComparisonCategory { name: string; items: AgentComparisonItem[] }
 export interface AgentResultComparison {

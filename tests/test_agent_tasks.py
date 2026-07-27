@@ -244,6 +244,10 @@ class AgentTaskManagerTests(unittest.TestCase):
             "operations": [
                 {"type": "add_blocks", "fragmentId": "opening", "blocks": [{"type": "narration", "text": "新文本"}]},
                 {"type": "create_fragment", "chapterId": "start", "name": "分支", "blocks": []},
+                {"type": "upsert_character", "characterId": "hero", "name": "林澄", "portraits": {"默认": "portrait"}},
+                {"type": "update_asset", "assetId": "portrait", "forceBundle": True},
+                {"type": "upsert_variable", "name": "affection", "defaultValue": 1, "valueType": "number", "persistence": "slot"},
+                {"type": "update_branch", "fragmentId": "opening", "blockId": "choice", "title": "选择", "options": [{"text": "继续", "target": "opening"}]},
             ],
             "builds": [{"target": "web", "blocked": False, "requiresConfirmation": True}],
             "diagnostics": [{"name": "get_diagnostics", "permission": "validate", "ok": True, "summary": "clean"}],
@@ -253,6 +257,9 @@ class AgentTaskManagerTests(unittest.TestCase):
         self.assertEqual(by_name["剧本 Block"][0]["status"], "modified")
         self.assertEqual(by_name["剧本 Block"][0]["target"], {"kind": "fragment", "id": "opening"})
         self.assertEqual(by_name["章节与 Fragment"][0]["status"], "added")
+        self.assertEqual(by_name["角色配置"][0]["target"], {"kind": "character", "id": "hero"})
+        self.assertEqual(by_name["素材引用"][0]["target"], {"kind": "asset", "id": "portrait"})
+        self.assertEqual({item["target"]["kind"] for item in by_name["变量与分支"]}, {"variable", "fragment"})
         self.assertEqual(by_name["诊断结果"][0]["status"], "modified")
         self.assertEqual(by_name["构建请求"][0]["status"], "added")
 

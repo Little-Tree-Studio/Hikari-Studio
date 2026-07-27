@@ -592,11 +592,23 @@ class AiService:
             raise ValueError("Agent 没有返回有效的结构化计划") from error
         if not isinstance(plan, dict) or not isinstance(plan.get("summary"), str) or not isinstance(plan.get("operations"), list):
             raise ValueError("Agent 计划缺少 summary 或 operations")
-        allowed_operations = {"add_blocks", "create_fragment", "update_project"}
+        allowed_operations = {"add_blocks", "create_fragment", "update_project", "upsert_character", "update_asset", "upsert_variable", "update_branch"}
+        required_fields = {
+            "add_blocks": ("fragmentId", "blocks"), "create_fragment": ("chapterId", "name", "blocks"),
+            "update_project": (), "upsert_character": ("name",), "update_asset": ("assetId",),
+            "upsert_variable": ("name", "defaultValue", "valueType", "persistence"),
+            "update_branch": ("fragmentId", "blockId", "title", "options"),
+        }
         allowed_blocks = {"scene", "sound", "characterShow", "characterHide", "camera", "narration", "dialogue", "branch", "setVariable", "condition", "jump", "call", "return"}
         for operation in plan["operations"]:
             if not isinstance(operation, dict) or operation.get("type") not in allowed_operations:
                 raise ValueError("Agent 计划包含不受支持的操作")
+            if any(field not in operation for field in required_fields[operation["type"]]):
+                raise ValueError("Agent 计划操作缺少必要字段")
+            if operation["type"] == "update_branch" and (not isinstance(operation.get("options"), list) or not operation["options"] or any(not isinstance(option, dict) or not isinstance(option.get("text"), str) or not isinstance(option.get("target"), str) for option in operation["options"])):
+                raise ValueError("Agent 分支修改格式无效")
+            if operation["type"] == "upsert_character" and "portraits" in operation and not isinstance(operation["portraits"], dict):
+                raise ValueError("Agent 角色立绘引用格式无效")
             for block in operation.get("blocks", []):
                 if not isinstance(block, dict) or block.get("type") not in allowed_blocks:
                     raise ValueError("Agent 计划包含不受支持的 Block")

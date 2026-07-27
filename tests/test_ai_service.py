@@ -120,6 +120,16 @@ class AiServiceTests(unittest.TestCase):
         self.assertEqual(plan["summary"], "补写剧情")
         self.assertEqual(plan["operations"][0]["blocks"][0]["type"], "narration")
 
+    def test_plan_schema_accepts_extended_confirmable_operations(self) -> None:
+        content = json.dumps({"summary": "扩展项目", "operations": [
+            {"type": "upsert_character", "name": "林澄", "portraits": {"默认": "portrait"}},
+            {"type": "update_asset", "assetId": "portrait", "forceBundle": True},
+            {"type": "upsert_variable", "name": "affection", "defaultValue": 0, "valueType": "number", "persistence": "slot"},
+            {"type": "update_branch", "fragmentId": "opening", "blockId": "choice", "title": "选择", "options": [{"text": "留下", "target": "opening"}]},
+        ]}, ensure_ascii=False)
+        plan = self.service._parse_plan(content)
+        self.assertEqual([operation["type"] for operation in plan["operations"]], ["upsert_character", "update_asset", "upsert_variable", "update_branch"])
+
     def test_agent_runs_tools_and_returns_confirmable_patch_and_build(self) -> None:
         class FakeProvider:
             def __init__(self) -> None:
