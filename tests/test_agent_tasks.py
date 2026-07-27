@@ -29,6 +29,16 @@ class FastAi:
         return {"summary": instruction, "assumptions": [], "operations": [], "toolCalls": [], "requestedBuilds": [], "usage": {}}
 
 
+class PartialRetryAi:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict]] = []
+
+    def run(self, instruction, project, checkpoint=None, progress=None, cancellation=None, execution_checkpoint=None, save_execution_checkpoint=None):
+        self.calls.append((instruction, project))
+        operations = [{"type": "upsert_character", "name": "林澄"}, {"type": "update_branch", "fragmentId": "opening", "blockId": "choice", "title": "选择", "options": [{"text": "留下", "target": "opening"}]}] if len(self.calls) == 1 else []
+        return {"summary": "partial retry", "assumptions": [], "operations": operations, "toolCalls": [], "requestedBuilds": [], "usage": {}}
+
+
 class ControlledAi:
     def __init__(self, steps: int = 80) -> None:
         self.steps = steps
@@ -262,6 +272,31 @@ class AgentTaskManagerTests(unittest.TestCase):
         self.assertEqual({item["target"]["kind"] for item in by_name["变量与分支"]}, {"variable", "fragment"})
         self.assertEqual(by_name["诊断结果"][0]["status"], "modified")
         self.assertEqual(by_name["构建请求"][0]["status"], "added")
+
+    def test_rejected_operations_create_child_task_with_current_project(self) -> None:
+        ai = PartialRetryAi()
+        manager = self.manager(ai)
+        source = manager.start_task("配置角色和分支", sample_project(), self.root)
+        source = wait_status(manager, self.root, source["id"], {"completed"})
+        current_project = sample_project()
+        current_project["meta"]["name"] = "已应用角色修改"
+        child = manager.retry_remaining_operations(source["id"], [1], current_project, self.root)
+        self.assertEqual(child["parentTaskId"], source["id"])
+        self.assertEqual(child["remainingOperationIndexes"], [1])
+        self.assertNotIn("executionInstruction", child)
+        self.assertTrue(child["instruction"].startswith("重新执行 1 项未接受修改"))
+        completed = wait_status(manager, self.root, child["id"], {"completed"})
+        self.assertEqual(completed["status"], "completed")
+        self.assertIn('"type":"update_branch"', ai.calls[1][0])
+        self.assertNotIn('"type":"upsert_character"', ai.calls[1][0])
+        self.assertEqual(ai.calls[1][1]["meta"]["name"], "已应用角色修改")
+
+    def test_rejected_operation_retry_rejects_invalid_indexes(self) -> None:
+        manager = self.manager(PartialRetryAi())
+        source = manager.start_task("配置角色和分支", sample_project(), self.root)
+        source = wait_status(manager, self.root, source["id"], {"completed"})
+        with self.assertRaisesRegex(ValueError, "索引无效"):
+            manager.retry_remaining_operations(source["id"], [8], sample_project(), self.root)
 
 
 if __name__ == "__main__":

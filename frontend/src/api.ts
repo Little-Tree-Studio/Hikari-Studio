@@ -234,6 +234,12 @@ export async function restartAiTaskFromCheckpoint(taskId: string, checkpointId: 
   return withTimeout(api.restart_ai_task_from_checkpoint(taskId, checkpointId, project), 10000);
 }
 
+export async function retryAiTaskOperations(taskId: string, operationIndexes: number[], project: Project): Promise<AgentTask> {
+  const api = await waitForDesktopApi();
+  if (!api) throw new Error('Agent 局部重试仅在桌面应用中可用');
+  return withTimeout(api.retry_ai_task_operations(taskId, operationIndexes, project), 10000);
+}
+
 export async function compareAiTaskResults(left: AgentResultRef, right: AgentResultRef): Promise<AgentResultComparison> {
   const api = await waitForDesktopApi();
   if (!api) throw new Error('Agent 结果比较仅在桌面应用中可用');

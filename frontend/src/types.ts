@@ -317,6 +317,7 @@ export interface DesktopApi {
   discover_ai_models(settings: AiSettingsInput): Promise<AiModelDiscovery>;
   run_ai_agent(instruction: string, project: Project): Promise<AgentPlan>;
   start_ai_task(instruction: string, project: Project): Promise<AgentTask>;
+  retry_ai_task_operations(taskId: string, operationIndexes: number[], project: Project): Promise<AgentTask>;
   list_ai_tasks(): Promise<AgentTask[]>;
   get_ai_task(taskId: string, afterSeq?: number): Promise<AgentTask>;
   pause_ai_task(taskId: string): Promise<AgentTask>;
@@ -482,6 +483,7 @@ export interface AgentCheckpoint {
 export interface AgentTask {
   id: string;
   instruction: string;
+  displayInstruction?: string;
   status: AgentTaskStatus;
   projectId: string;
   projectName: string;
@@ -496,6 +498,7 @@ export interface AgentTask {
   checkpoints?: AgentCheckpoint[];
   parentTaskId?: string | null;
   sourceCheckpointId?: string | null;
+  remainingOperationIndexes?: number[];
   lastEventSeq: number;
   events?: AgentTaskEvent[];
   plan?: AgentPlan | null;

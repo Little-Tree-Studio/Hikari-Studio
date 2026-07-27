@@ -888,7 +888,7 @@ export default function App() {
     });
     if (invalid) {
       show('Agent 计划包含无效的项目引用，已拒绝应用', 'error');
-      return;
+      return false;
     }
     commit((current) => {
       const next = clone(current);
@@ -933,6 +933,7 @@ export default function App() {
       return next;
     }, `AI Agent：${plan.summary}`);
     show(`已应用 ${plan.operations.length} 项 Agent 修改`);
+    return true;
   };
 
   const activeName = project.chapters.flatMap((chapter) => chapter.fragments).find((fragment) => fragment.id === project.activeFragmentId)?.name ?? '片段';

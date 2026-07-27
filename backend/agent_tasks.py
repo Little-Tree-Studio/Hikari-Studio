@@ -51,6 +51,9 @@ class AgentTaskManager:
         self._active_task_id: str | None = None
 
     def start_task(self, instruction: str, project: dict[str, Any], project_root: Path) -> dict[str, Any]:
+        return self._enqueue_new_task(instruction, project, project_root)
+
+    def _enqueue_new_task(self, instruction: str, project: dict[str, Any], project_root: Path, parent_task_id: str | None = None, remaining_operation_indexes: list[int] | None = None, display_instruction: str | None = None) -> dict[str, Any]:
         instruction = instruction.strip()
         if not instruction:
             raise ValueError("请先描述希望 Agent 完成的任务")
@@ -58,7 +61,9 @@ class AgentTaskManager:
         now = self._now()
         task = {
             "id": task_id,
-            "instruction": instruction,
+            "instruction": display_instruction or instruction,
+            "displayInstruction": display_instruction or instruction,
+            "executionInstruction": instruction if display_instruction else None,
             "status": "queued",
             "projectId": str(project.get("meta", {}).get("id", "")),
             "projectName": str(project.get("meta", {}).get("name", "")),
@@ -72,8 +77,9 @@ class AgentTaskManager:
             "currentCheckpointId": None,
             "checkpoints": [],
             "executionCheckpoint": None,
-            "parentTaskId": None,
+            "parentTaskId": parent_task_id,
             "sourceCheckpointId": None,
+            "remainingOperationIndexes": remaining_operation_indexes or [],
             "events": [],
             "lastEventSeq": 0,
             "plan": None,
@@ -84,10 +90,35 @@ class AgentTaskManager:
             self._projects[task_id] = deepcopy(project)
             self._roots[task_id] = project_root.resolve()
             self._controls[task_id] = TaskControl()
+            if parent_task_id:
+                self._append_event_locked(task_id, "remaining_retry", "正在重新规划未接受的修改", {"sourceTaskId": parent_task_id, "operationIndexes": remaining_operation_indexes or []})
             self._append_event_locked(task_id, "queued", "任务已加入队列", {})
             self._ensure_worker_locked()
             self._queue.put(task_id)
             return self._public_task(task)
+
+    def retry_remaining_operations(self, task_id: str, operation_indexes: list[int], project: dict[str, Any], project_root: Path) -> dict[str, Any]:
+        root = project_root.resolve()
+        with self._lock:
+            source = deepcopy(self._find_task_locked(task_id, root))
+        plan = source.get("plan") or {}
+        operations = plan.get("operations") or []
+        if not isinstance(operation_indexes, list) or not operation_indexes:
+            raise ValueError("请选择需要重新执行的 Agent 操作")
+        if any(not isinstance(index, int) or isinstance(index, bool) for index in operation_indexes):
+            raise ValueError("未接受操作索引无效")
+        indexes = sorted(set(operation_indexes))
+        if any(index < 0 or index >= len(operations) for index in indexes):
+            raise ValueError("未接受操作索引无效")
+        remaining = [operations[index] for index in indexes]
+        payload = json.dumps(remaining, ensure_ascii=False, separators=(",", ":"))
+        instruction = (
+            f"继续完成原任务：{source.get('instruction', '')}\n"
+            "用户已应用其它修改。请基于当前项目重新检查并仅重新规划以下未接受操作；不要重复已经接受的内容。\n"
+            f"未接受操作：{payload[:20000]}"
+        )
+        display = f"重新执行 {len(indexes)} 项未接受修改 · {source.get('displayInstruction') or source.get('instruction', '')}"
+        return self._enqueue_new_task(instruction, project, root, source["id"], indexes, display)
 
     def restart_from_checkpoint(self, task_id: str, checkpoint_id: str, project: dict[str, Any], project_root: Path) -> dict[str, Any]:
         root = project_root.resolve()
@@ -124,6 +155,7 @@ class AgentTaskManager:
                 "executionCheckpoint": deepcopy(state),
                 "parentTaskId": source["id"],
                 "sourceCheckpointId": checkpoint_id,
+                "remainingOperationIndexes": [],
                 "events": [],
                 "lastEventSeq": 0,
                 "plan": None,
@@ -268,7 +300,7 @@ class AgentTaskManager:
                 project = deepcopy(self._projects[task_id])
             try:
                 plan = self.ai_service.run(
-                    task["instruction"],
+                    task.get("executionInstruction") or task["instruction"],
                     project,
                     checkpoint=lambda: self._checkpoint(task_id),
                     progress=lambda kind, message, data=None: self._progress(task_id, kind, message, data or {}),
@@ -396,7 +428,7 @@ class AgentTaskManager:
             plan = task.get("plan") or {}
             snapshot = {"operations": deepcopy(plan.get("operations") or []), "builds": deepcopy(plan.get("requestedBuilds") or []), "diagnostics": self._diagnostic_trace(plan.get("toolCalls") or [])}
             label = "最终结果" if task.get("plan") else "当前任务"
-        return {**snapshot, "ref": {"taskId": task_id, "checkpointId": checkpoint_id, "label": label, "instruction": task.get("instruction", "")}}
+        return {**snapshot, "ref": {"taskId": task_id, "checkpointId": checkpoint_id, "label": label, "instruction": task.get("displayInstruction") or task.get("instruction", "")}}
 
     @staticmethod
     def _checkpoint_snapshot(checkpoint: dict[str, Any]) -> dict[str, Any]:
@@ -486,6 +518,7 @@ class AgentTaskManager:
         result = deepcopy(task)
         result["hasPlan"] = bool(result.get("plan"))
         result.pop("executionCheckpoint", None)
+        result.pop("executionInstruction", None)
         result["checkpoints"] = [{key: item.get(key) for key in ("id", "createdAt", "attempt", "step", "round", "model", "toolNames", "inherited")} for item in result.get("checkpoints", [])]
         if not include_events:
             result.pop("events", None)
@@ -498,6 +531,9 @@ class AgentTaskManager:
         task.setdefault("currentCheckpointId", None)
         task.setdefault("parentTaskId", None)
         task.setdefault("sourceCheckpointId", None)
+        task.setdefault("remainingOperationIndexes", [])
+        task.setdefault("displayInstruction", task.get("instruction", ""))
+        task.setdefault("executionInstruction", None)
         if not task["checkpoints"] and isinstance(task.get("executionCheckpoint"), dict):
             checkpoint = task["executionCheckpoint"]
             checkpoint_id = uuid.uuid5(uuid.NAMESPACE_URL, f"hikari:{task.get('id')}:{checkpoint.get('nextRound', 0)}").hex

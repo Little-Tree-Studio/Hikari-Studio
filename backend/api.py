@@ -235,6 +235,9 @@ class DesktopApi:
     def start_ai_task(self, instruction: str, project: dict[str, Any]) -> dict[str, Any]:
         return self._agent_tasks.start_task(instruction, project, self._store.project_root)
 
+    def retry_ai_task_operations(self, task_id: str, operation_indexes: list[int], project: dict[str, Any]) -> dict[str, Any]:
+        return self._agent_tasks.retry_remaining_operations(task_id, operation_indexes, project, self._store.project_root)
+
     def list_ai_tasks(self) -> list[dict[str, Any]]:
         return self._agent_tasks.list_tasks(self._store.project_root)
 

@@ -64,7 +64,7 @@ class DesktopApiTests(unittest.TestCase):
             root = Path(directory)
             api = DesktopApi(ProjectStore(root / "data"), root)
             project = api.load_project()
-            plan = {"summary": "完成", "assumptions": [], "operations": [], "toolCalls": [], "requestedBuilds": [], "usage": {}}
+            plan = {"summary": "完成", "assumptions": [], "operations": [{"type": "update_project", "name": "新名称"}], "toolCalls": [], "requestedBuilds": [], "usage": {}}
             with patch.object(api._agent_tasks.ai_service, "run", return_value=plan):
                 started = api.start_ai_task("检查当前项目", project)
                 deadline = time.time() + 2
@@ -76,6 +76,9 @@ class DesktopApiTests(unittest.TestCase):
                 payload = json.loads(json.dumps(task, ensure_ascii=False))
                 self.assertEqual(payload["plan"]["summary"], "完成")
                 self.assertEqual(api.list_ai_tasks()[0]["id"], started["id"])
+                retry = api.retry_ai_task_operations(started["id"], [0], project)
+                self.assertEqual(retry["parentTaskId"], started["id"])
+                self.assertEqual(retry["remainingOperationIndexes"], [0])
                 session = api._store.project_root / ".hikari" / "agent" / "sessions" / f"{started['id']}.json"
                 self.assertTrue(session.exists())
             api.stop_background_services()

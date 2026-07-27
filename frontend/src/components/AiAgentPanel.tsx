@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Activity, ArrowRight, Bot, Box, Check, Clock3, Database, GitCompare, GitFork, KeyRound, ListTodo, LoaderCircle, Pause, Play, RefreshCw, RotateCcw, Settings2, Sparkles, Star, Wrench, XCircle } from 'lucide-react';
-import { cancelAiTask, compareAiTaskResults, discoverAiModels, getAiSettings, getAiTask, listAiTasks, pauseAiTask, restartAiTaskFromCheckpoint, resumeAiTask, saveAiSettings, startAiTask } from '../api';
+import { cancelAiTask, compareAiTaskResults, discoverAiModels, getAiSettings, getAiTask, listAiTasks, pauseAiTask, restartAiTaskFromCheckpoint, resumeAiTask, retryAiTaskOperations, saveAiSettings, startAiTask } from '../api';
 import type { AgentComparisonTarget, AgentOperation, AgentPlan, AgentResultComparison, AgentResultRef, AgentTask, AgentTaskEvent, AgentTaskStatus, AiModelDiscovery, AiSettingsInput, Project } from '../types';
 import { groupModels, MODEL_CATEGORY_LABEL, recommendedModelId } from './aiModelCatalog';
 
 interface AiAgentPanelProps {
   project: Project;
-  applyPlan: (plan: AgentPlan) => void;
+  applyPlan: (plan: AgentPlan) => boolean;
   requestBuild: (target: 'web' | 'windows' | 'renpy') => void;
   notify: (message: string, tone?: 'error' | 'success') => void;
   navigateTarget?: (target: AgentComparisonTarget) => void;
@@ -51,6 +51,8 @@ export function AiAgentPanel({ project, applyPlan, requestBuild, notify, navigat
   const [hasKey, setHasKey] = useState(false);
   const [instruction, setInstruction] = useState('为当前片段补写一段有悬念的角色对话，并给玩家三个会影响后续剧情的选择。');
   const [plan, setPlan] = useState<AgentPlan | null>(null);
+  const [selectedOperationIndexes, setSelectedOperationIndexes] = useState<Set<number>>(new Set());
+  const [appliedOperationIndexes, setAppliedOperationIndexes] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [discovering, setDiscovering] = useState(false);
@@ -64,6 +66,7 @@ export function AiAgentPanel({ project, applyPlan, requestBuild, notify, navigat
   const [comparison, setComparison] = useState<AgentResultComparison | null>(null);
   const [comparing, setComparing] = useState(false);
   const eventCursor = useRef(0);
+  const planOwnerRef = useRef<string | null>(null);
 
   useEffect(() => {
     void getAiSettings().then((value) => {
@@ -100,7 +103,14 @@ export function AiAgentPanel({ project, applyPlan, requestBuild, notify, navigat
             const events = [...previous, ...incoming].filter((event, index, all) => all.findIndex((candidate) => candidate.seq === event.seq) === index);
             return { ...snapshot, events };
           });
-          if (snapshot.plan) setPlan(snapshot.plan);
+          if (snapshot.plan) {
+            if (planOwnerRef.current !== snapshot.id) {
+              planOwnerRef.current = snapshot.id;
+              setSelectedOperationIndexes(new Set(snapshot.plan.operations.map((_, index) => index)));
+              setAppliedOperationIndexes(new Set());
+            }
+            setPlan(snapshot.plan);
+          }
         }
       } catch {
         // Polling failures are transient; explicit actions still surface errors.
@@ -132,6 +142,7 @@ export function AiAgentPanel({ project, applyPlan, requestBuild, notify, navigat
     try {
       setSubmitting(true);
       setPlan(null);
+      planOwnerRef.current = null;
       const task = await startAiTask(instruction, project);
       eventCursor.current = 0;
       setActiveTaskId(task.id);
@@ -149,6 +160,7 @@ export function AiAgentPanel({ project, applyPlan, requestBuild, notify, navigat
     setActiveTaskId(task.id);
     setActiveTask(task);
     setPlan(null);
+    planOwnerRef.current = null;
   };
 
   const controlTask = async (action: 'pause' | 'resume' | 'cancel') => {
@@ -172,6 +184,7 @@ export function AiAgentPanel({ project, applyPlan, requestBuild, notify, navigat
       setActiveTaskId(next.id);
       setActiveTask(next);
       setPlan(null);
+      planOwnerRef.current = null;
       notify('已从所选检查点创建派生任务');
     } catch (error) {
       notify(String(error), 'error');
@@ -200,6 +213,8 @@ export function AiAgentPanel({ project, applyPlan, requestBuild, notify, navigat
 
   const streamedText = (activeTask?.events ?? []).filter((event) => event.type === 'text_delta' && (typeof event.data.attempt !== 'number' || event.data.attempt === activeTask?.attempt)).map((event) => typeof event.data.delta === 'string' ? event.data.delta : '').join('');
   const historyEvents = (activeTask?.events ?? []).filter((event) => event.type !== 'text_delta');
+  const pendingOperationIndexes = plan ? plan.operations.map((_, index) => index).filter((index) => !appliedOperationIndexes.has(index)) : [];
+  const selectedPendingIndexes = pendingOperationIndexes.filter((index) => selectedOperationIndexes.has(index));
   const comparisonOptions = useMemo(() => tasks.flatMap((task) => [
     ...(task.plan || task.hasPlan ? [{ value: refValue({ taskId: task.id }), label: `${task.instruction} · 最终结果`, ref: { taskId: task.id } as AgentResultRef }] : []),
     ...(task.checkpoints ?? []).map((checkpoint) => ({ value: refValue({ taskId: task.id, checkpointId: checkpoint.id }), label: `${task.instruction} · 检查点 ${checkpoint.step}`, ref: { taskId: task.id, checkpointId: checkpoint.id } as AgentResultRef })),
@@ -230,6 +245,33 @@ export function AiAgentPanel({ project, applyPlan, requestBuild, notify, navigat
     finally { setComparing(false); }
   };
 
+  const toggleOperation = (index: number) => setSelectedOperationIndexes((current) => { const next = new Set(current); if (next.has(index)) next.delete(index); else next.add(index); return next; });
+  const applySelectedOperations = () => {
+    if (!plan || !selectedPendingIndexes.length) return;
+    const acceptedPlan = { ...plan, operations: selectedPendingIndexes.map((index) => plan.operations[index]) };
+    if (!applyPlan(acceptedPlan)) return;
+    setAppliedOperationIndexes((current) => new Set([...current, ...selectedPendingIndexes]));
+    setSelectedOperationIndexes(new Set());
+    notify(`已接受并应用 ${selectedPendingIndexes.length} 项修改`, 'success');
+  };
+  const retryRemainingOperations = async () => {
+    if (!activeTask || !pendingOperationIndexes.length) return;
+    try {
+      setSubmitting(true);
+      const next = await retryAiTaskOperations(activeTask.id, pendingOperationIndexes, project);
+      eventCursor.current = 0;
+      planOwnerRef.current = null;
+      setTasks((current) => [next, ...current.filter((task) => task.id !== next.id)]);
+      setActiveTaskId(next.id);
+      setActiveTask(next);
+      setPlan(null);
+      setSelectedOperationIndexes(new Set());
+      setAppliedOperationIndexes(new Set());
+      notify(`已创建派生任务，重新规划 ${pendingOperationIndexes.length} 项未接受修改`);
+    } catch (error) { notify(String(error), 'error'); }
+    finally { setSubmitting(false); }
+  };
+
   return <div className="agent-page">
     <header className="agent-header"><div><span className="agent-kicker"><Sparkles /> AI 制作 Agent</span><h1>把制作目标交给 Agent</h1><p>Agent 会读取当前项目并生成可审查的结构化改动，确认后才写入项目。</p></div><button className="button ghost" onClick={() => setSettingsOpen(!settingsOpen)}><Settings2 />服务配置</button></header>
     {settingsOpen && <section className="agent-settings">
@@ -246,7 +288,7 @@ export function AiAgentPanel({ project, applyPlan, requestBuild, notify, navigat
       <div className="agent-settings-actions full"><span>{settings.fallbackModels?.length ? `已准备 ${settings.fallbackModels.length} 个自动回退模型` : '发现和选择不会自动保存'}</span><button className="button primary" disabled={busy || !settings.model.trim()} onClick={() => void save()}><Check />保存配置</button></div>
     </section>}
     <div className="agent-workspace"><section className="agent-compose"><div className="agent-section-title"><Bot /><div><strong>制作需求</strong><span>当前上下文：{project.meta.name} / {project.activeFragmentId}</span></div></div><textarea value={instruction} onChange={(event) => setInstruction(event.target.value)} /><div className="agent-actions"><span>{hasKey ? '服务已配置' : '需要先填写 API Key'}</span><button className="button primary" disabled={submitting || !instruction.trim() || !hasKey} onClick={() => void run()}>{submitting ? <LoaderCircle className="spin" /> : <Play />}{submitting ? '正在加入队列' : '生成制作计划'}</button></div>
-        <section className="agent-task-queue"><header><div><GitFork /><strong>任务分支树</strong></div><span>{tasks.length} 项</span></header>{tasks.length === 0 ? <div className="agent-task-list-empty">当前项目还没有 Agent 任务</div> : <div className="agent-task-list branch-tree">{taskRows.map(({ task, depth }) => <button type="button" className={`agent-task-item status-${task.status} ${activeTaskId === task.id ? 'active' : ''} ${task.parentTaskId ? 'derived' : ''}`} style={{ '--branch-offset': `${depth * 20}px` } as CSSProperties} key={task.id} onClick={() => selectTask(task)}><span className="branch-rail">{task.parentTaskId ? <GitFork /> : <ListTodo />}</span><span className="agent-task-status">{taskStatusName[task.status]}</span><strong>{task.instruction}</strong><small><Clock3 />{taskTime(task.updatedAt)} · 第 {task.attempt} 次执行{task.sourceCheckpointId ? ' · 派生重跑' : ''}</small></button>)}</div>}</section>
+        <section className="agent-task-queue"><header><div><GitFork /><strong>任务分支树</strong></div><span>{tasks.length} 项</span></header>{tasks.length === 0 ? <div className="agent-task-list-empty">当前项目还没有 Agent 任务</div> : <div className="agent-task-list branch-tree">{taskRows.map(({ task, depth }) => <button type="button" className={`agent-task-item status-${task.status} ${activeTaskId === task.id ? 'active' : ''} ${task.parentTaskId ? 'derived' : ''}`} style={{ '--branch-offset': `${depth * 20}px` } as CSSProperties} key={task.id} onClick={() => selectTask(task)}><span className="branch-rail">{task.parentTaskId ? <GitFork /> : <ListTodo />}</span><span className="agent-task-status">{taskStatusName[task.status]}</span><strong>{task.displayInstruction ?? task.instruction}</strong><small><Clock3 />{taskTime(task.updatedAt)} · 第 {task.attempt} 次执行{task.remainingOperationIndexes?.length ? ` · 局部重试 ${task.remainingOperationIndexes.length} 项` : task.sourceCheckpointId ? ' · 检查点重跑' : ''}</small></button>)}</div>}</section>
         <section className="agent-compare"><header><div><GitCompare /><strong>结构化结果比较</strong></div><span>任务或检查点</span></header><div className="agent-compare-pickers"><select value={compareLeft} onChange={(event) => { setCompareLeft(event.target.value); setComparison(null); }}>{comparisonOptions.map((item) => <option key={`left-${item.value}`} value={item.value}>{item.label}</option>)}</select><ArrowRight /><select value={compareRight} onChange={(event) => { setCompareRight(event.target.value); setComparison(null); }}>{comparisonOptions.map((item) => <option key={`right-${item.value}`} value={item.value}>{item.label}</option>)}</select></div><button className="button ghost" disabled={comparing || !compareLeft || !compareRight || compareLeft === compareRight} onClick={() => void compareResults()}>{comparing ? <LoaderCircle className="spin" /> : <GitCompare />}比较结果</button></section>
       </section>
       <section className="agent-result"><div className="agent-section-title"><Sparkles /><div><strong>{activeTask ? '任务执行与变更预览' : '变更预览'}</strong><span>{activeTask ? `${taskStatusName[activeTask.status]} · 第 ${activeTask.attempt} 次执行${activeTask.checkpointStep ? ` · 检查点 ${activeTask.checkpointStep}` : ''}` : '应用后可使用撤销恢复'}</span></div></div>
@@ -257,9 +299,10 @@ export function AiAgentPanel({ project, applyPlan, requestBuild, notify, navigat
         {comparison && <section className="agent-comparison-result"><header><GitCompare /><div><strong>{comparison.left.label} → {comparison.right.label}</strong><span>{comparison.categories.reduce((sum, category) => sum + category.items.length, 0)} 项结构化差异</span></div></header>{comparison.categories.length === 0 ? <div className="agent-no-changes">两个结果没有结构化差异</div> : comparison.categories.map((category) => <div className="agent-diff-category" key={category.name}><strong>{category.name}<span>{category.items.length}</span></strong>{category.items.map((item, index) => <article className={`diff-${item.status}`} key={`${category.name}-${index}`}><i>{item.status === 'added' ? '+' : item.status === 'removed' ? '−' : '~'}</i><span>{item.summary}</span>{item.target && navigateTarget && <button type="button" className="icon-button" title="在编辑器中打开" onClick={() => navigateTarget(item.target!)}><ArrowRight /></button>}</article>)}</div>)}</section>}
         {!plan && !activeTask && <div className="agent-empty"><Bot /><strong>等待制作任务</strong><span>Agent 的修改不会自动写入项目。</span></div>}{!plan && activeTask && !activeTask.events?.length && <div className="agent-empty compact"><LoaderCircle className="spin" /><strong>正在准备任务</strong><span>状态更新会在这里实时显示。</span></div>}{plan && <><div className="plan-summary"><strong>{plan.summary}</strong>{plan.model && <span>实际模型：{plan.model}{plan.failoverHistory?.length ? ` · 已自动切换 ${plan.failoverHistory.length} 次` : ''}</span>}{plan.assumptions.map((item) => <span key={item}>{item}</span>)}</div>
         {!!plan.toolCalls?.length && <div className="agent-tool-trace"><header><Wrench /><strong>工具执行记录</strong><small>{plan.toolCalls.length} 次</small></header>{plan.toolCalls.map((call, index) => <div className={call.ok ? '' : 'failed'} key={`${call.name}-${index}`}><span>{call.name}</span><em>{call.permission}</em><small>{call.ok ? call.summary ?? '完成' : call.summary ?? '失败'}</small></div>)}</div>}
-        <div className="operation-list">{plan.operations.map((operation, index) => <article key={index}><span>{index + 1}</span><div><strong>{operationName[operation.type]}</strong><small>{operationDetail(operation)}</small></div></article>)}</div>
-        {!!plan.requestedBuilds?.length && <div className="agent-build-requests">{plan.requestedBuilds.map((request) => <article key={request.target}><Box /><div><strong>{request.target === 'web' ? 'Web 游戏' : request.target === 'windows' ? 'Windows 游戏' : "Ren'Py"} 构建请求</strong><small>{request.blocked ? '诊断存在错误，暂时无法构建' : plan.operations.length ? '请先确认并应用项目修改' : '需要单独确认，不会随项目修改自动执行'}</small></div><button className="button ghost" disabled={request.blocked || plan.operations.length > 0} onClick={() => requestBuild(request.target)}>确认构建</button></article>)}</div>}
-        {plan.operations.length > 0 ? <button className="button primary apply-plan" onClick={() => { applyPlan(plan); setPlan((current) => current ? { ...current, operations: [] } : null); }}><Check />确认并应用 {plan.operations.length} 项修改</button> : <div className="agent-no-changes">Agent 未请求项目写入</div>}</>}</section>
+        {!!plan.operations.length && <div className="operation-selection-toolbar"><label><input type="checkbox" checked={pendingOperationIndexes.length > 0 && selectedPendingIndexes.length === pendingOperationIndexes.length} onChange={(event) => setSelectedOperationIndexes(event.target.checked ? new Set(pendingOperationIndexes) : new Set())} />选择全部未处理项</label><span>已接受 {appliedOperationIndexes.size} · 未接受 {pendingOperationIndexes.length - selectedPendingIndexes.length}</span></div>}
+        <div className="operation-list selectable">{plan.operations.map((operation, index) => { const applied = appliedOperationIndexes.has(index); const selected = selectedOperationIndexes.has(index); return <article className={`${applied ? 'applied' : ''} ${!applied && !selected ? 'excluded' : ''}`} key={index}><label className="operation-check"><input type="checkbox" disabled={applied} checked={applied || selected} onChange={() => toggleOperation(index)} /><span>{index + 1}</span></label><div><strong>{operationName[operation.type]}</strong><small>{operationDetail(operation)}</small></div><em>{applied ? '已接受' : selected ? '待应用' : '未接受'}</em></article>; })}</div>
+        {!!plan.requestedBuilds?.length && <div className="agent-build-requests">{plan.requestedBuilds.map((request) => <article key={request.target}><Box /><div><strong>{request.target === 'web' ? 'Web 游戏' : request.target === 'windows' ? 'Windows 游戏' : "Ren'Py"} 构建请求</strong><small>{request.blocked ? '诊断存在错误，暂时无法构建' : pendingOperationIndexes.length ? '请先处理项目修改' : '需要单独确认，不会随项目修改自动执行'}</small></div><button className="button ghost" disabled={request.blocked || pendingOperationIndexes.length > 0} onClick={() => requestBuild(request.target)}>确认构建</button></article>)}</div>}
+        {plan.operations.length > 0 ? pendingOperationIndexes.length > 0 ? <div className="agent-patch-actions"><button className="button ghost" disabled={submitting || !activeTask} onClick={() => void retryRemainingOperations()}><RotateCcw />重新执行未接受项（{pendingOperationIndexes.length}）</button><button className="button primary" disabled={!selectedPendingIndexes.length} onClick={applySelectedOperations}><Check />应用选中的 {selectedPendingIndexes.length} 项</button></div> : <div className="agent-no-changes">全部修改已接受并应用</div> : <div className="agent-no-changes">Agent 未请求项目写入</div>}</>}</section>
     </div>
   </div>;
 }
