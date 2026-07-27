@@ -3,7 +3,8 @@ import type { CSSProperties } from 'react';
 import { Activity, AlertTriangle, ArrowRight, BookOpenCheck, Bot, Box, Check, Clock3, Database, GitCompare, GitFork, KeyRound, ListTodo, LoaderCircle, Pause, Play, RefreshCw, RotateCcw, Settings2, Sparkles, Star, Wrench, XCircle } from 'lucide-react';
 import { cancelAiTask, compareAiTaskResults, discoverAiModels, getAiSettings, getAiTask, listAiTasks, pauseAiTask, rebaseAiPatch, restartAiTaskFromCheckpoint, resumeAiTask, retryAiTaskOperations, saveAiSettings, startAiTask } from '../api';
 import type { AgentComparisonTarget, AgentContext, AgentOperation, AgentPatchApplyResult, AgentPatchPreconditionResult, AgentPlan, AgentResultComparison, AgentResultRef, AgentTask, AgentTaskEvent, AgentTaskStatus, AiModelDiscovery, AiSettingsInput, Project } from '../types';
-import { simulateProjectBranches } from '../engine-core/simulation';
+import { branchSimulationRunner } from '../engine-core/simulationRunner';
+import type { BranchSimulationProgress } from '../engine-core/types';
 import { diagnoseProject } from '../engine-core/diagnostics';
 import { groupModels, MODEL_CATEGORY_LABEL, recommendedModelId } from './aiModelCatalog';
 import { ProductionMemoryDialog } from './ProductionMemoryDialog';
@@ -80,8 +81,11 @@ export function AiAgentPanel({ project, applyPlan, requestBuild, notify, navigat
   const [comparison, setComparison] = useState<AgentResultComparison | null>(null);
   const [comparing, setComparing] = useState(false);
   const [validationDelta, setValidationDelta] = useState<{ beforeErrors: number; afterErrors: number; beforeWarnings: number; afterWarnings: number; beforeCoverage: number; afterCoverage: number; beforeProblems: number; afterProblems: number } | null>(null);
+  const [preflightProgress, setPreflightProgress] = useState<BranchSimulationProgress | null>(null);
+  const [preflightRunning, setPreflightRunning] = useState(false);
   const eventCursor = useRef(0);
   const planOwnerRef = useRef<string | null>(null);
+  const simulationAbort = useRef<AbortController | null>(null);
 
   useEffect(() => {
     void getAiSettings().then((value) => {
@@ -89,6 +93,8 @@ export function AiAgentPanel({ project, applyPlan, requestBuild, notify, navigat
       setHasKey(value.hasKey);
     }).catch(() => undefined);
   }, []);
+
+  useEffect(() => () => simulationAbort.current?.abort(), []);
 
   useEffect(() => {
     let stopped = false;
@@ -155,11 +161,16 @@ export function AiAgentPanel({ project, applyPlan, requestBuild, notify, navigat
   };
 
   const run = async () => {
+    const controller = new AbortController();
+    simulationAbort.current = controller;
     try {
       setSubmitting(true);
+      setPreflightRunning(true);
+      setPreflightProgress({ phase: 'preparing', completedPaths: 0, queuedPaths: 0, scenarioCount: 0, stepsExecuted: 0, percent: 0 });
       setPlan(null);
       planOwnerRef.current = null;
-      const simulation = simulateProjectBranches(project);
+      const { result: simulation } = await branchSimulationRunner.run(project, {}, { signal: controller.signal, onProgress: setPreflightProgress });
+      setPreflightRunning(false);
       const context: AgentContext = {
         mode,
         activeFragmentId: project.activeFragmentId,
@@ -181,8 +192,11 @@ export function AiAgentPanel({ project, applyPlan, requestBuild, notify, navigat
       setActiveTask(task);
       setTasks((current) => [task, ...current.filter((item) => item.id !== task.id)]);
     } catch (error) {
-      notify(String(error), 'error');
+      if (error instanceof DOMException && error.name === 'AbortError') notify('已取消 Agent 启动前的全分支模拟');
+      else notify(String(error), 'error');
     } finally {
+      if (simulationAbort.current === controller) simulationAbort.current = null;
+      setPreflightRunning(false);
       setSubmitting(false);
     }
   };
@@ -283,7 +297,7 @@ export function AiAgentPanel({ project, applyPlan, requestBuild, notify, navigat
     try {
       setCheckingPatch(true);
       const beforeDiagnostics = diagnoseProject(project);
-      const beforeSimulation = simulateProjectBranches(project);
+      const beforeSimulation = (await branchSimulationRunner.run(project)).result;
       const result = await applyPlan(activeTask.id, selectedPendingIndexes, selectedPendingIndexes.map((index) => plan.operations[index]));
       setPatchCheck(result);
       if (!result.ok) { notify(`检测到 ${result.conflicts.length} 项过期冲突，Patch 尚未应用`, 'error'); return; }
@@ -292,7 +306,7 @@ export function AiAgentPanel({ project, applyPlan, requestBuild, notify, navigat
       setPatchCheck(null);
       if (result.project) {
         const afterDiagnostics = diagnoseProject(result.project);
-        const afterSimulation = simulateProjectBranches(result.project);
+        const afterSimulation = (await branchSimulationRunner.run(result.project)).result;
         setValidationDelta({ beforeErrors: beforeDiagnostics.filter((item) => item.severity === 'error').length, afterErrors: afterDiagnostics.filter((item) => item.severity === 'error').length, beforeWarnings: beforeDiagnostics.filter((item) => item.severity === 'warning').length, afterWarnings: afterDiagnostics.filter((item) => item.severity === 'warning').length, beforeCoverage: beforeSimulation.coverage.branchOptions.percent, afterCoverage: afterSimulation.coverage.branchOptions.percent, beforeProblems: beforeSimulation.summary.error + beforeSimulation.summary.loop + beforeSimulation.summary['dead-end'] + beforeSimulation.summary.truncated, afterProblems: afterSimulation.summary.error + afterSimulation.summary.loop + afterSimulation.summary['dead-end'] + afterSimulation.summary.truncated });
       }
       notify(`已原子应用并保存 ${result.appliedOperationIndexes.length} 项修改`, 'success');
@@ -347,7 +361,7 @@ export function AiAgentPanel({ project, applyPlan, requestBuild, notify, navigat
       <div className="field"><label>Temperature</label><input type="number" min="0" max="1.5" step="0.1" value={settings.temperature} onChange={(event) => setSettings({ ...settings, temperature: Number(event.target.value) })} /></div>
       <div className="agent-settings-actions full"><span>{settings.fallbackModels?.length ? `已准备 ${settings.fallbackModels.length} 个自动回退模型` : '发现和选择不会自动保存'}</span><button className="button primary" disabled={busy || !settings.model.trim()} onClick={() => void save()}><Check />保存配置</button></div>
     </section>}
-    <div className="agent-workspace"><section className="agent-compose"><div className="agent-section-title"><Bot /><div><strong>制作需求</strong><span>当前上下文：{project.meta.name} / {project.activeFragmentId}</span></div></div><div className="agent-mode-switch"><button className={mode === 'assistant' ? 'active' : ''} onClick={() => setMode('assistant')}>制作助手</button><button className={mode === 'director' ? 'active' : ''} onClick={() => { setMode('director'); if (!instruction.trim() || instruction.startsWith('为当前片段补写')) setInstruction('为当前选中的剧情设计完整演出：安排场景、角色出入场与表情、镜头、BGM、音效和转场。只使用项目已有素材，并保持对白与分支逻辑不变。'); }}>导演模式</button></div><textarea value={instruction} onChange={(event) => setInstruction(event.target.value)} /><div className="agent-actions"><span>{mode === 'director' ? '导演模式会先读取制作记忆并验证全分支' : hasKey ? '服务已配置' : '需要先填写 API Key'}</span><button className="button primary" disabled={submitting || !instruction.trim() || !hasKey} onClick={() => void run()}>{submitting ? <LoaderCircle className="spin" /> : <Play />}{submitting ? '正在加入队列' : mode === 'director' ? '生成演出方案' : '生成制作计划'}</button></div>
+    <div className="agent-workspace"><section className="agent-compose"><div className="agent-section-title"><Bot /><div><strong>制作需求</strong><span>当前上下文：{project.meta.name} / {project.activeFragmentId}</span></div></div><div className="agent-mode-switch"><button className={mode === 'assistant' ? 'active' : ''} onClick={() => setMode('assistant')}>制作助手</button><button className={mode === 'director' ? 'active' : ''} onClick={() => { setMode('director'); if (!instruction.trim() || instruction.startsWith('为当前片段补写')) setInstruction('为当前选中的剧情设计完整演出：安排场景、角色出入场与表情、镜头、BGM、音效和转场。只使用项目已有素材，并保持对白与分支逻辑不变。'); }}>导演模式</button></div><textarea value={instruction} onChange={(event) => setInstruction(event.target.value)} />{preflightRunning && preflightProgress && <div className="agent-simulation-progress"><div><span>正在准备全分支上下文</span><strong>{preflightProgress.percent}%</strong></div><i><b style={{ width: `${preflightProgress.percent}%` }} /></i><small>{preflightProgress.completedPaths} 条完成 · {preflightProgress.queuedPaths} 条排队 · {preflightProgress.stepsExecuted.toLocaleString()} OP</small></div>}<div className="agent-actions"><span>{mode === 'director' ? '导演模式会先读取制作记忆并验证全分支' : hasKey ? '服务已配置' : '需要先填写 API Key'}</span>{preflightRunning ? <button className="button danger" onClick={() => simulationAbort.current?.abort()}><XCircle />取消模拟</button> : <button className="button primary" disabled={submitting || !instruction.trim() || !hasKey} onClick={() => void run()}>{submitting ? <LoaderCircle className="spin" /> : <Play />}{submitting ? '正在加入队列' : mode === 'director' ? '生成演出方案' : '生成制作计划'}</button>}</div>
         <section className="agent-task-queue"><header><div><GitFork /><strong>任务分支树</strong></div><span>{tasks.length} 项</span></header>{tasks.length === 0 ? <div className="agent-task-list-empty">当前项目还没有 Agent 任务</div> : <div className="agent-task-list branch-tree">{taskRows.map(({ task, depth }) => <button type="button" className={`agent-task-item status-${task.status} ${activeTaskId === task.id ? 'active' : ''} ${task.parentTaskId ? 'derived' : ''}`} style={{ '--branch-offset': `${depth * 20}px` } as CSSProperties} key={task.id} onClick={() => selectTask(task)}><span className="branch-rail">{task.parentTaskId ? <GitFork /> : <ListTodo />}</span><span className="agent-task-status">{taskStatusName[task.status]}</span><strong>{task.displayInstruction ?? task.instruction}</strong><small><Clock3 />{taskTime(task.updatedAt)} · 第 {task.attempt} 次执行{task.remainingOperationIndexes?.length ? ` · 局部重试 ${task.remainingOperationIndexes.length} 项` : task.sourceCheckpointId ? ' · 检查点重跑' : ''}</small></button>)}</div>}</section>
         <section className="agent-compare"><header><div><GitCompare /><strong>结构化结果比较</strong></div><span>任务或检查点</span></header><div className="agent-compare-pickers"><select value={compareLeft} onChange={(event) => { setCompareLeft(event.target.value); setComparison(null); }}>{comparisonOptions.map((item) => <option key={`left-${item.value}`} value={item.value}>{item.label}</option>)}</select><ArrowRight /><select value={compareRight} onChange={(event) => { setCompareRight(event.target.value); setComparison(null); }}>{comparisonOptions.map((item) => <option key={`right-${item.value}`} value={item.value}>{item.label}</option>)}</select></div><button className="button ghost" disabled={comparing || !compareLeft || !compareRight || compareLeft === compareRight} onClick={() => void compareResults()}>{comparing ? <LoaderCircle className="spin" /> : <GitCompare />}比较结果</button></section>
       </section>

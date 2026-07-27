@@ -21,5 +21,8 @@ test('production memory, director mode, and branch simulation stay inside the ap
   await page.getByRole('button', { name: '全分支' }).click();
   await page.getByRole('button', { name: '运行模拟' }).click();
   await expect(page.locator('.branch-simulation-stats')).toBeVisible();
+  await expect(page.locator('.simulation-progress')).toBeVisible();
+  await page.getByRole('button', { name: '运行模拟' }).click();
+  await expect(page.getByText('路径 · 缓存')).toBeVisible();
   expect(nativeDialogs).toEqual([]);
 });

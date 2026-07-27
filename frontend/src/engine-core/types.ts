@@ -153,6 +153,15 @@ export interface BranchSimulationRequest {
   maxVariableScenarios?: number;
 }
 
+export interface BranchSimulationProgress {
+  phase: 'preparing' | 'traversing' | 'finalizing' | 'completed';
+  completedPaths: number;
+  queuedPaths: number;
+  scenarioCount: number;
+  stepsExecuted: number;
+  percent: number;
+}
+
 export type BranchSimulationPathStatus = 'completed' | 'dead-end' | 'loop' | 'error' | 'truncated';
 
 export interface BranchSimulationLocation {
@@ -189,4 +198,10 @@ export interface BranchSimulationResult {
   summary: Record<BranchSimulationPathStatus, number>;
   variableConflicts: Array<{ name: string; observedTypes: string[]; locations: BranchSimulationLocation[] }>;
   paths: BranchSimulationPath[];
+}
+
+export interface BranchSimulationExecution {
+  result: BranchSimulationResult;
+  cacheHit: boolean;
+  projectFingerprint: string;
 }

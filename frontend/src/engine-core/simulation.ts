@@ -1,11 +1,12 @@
 import type { Project, StoryBlock } from '../types';
 import { advanceEngine, chooseBranch, createEngineState, currentBlock } from './runtime';
-import type { BranchSimulationLocation, BranchSimulationPath, BranchSimulationRequest, BranchSimulationResult, EngineState } from './types';
+import type { BranchSimulationLocation, BranchSimulationPath, BranchSimulationProgress, BranchSimulationRequest, BranchSimulationResult, EngineState } from './types';
 
 const DEFAULT_MAX_PATHS = 500;
 const DEFAULT_MAX_STEPS = 10_000;
 const DEFAULT_MAX_SCENARIOS = 64;
 type Scalar = string | number | boolean;
+export interface BranchSimulationControl { onProgress?: (progress: BranchSimulationProgress) => void; progressInterval?: number }
 
 const percent = (visited: number, total: number) => total ? Math.round((visited / total) * 100) : 100;
 const valueKey = (value: Scalar) => `${typeof value}:${String(value)}`;
@@ -89,7 +90,7 @@ function resultPath(index: number, path: PendingPath, status: BranchSimulationPa
   };
 }
 
-export function simulateProjectBranches(project: Project, request: BranchSimulationRequest = {}): BranchSimulationResult {
+export function simulateProjectBranches(project: Project, request: BranchSimulationRequest = {}, control: BranchSimulationControl = {}): BranchSimulationResult {
   const maxPaths = Math.max(1, request.maxPaths ?? DEFAULT_MAX_PATHS);
   const maxStepsPerPath = Math.max(1, request.maxStepsPerPath ?? DEFAULT_MAX_STEPS);
   const maxVariableScenarios = Math.max(1, request.maxVariableScenarios ?? DEFAULT_MAX_SCENARIOS);
@@ -98,6 +99,20 @@ export function simulateProjectBranches(project: Project, request: BranchSimulat
     ?? project.chapters[0]?.fragments[0]?.id
     ?? project.activeFragmentId;
   const generated = variableScenarios(project, request.variableOverrides ?? {}, maxVariableScenarios);
+  let workSteps = 0;
+  let lastPercent = 0;
+  let lastReportedStep = -1;
+  const report = (phase: BranchSimulationProgress['phase'], completedPaths: number, queuedPaths: number, force = false) => {
+    if (!control.onProgress) return;
+    const interval = Math.max(1, control.progressInterval ?? 128);
+    if (!force && workSteps - lastReportedStep < interval) return;
+    const estimated = completedPaths + queuedPaths ? Math.round((completedPaths / (completedPaths + queuedPaths)) * 95) : phase === 'completed' ? 100 : 95;
+    const nextPercent = phase === 'completed' ? 100 : Math.max(lastPercent, Math.min(95, estimated));
+    lastPercent = nextPercent;
+    lastReportedStep = workSteps;
+    control.onProgress({ phase, completedPaths, queuedPaths, scenarioCount: generated.scenarios.length, stepsExecuted: workSteps, percent: nextPercent });
+  };
+  report('preparing', 0, generated.scenarios.length, true);
   const queue: PendingPath[] = generated.scenarios.map((variables) => {
     const state = createEngineState({ ...project, variables }, entryFragmentId);
     const path = { state, initialVariables: variables, choices: [], seen: new Set<string>(), visitedFragments: new Set([entryFragmentId]), visitedBlocks: new Set<string>(), visitedOptions: new Set<string>(), steps: state.stepsExecuted };
@@ -129,6 +144,8 @@ export function simulateProjectBranches(project: Project, request: BranchSimulat
     recordTrace(path);
     let settled = false;
     while (!settled) {
+      workSteps += 1;
+      report('traversing', paths.length, queue.length);
       const block = currentBlock(project, path.state);
       path.visitedFragments.add(path.state.fragmentId);
       if (block) path.visitedBlocks.add(block.id);
@@ -181,6 +198,7 @@ export function simulateProjectBranches(project: Project, request: BranchSimulat
     }
   }
   if (queue.length) pathLimitReached = true;
+  report('finalizing', paths.length, queue.length, true);
   const observedTypes = new Map<string, { types: Set<string>; locations: BranchSimulationLocation[] }>();
   for (const path of paths) for (const [name, value] of Object.entries(path.finalVariables)) {
     const item = observedTypes.get(name) ?? { types: new Set<string>(), locations: [] };
@@ -190,7 +208,7 @@ export function simulateProjectBranches(project: Project, request: BranchSimulat
   }
   const summary: BranchSimulationResult['summary'] = { completed: 0, 'dead-end': 0, loop: 0, error: 0, truncated: 0 };
   paths.forEach((path) => { summary[path.status] += 1; });
-  return {
+  const result: BranchSimulationResult = {
     entryFragmentId,
     generatedAt: new Date().toISOString(),
     limits: { maxPaths, maxStepsPerPath, maxVariableScenarios },
@@ -207,4 +225,6 @@ export function simulateProjectBranches(project: Project, request: BranchSimulat
     variableConflicts: [...observedTypes].filter(([, item]) => item.types.size > 1).map(([name, item]) => ({ name, observedTypes: [...item.types], locations: item.locations })),
     paths,
   };
+  report('completed', paths.length, 0, true);
+  return result;
 }
