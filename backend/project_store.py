@@ -220,11 +220,12 @@ class ProjectStore:
             raise ValueError("Command history exceeds the 128 MiB limit")
         with self._lock:
             self._write_json_atomic(self.command_history_path, value)
-        return {"ok": True, "path": str(self.command_history_path), "bytes": self.command_history_path.stat().st_size, "commandCount": len(value["undo"]) + len(value["redo"])}
+        archive_count = len(value.get("archive", [])) if value["version"] == 2 else 0
+        return {"ok": True, "path": str(self.command_history_path), "bytes": self.command_history_path.stat().st_size, "commandCount": len(value["undo"]) + len(value["redo"]) + archive_count}
 
     @staticmethod
     def _validate_command_history(history: Any) -> dict[str, Any]:
-        if not isinstance(history, dict) or history.get("version") != 1:
+        if not isinstance(history, dict) or history.get("version") not in {1, 2}:
             raise ValueError("Unsupported Command history version")
         if not isinstance(history.get("projectId"), str) or not history["projectId"]:
             raise ValueError("Command history project id is invalid")
@@ -232,13 +233,44 @@ class ProjectStore:
         redo = history.get("redo")
         if not isinstance(undo, list) or not isinstance(redo, list) or len(undo) > 50 or len(redo) > 50:
             raise ValueError("Command history stack is invalid")
-        for command in [*undo, *redo]:
+        archive = history.get("archive", []) if history["version"] == 2 else []
+        if not isinstance(archive, list) or len(archive) > 50:
+            raise ValueError("Command history archive is invalid")
+        commands = [*undo, *redo, *archive]
+        command_ids: set[str] = set()
+        for command in commands:
             if not isinstance(command, dict) or not isinstance(command.get("id"), str) or not command["id"].startswith("command-"):
                 raise ValueError("Command history entry is invalid")
+            if command["id"] in command_ids:
+                raise ValueError("Command history contains duplicate entries")
+            command_ids.add(command["id"])
             if not isinstance(command.get("label"), str) or not isinstance(command.get("timestamp"), (int, float)):
                 raise ValueError("Command history metadata is invalid")
-            if not isinstance(command.get("before"), dict) or not isinstance(command.get("after"), dict):
-                raise ValueError("Command history snapshot is invalid")
+            if command.get("name") is not None and (not isinstance(command["name"], str) or len(command["name"]) > 120):
+                raise ValueError("Command history name is invalid")
+            if command.get("pinned") is not None and not isinstance(command["pinned"], bool):
+                raise ValueError("Command history pin state is invalid")
+        if history["version"] == 1:
+            for command in commands:
+                if not isinstance(command.get("before"), dict) or not isinstance(command.get("after"), dict):
+                    raise ValueError("Command history snapshot is invalid")
+        else:
+            snapshots = history.get("snapshots")
+            if not isinstance(snapshots, list) or len(snapshots) > 400:
+                raise ValueError("Command history snapshots are invalid")
+            snapshot_ids: set[str] = set()
+            for snapshot in snapshots:
+                snapshot_id = snapshot.get("id") if isinstance(snapshot, dict) else None
+                if not isinstance(snapshot_id, str) or not snapshot_id.startswith("snapshot-") or snapshot_id in snapshot_ids:
+                    raise ValueError("Command history snapshot id is invalid")
+                has_value = isinstance(snapshot.get("value"), dict)
+                has_delta = isinstance(snapshot.get("baseId"), str) and isinstance(snapshot.get("delta"), dict) and snapshot["baseId"] in snapshot_ids
+                if has_value == has_delta:
+                    raise ValueError("Command history snapshot payload is invalid")
+                snapshot_ids.add(snapshot_id)
+            for command in commands:
+                if command.get("beforeRef") not in snapshot_ids or command.get("afterRef") not in snapshot_ids:
+                    raise ValueError("Command history snapshot reference is invalid")
         return deepcopy(history)
 
     def list_recent_projects(self) -> list[dict[str, Any]]:

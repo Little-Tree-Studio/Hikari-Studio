@@ -1,9 +1,12 @@
 import { useCallback, useRef, useState } from 'react';
+import { decodeSnapshotValues, encodeSnapshotValues, type EncodedSnapshot } from '../core/historyCodec';
 
 export interface CommandEntry {
   id: string;
   label: string;
   timestamp: number;
+  name?: string;
+  pinned?: boolean;
   categories?: CommandCategory[];
 }
 
@@ -12,23 +15,42 @@ export interface CommandCategory { id: string; label: string; count: number; ite
 export interface CommandSnapshotEntry<T> extends CommandEntry {
   before: T;
   after: T;
-  state: 'applied' | 'undone';
+  state: 'applied' | 'undone' | 'archived';
 }
 
-export interface PersistedCommandHistory<T> {
+interface PersistedCommandHistoryV1<T> {
   version: 1;
   projectId: string;
-  undo: PersistedCommand<T>[];
-  redo: PersistedCommand<T>[];
+  undo: PersistedCommandV1<T>[];
+  redo: PersistedCommandV1<T>[];
 }
 
-interface PersistedCommand<T> extends CommandEntry {
+interface PersistedCommandV1<T> extends CommandEntry {
   before: T;
   after: T;
   options?: { categories?: CommandCategory[]; persistence?: { strategy: string; payload: unknown } };
   undoneCategoryIds?: string[];
   categoryEffect?: { sourceCommandId: string; categoryId: string };
 }
+
+interface PersistedCommandV2 extends CommandEntry {
+  beforeRef: string;
+  afterRef: string;
+  options?: { categories?: CommandCategory[]; persistence?: { strategy: string; payload: unknown } };
+  undoneCategoryIds?: string[];
+  categoryEffect?: { sourceCommandId: string; categoryId: string };
+}
+
+interface PersistedCommandHistoryV2<T> {
+  version: 2;
+  projectId: string;
+  snapshots: EncodedSnapshot<T>[];
+  undo: PersistedCommandV2[];
+  redo: PersistedCommandV2[];
+  archive?: PersistedCommandV2[];
+}
+
+export type PersistedCommandHistory<T> = PersistedCommandHistoryV1<T> | PersistedCommandHistoryV2<T>;
 
 export type CommandRestoreStrategies<T> = Record<string, (current: T, before: T, after: T, categoryId: string, payload: unknown) => T>;
 
@@ -55,9 +77,11 @@ export function useCommandHistory<T>(initial: T, limit = 50) {
   const valueRef = useRef(value);
   const undoRef = useRef<SnapshotCommand<T>[]>([]);
   const redoRef = useRef<SnapshotCommand<T>[]>([]);
+  const archiveRef = useRef<SnapshotCommand<T>[]>([]);
   const revisionRef = useRef(0);
   const [revision, setRevision] = useState(0);
   const [savedRevision, setSavedRevision] = useState(0);
+  const [historyVersion, setHistoryVersion] = useState(0);
   const [counts, setCounts] = useState({ undo: 0, redo: 0 });
 
   const publish = useCallback((next: T) => {
@@ -76,42 +100,66 @@ export function useCommandHistory<T>(initial: T, limit = 50) {
     if (saved) setSavedRevision(next);
   }, []);
 
+  const touchHistory = useCallback(() => setHistoryVersion((value) => value + 1), []);
+  const trimHistory = useCallback((commands: SnapshotCommand<T>[]) => {
+    if (commands.length <= limit) return commands;
+    const keep = new Set(commands.filter((command) => command.pinned).map((command) => command.id));
+    for (let index = commands.length - 1; index >= 0 && keep.size < limit; index -= 1) keep.add(commands[index].id);
+    return commands.filter((command) => keep.has(command.id));
+  }, [limit]);
+  const archivePinnedRedo = useCallback(() => {
+    archiveRef.current = trimHistory([...archiveRef.current, ...redoRef.current.filter((command) => command.pinned)]);
+  }, [trimHistory]);
+
   const reset = useCallback((next: T) => {
     undoRef.current = [];
     redoRef.current = [];
+    archiveRef.current = [];
     publish(next);
     revisionRef.current = 0;
     setRevision(0);
     setSavedRevision(0);
     syncCounts();
-  }, [publish, syncCounts]);
+    touchHistory();
+  }, [publish, syncCounts, touchHistory]);
 
   const serializeHistory = useCallback((projectId: string): PersistedCommandHistory<T> => {
-    const serialize = (command: SnapshotCommand<T>): PersistedCommand<T> => ({
+    const commands = [...undoRef.current, ...redoRef.current, ...archiveRef.current];
+    const encoded = encodeSnapshotValues(commands.flatMap((command) => [command.before, command.after]));
+    let refIndex = 0;
+    const serialize = (command: SnapshotCommand<T>): PersistedCommandV2 => ({
       id: command.id,
       label: command.label,
       timestamp: command.timestamp,
-      before: clone(command.before),
-      after: clone(command.after),
+      name: command.name,
+      pinned: command.pinned,
+      beforeRef: encoded.refs[refIndex++],
+      afterRef: encoded.refs[refIndex++],
       options: command.options ? { categories: command.options.categories ? clone(command.options.categories) : undefined, persistence: command.options.persistence ? clone(command.options.persistence) : undefined } : undefined,
       undoneCategoryIds: [...(command.undoneCategoryIds ?? [])],
       categoryEffect: command.categoryEffect ? { ...command.categoryEffect } : undefined,
     });
-    return { version: 1, projectId, undo: undoRef.current.map(serialize), redo: redoRef.current.map(serialize) };
+    return { version: 2, projectId, snapshots: encoded.snapshots, undo: undoRef.current.map(serialize), redo: redoRef.current.map(serialize), archive: archiveRef.current.map(serialize) };
   }, []);
 
   const restoreHistory = useCallback((next: T, state: PersistedCommandHistory<T> | null | undefined, strategies: CommandRestoreStrategies<T>) => {
-    if (!state || state.version !== 1 || !Array.isArray(state.undo) || !Array.isArray(state.redo)) {
+    if (!state || ![1, 2].includes(state.version) || !Array.isArray(state.undo) || !Array.isArray(state.redo)) {
       reset(next);
       return;
     }
-    const restore = (command: PersistedCommand<T>): SnapshotCommand<T> => {
+    const restore = (command: PersistedCommandV1<T> | PersistedCommandV2, before: T, after: T): SnapshotCommand<T> => {
       const persistence = command.options?.persistence;
       const strategy = persistence ? strategies[persistence.strategy] : undefined;
       return {
-        ...command,
-        before: clone(command.before),
-        after: clone(command.after),
+        id: command.id,
+        label: command.label,
+        timestamp: command.timestamp,
+        name: command.name,
+        pinned: command.pinned,
+        before: clone(before),
+        after: clone(after),
+        undoneCategoryIds: [...(command.undoneCategoryIds ?? [])],
+        categoryEffect: command.categoryEffect ? { ...command.categoryEffect } : undefined,
         options: command.options ? {
           categories: command.options.categories ? clone(command.options.categories) : undefined,
           persistence: persistence ? clone(persistence) : undefined,
@@ -119,9 +167,28 @@ export function useCommandHistory<T>(initial: T, limit = 50) {
         } : undefined,
       };
     };
-    undoRef.current = state.undo.slice(-limit).map(restore);
-    redoRef.current = state.redo.slice(-limit).map(restore);
-    const commands = [...undoRef.current, ...redoRef.current];
+    try {
+      if (state.version === 1) {
+        undoRef.current = trimHistory(state.undo.map((command) => restore(command, command.before, command.after)));
+        redoRef.current = trimHistory(state.redo.map((command) => restore(command, command.before, command.after)));
+        archiveRef.current = [];
+      } else {
+        const snapshots = decodeSnapshotValues(state.snapshots);
+        const restoreV2 = (command: PersistedCommandV2) => {
+          const before = snapshots.get(command.beforeRef);
+          const after = snapshots.get(command.afterRef);
+          if (before === undefined || after === undefined) throw new Error(`Command snapshot reference is missing: ${command.id}`);
+          return restore(command, before, after);
+        };
+        undoRef.current = trimHistory(state.undo.map(restoreV2));
+        redoRef.current = trimHistory(state.redo.map(restoreV2));
+        archiveRef.current = trimHistory((state.archive ?? []).map(restoreV2));
+      }
+    } catch {
+      reset(next);
+      return;
+    }
+    const commands = [...undoRef.current, ...redoRef.current, ...archiveRef.current];
     for (const command of commands) {
       const effect = command.categoryEffect;
       if (!effect) continue;
@@ -135,30 +202,33 @@ export function useCommandHistory<T>(initial: T, limit = 50) {
     setRevision(0);
     setSavedRevision(0);
     syncCounts();
-  }, [limit, publish, reset, syncCounts]);
+    touchHistory();
+  }, [publish, reset, syncCounts, touchHistory, trimHistory]);
 
   const commit = useCallback((updater: (current: T) => T, label = '编辑项目') => {
     const before = valueRef.current;
     const after = updater(before);
     if (Object.is(before, after)) return;
-    undoRef.current = [...undoRef.current, {
+    undoRef.current = trimHistory([...undoRef.current, {
       id: `command-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       label,
       timestamp: Date.now(),
       before: clone(before),
       after: clone(after),
-    }].slice(-limit);
+    }]);
+    archivePinnedRedo();
     redoRef.current = [];
     publish(after);
     bumpRevision();
     syncCounts();
-  }, [bumpRevision, limit, publish, syncCounts]);
+    touchHistory();
+  }, [archivePinnedRedo, bumpRevision, publish, syncCounts, touchHistory, trimHistory]);
 
   const commitSaved = useCallback((updater: (current: T) => T, label = '编辑并保存项目', options?: CommandOptions<T>) => {
     const before = valueRef.current;
     const after = updater(before);
     if (Object.is(before, after)) return;
-    undoRef.current = [...undoRef.current, {
+    undoRef.current = trimHistory([...undoRef.current, {
       id: `command-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       label,
       timestamp: Date.now(),
@@ -166,12 +236,14 @@ export function useCommandHistory<T>(initial: T, limit = 50) {
       after: clone(after),
       options,
       undoneCategoryIds: [],
-    }].slice(-limit);
+    }]);
+    archivePinnedRedo();
     redoRef.current = [];
     publish(after);
     bumpRevision(true);
     syncCounts();
-  }, [bumpRevision, limit, publish, syncCounts]);
+    touchHistory();
+  }, [archivePinnedRedo, bumpRevision, publish, syncCounts, touchHistory, trimHistory]);
 
   const replace = useCallback((updater: (current: T) => T) => {
     publish(updater(valueRef.current));
@@ -186,7 +258,8 @@ export function useCommandHistory<T>(initial: T, limit = 50) {
     publish(clone(command.before));
     bumpRevision();
     syncCounts();
-  }, [bumpRevision, publish, syncCounts]);
+    touchHistory();
+  }, [bumpRevision, publish, syncCounts, touchHistory]);
 
   const redo = useCallback(() => {
     const command = redoRef.current.pop();
@@ -196,7 +269,8 @@ export function useCommandHistory<T>(initial: T, limit = 50) {
     publish(clone(command.after));
     bumpRevision();
     syncCounts();
-  }, [bumpRevision, publish, syncCounts]);
+    touchHistory();
+  }, [bumpRevision, publish, syncCounts, touchHistory]);
 
   const markSaved = useCallback(() => setSavedRevision(revisionRef.current), []);
   const undoCategory = useCallback((commandId: string, categoryId: string) => {
@@ -209,21 +283,46 @@ export function useCommandHistory<T>(initial: T, limit = 50) {
     const markActive = () => { source.undoneCategoryIds = (source.undoneCategoryIds ?? []).filter((id) => id !== categoryId); };
     markUndone();
     const category = source.options.categories?.find((item) => item.id === categoryId);
-    undoRef.current = [...undoRef.current, {
+    undoRef.current = trimHistory([...undoRef.current, {
       id: `command-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       label: `撤销 ${source.label} · ${category?.label ?? categoryId}`,
       timestamp: Date.now(), before: clone(before), after: clone(after), onUndo: markActive, onRedo: markUndone, categoryEffect: { sourceCommandId: source.id, categoryId },
-    }].slice(-limit);
+    }]);
+    archivePinnedRedo();
     redoRef.current = [];
     publish(after);
     bumpRevision();
     syncCounts();
+    touchHistory();
     return true;
-  }, [bumpRevision, limit, publish, syncCounts]);
-  const snapshotEntry = (state: CommandSnapshotEntry<T>['state']) => ({ id, label, timestamp, before, after, options, undoneCategoryIds }: SnapshotCommand<T>): CommandSnapshotEntry<T> => ({
+  }, [archivePinnedRedo, bumpRevision, publish, syncCounts, touchHistory, trimHistory]);
+
+  const renameCommand = useCallback((commandId: string, name: string) => {
+    const command = [...undoRef.current, ...redoRef.current, ...archiveRef.current].find((item) => item.id === commandId);
+    if (!command) return false;
+    command.name = name.trim().slice(0, 120) || undefined;
+    touchHistory();
+    return true;
+  }, [touchHistory]);
+
+  const toggleCommandPinned = useCallback((commandId: string) => {
+    const command = [...undoRef.current, ...redoRef.current, ...archiveRef.current].find((item) => item.id === commandId);
+    if (!command) return false;
+    command.pinned = !command.pinned;
+    undoRef.current = trimHistory(undoRef.current);
+    redoRef.current = trimHistory(redoRef.current);
+    archiveRef.current = trimHistory(archiveRef.current);
+    syncCounts();
+    touchHistory();
+    return true;
+  }, [syncCounts, touchHistory, trimHistory]);
+
+  const snapshotEntry = (state: CommandSnapshotEntry<T>['state']) => ({ id, label, timestamp, name, pinned, before, after, options, undoneCategoryIds }: SnapshotCommand<T>): CommandSnapshotEntry<T> => ({
     id,
     label,
     timestamp,
+    name,
+    pinned,
     before,
     after,
     state,
@@ -232,6 +331,7 @@ export function useCommandHistory<T>(initial: T, limit = 50) {
   const history = [
     ...undoRef.current.map(snapshotEntry('applied')),
     ...redoRef.current.map(snapshotEntry('undone')),
+    ...archiveRef.current.map(snapshotEntry('archived')),
   ].sort((left, right) => left.timestamp - right.timestamp);
 
   return {
@@ -245,10 +345,12 @@ export function useCommandHistory<T>(initial: T, limit = 50) {
     undo,
     redo,
     undoCategory,
+    renameCommand,
+    toggleCommandPinned,
     undoCount: counts.undo,
     redoCount: counts.redo,
     history,
-    historyVersion: revision,
+    historyVersion,
     dirty: revision !== savedRevision,
     markSaved,
   };

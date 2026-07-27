@@ -249,7 +249,7 @@ export async function loadRecoverySnapshot(): Promise<RecoverySnapshot | null> {
 
 export async function saveCommandHistory(history: PersistedCommandHistory<Project>) {
   const api = await waitForDesktopApi();
-  if (!api) return { ok: true, path: 'browser-memory', bytes: 0, commandCount: history.undo.length + history.redo.length };
+  if (!api) return { ok: true, path: 'browser-memory', bytes: 0, commandCount: history.undo.length + history.redo.length + (history.version === 2 ? history.archive?.length ?? 0 : 0) };
   return withTimeout(api.save_command_history(history), 30000);
 }
 

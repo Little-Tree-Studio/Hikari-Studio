@@ -29,6 +29,26 @@ class ProjectStoreTests(unittest.TestCase):
             "redo": [],
         }
 
+    @staticmethod
+    def _compressed_command_history(project: dict) -> dict:
+        return {
+            "version": 2,
+            "projectId": project["meta"]["id"],
+            "snapshots": [
+                {"id": "snapshot-1", "value": project},
+                {"id": "snapshot-2", "baseId": "snapshot-1", "delta": {"type": "object", "changed": {"meta": {"type": "object", "changed": {"name": {"type": "replace", "value": "新名称"}}}}}},
+            ],
+            "undo": [{
+                "id": "command-2", "label": "重命名项目", "name": "发布前检查点", "pinned": True, "timestamp": 2,
+                "beforeRef": "snapshot-1", "afterRef": "snapshot-2", "undoneCategoryIds": [],
+            }],
+            "redo": [],
+            "archive": [{
+                "id": "command-archived", "label": "已归档快照", "name": "固定归档", "pinned": True, "timestamp": 1,
+                "beforeRef": "snapshot-1", "afterRef": "snapshot-2", "undoneCategoryIds": [],
+            }],
+        }
+
     def test_command_history_survives_store_recreation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -44,6 +64,19 @@ class ProjectStoreTests(unittest.TestCase):
             self.assertEqual(reopened, history)
             json.loads(json.dumps(reopened, ensure_ascii=False))
 
+    def test_compressed_command_history_preserves_names_pins_and_references(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = ProjectStore(root)
+            history = self._compressed_command_history(store.load())
+            result = store.save_command_history(history)
+            reopened = ProjectStore(root).load_command_history()
+            self.assertEqual(result["commandCount"], 2)
+            self.assertEqual(reopened, history)
+            self.assertEqual(reopened["undo"][0]["name"], "发布前检查点")
+            self.assertTrue(reopened["undo"][0]["pinned"])
+            self.assertEqual(reopened["archive"][0]["name"], "固定归档")
+
     def test_command_history_rejects_wrong_project_and_invalid_stacks(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = ProjectStore(Path(directory))
@@ -54,7 +87,7 @@ class ProjectStoreTests(unittest.TestCase):
                 store.save_command_history(wrong_project)
 
             invalid_version = self._command_history(project)
-            invalid_version["version"] = 2
+            invalid_version["version"] = 3
             with self.assertRaises(ValueError):
                 store.save_command_history(invalid_version)
 
@@ -62,6 +95,21 @@ class ProjectStoreTests(unittest.TestCase):
             oversized["undo"] = oversized["undo"] * 51
             with self.assertRaises(ValueError):
                 store.save_command_history(oversized)
+
+            invalid_reference = self._compressed_command_history(project)
+            invalid_reference["undo"][0]["afterRef"] = "snapshot-missing"
+            with self.assertRaises(ValueError):
+                store.save_command_history(invalid_reference)
+
+            invalid_base = self._compressed_command_history(project)
+            invalid_base["snapshots"][1]["baseId"] = "snapshot-later"
+            with self.assertRaises(ValueError):
+                store.save_command_history(invalid_base)
+
+            invalid_name = self._compressed_command_history(project)
+            invalid_name["undo"][0]["name"] = "x" * 121
+            with self.assertRaises(ValueError):
+                store.save_command_history(invalid_name)
 
     def test_command_history_from_copied_project_is_ignored(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
