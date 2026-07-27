@@ -7,7 +7,7 @@ import { groupModels, MODEL_CATEGORY_LABEL, recommendedModelId } from './aiModel
 
 interface AiAgentPanelProps {
   project: Project;
-  applyPlan: (taskId: string, operationIndexes: number[]) => Promise<AgentPatchApplyResult>;
+  applyPlan: (taskId: string, operationIndexes: number[], operations: AgentOperation[]) => Promise<AgentPatchApplyResult>;
   requestBuild: (target: 'web' | 'windows' | 'renpy') => void;
   notify: (message: string, tone?: 'error' | 'success') => void;
   navigateTarget?: (target: AgentComparisonTarget) => void;
@@ -253,7 +253,7 @@ export function AiAgentPanel({ project, applyPlan, requestBuild, notify, navigat
     if (!plan || !activeTask || !selectedPendingIndexes.length) return;
     try {
       setCheckingPatch(true);
-      const result = await applyPlan(activeTask.id, selectedPendingIndexes);
+      const result = await applyPlan(activeTask.id, selectedPendingIndexes, selectedPendingIndexes.map((index) => plan.operations[index]));
       setPatchCheck(result);
       if (!result.ok) { notify(`检测到 ${result.conflicts.length} 项过期冲突，Patch 尚未应用`, 'error'); return; }
       setAppliedOperationIndexes((current) => new Set([...current, ...result.appliedOperationIndexes]));

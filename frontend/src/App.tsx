@@ -29,12 +29,13 @@ import { EditorAssetImportDialog, type EditorImportAction } from './components/E
 import { analyzeAssetReferences } from './core/assetReferences';
 import { audioCategoryOf, matchingVoice } from './core/audio';
 import { log } from './core/logger';
+import { buildAgentPatchSemanticRecord, restoreAgentPatchCategory } from './core/agentPatchHistory';
 import { readSmallValue, removeSmallValue, writeSmallValue } from './core/storage';
 import { projectScenes, sceneBlockSnapshot } from './core/scenes';
 import { createBlock } from './engine-core/blocks';
 import { diagnosticSummary } from './engine-core/diagnostics';
 import { useCommandHistory, type CommandEntry } from './hooks/useCommandHistory';
-import type { AppNotification, Asset, AudioCategory, BlockType, ConditionOperator, InspectorDock, Project, ScriptImportPreview, StoryBlock, StoryBlockPatch } from './types';
+import type { AgentOperation, AppNotification, Asset, AudioCategory, BlockType, ConditionOperator, InspectorDock, Project, ScriptImportPreview, StoryBlock, StoryBlockPatch } from './types';
 
 const SaveAs = Copy;
 
@@ -664,8 +665,10 @@ function CharactersPage({ project, commit, notify, requestText, requestConfirm }
   })}</div></div></div>;
 }
 
-function HistoryPage({ entries, undoCount, redoCount, undo, redo }: { entries: CommandEntry[]; undoCount: number; redoCount: number; undo: () => void; redo: () => void }) {
-  return <div className="dashboard-page"><PageHeader title="编辑历史" sub="本次会话最多保留 50 个可撤销步骤"><button className="button ghost" disabled={!undoCount} onClick={undo}><Undo2 />撤销</button><button className="button ghost" disabled={!redoCount} onClick={redo}><Redo2 />重做</button></PageHeader><div className="content-pad"><div className="history-list">{[...entries].reverse().map((entry) => <div className="history-item" key={entry.id}><div className="history-icon">{entry.label.startsWith('AI Agent') ? <Sparkles /> : <History />}</div><div><strong>{entry.label}</strong><small>可撤销项目修改</small></div><time>{new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></div>)}{!entries.length && <div className="empty-state large"><History /><strong>还没有编辑记录</strong><span>修改项目后会在这里出现</span></div>}<div className="history-item"><div className="history-icon"><Save /></div><div><strong>自动保存</strong><small>项目修改会写入本地 v3 目录</small></div><time>450 ms</time></div></div></div></div>;
+function HistoryPage({ entries, undoCount, redoCount, undo, redo, undoCategory }: { entries: CommandEntry[]; undoCount: number; redoCount: number; undo: () => void; redo: () => void; undoCategory: (commandId: string, categoryId: string) => boolean }) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggle = (id: string) => setExpanded((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
+  return <div className="dashboard-page"><PageHeader title="编辑历史" sub="本次会话最多保留 50 个可撤销步骤"><button className="button ghost" disabled={!undoCount} onClick={undo}><Undo2 />撤销</button><button className="button ghost" disabled={!redoCount} onClick={redo}><Redo2 />重做</button></PageHeader><div className="content-pad"><div className="history-list">{[...entries].reverse().map((entry) => <section className={`history-entry ${entry.categories?.length ? 'semantic' : ''}`} key={entry.id}><button type="button" className="history-item" onClick={() => entry.categories?.length && toggle(entry.id)}><div className="history-icon">{entry.label.startsWith('AI Agent') ? <Sparkles /> : <History />}</div><div><strong>{entry.label}</strong><small>{entry.categories?.length ? `${entry.categories.length} 类语义修改 · 点击查看详情` : '可撤销项目修改'}</small></div><time>{new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>{entry.categories?.length ? <ChevronDown className={expanded.has(entry.id) ? 'expanded' : ''} /> : null}</button>{entry.categories?.length && expanded.has(entry.id) && <div className="history-category-list">{entry.categories.map((category) => <article className={category.undone ? 'undone' : ''} key={category.id}><header><div><strong>{category.label}</strong><span>{category.count} 项</span></div><button className="button ghost" disabled={category.undone} onClick={() => undoCategory(entry.id, category.id)}>{category.undone ? <CheckCircle2 /> : <Undo2 />}{category.undone ? '已撤销' : '撤销此类别'}</button></header><ul>{category.items.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}</ul></article>)}</div>}</section>)}{!entries.length && <div className="empty-state large"><History /><strong>还没有编辑记录</strong><span>修改项目后会在这里出现</span></div>}<div className="history-item static"><div className="history-icon"><Save /></div><div><strong>自动保存</strong><small>项目修改会写入本地 v3 目录</small></div><time>450 ms</time></div></div></div></div>;
 }
 
 interface ModalLayerProps {
@@ -727,7 +730,7 @@ export default function App() {
   const navigatePage = (next: Page) => { if (next === page) return; setBackPages((items) => [...items, page].slice(-40)); setForwardPages([]); setPage(next); };
   const navigateBack = () => { const previous = backPages.at(-1); if (!previous) return; setBackPages((items) => items.slice(0, -1)); setForwardPages((items) => [page, ...items].slice(0, 40)); setPage(previous); };
   const navigateForward = () => { const next = forwardPages[0]; if (!next) return; setForwardPages((items) => items.slice(1)); setBackPages((items) => [...items, page].slice(-40)); setPage(next); };
-  const { commit, commitSaved, replace, reset: resetHistory, undo, redo, undoCount, redoCount, history: commandEntries, dirty, markSaved } = history;
+  const { commit, commitSaved, replace, reset: resetHistory, undo, redo, undoCategory, undoCount, redoCount, history: commandEntries, dirty, markSaved } = history;
   const resetProject = (next: Project) => {
     const fragmentIds = new Set(next.chapters.flatMap((chapter) => chapter.fragments.map((fragment) => fragment.id)));
     const savedTabs = next.settings.editorSession?.openFragmentIds.filter((id) => fragmentIds.has(id)) ?? [];
@@ -896,7 +899,7 @@ export default function App() {
     if (count) { commit(() => next, `全局替换“${query}”为“${replacement}”`); show(`已替换 ${count} 处文本`); }
     return count;
   };
-  const applyAgentPlan = async (taskId: string, operationIndexes: number[]) => {
+  const applyAgentPlan = async (taskId: string, operationIndexes: number[], operations: AgentOperation[]) => {
     if (autoSaveTimerRef.current !== null) {
       window.clearTimeout(autoSaveTimerRef.current);
       autoSaveTimerRef.current = null;
@@ -909,7 +912,8 @@ export default function App() {
     }
     const result = await applyAiPatch(taskId, operationIndexes, project);
     if (result.ok && result.project) {
-      commitSaved(() => result.project!, `AI Agent：${result.summary ?? '应用 Patch'}`);
+      const semantic = buildAgentPatchSemanticRecord(operations);
+      commitSaved(() => result.project!, `AI Agent：${result.summary ?? '应用 Patch'}`, { categories: semantic.categories, restoreCategory: (current, before, after, categoryId) => restoreAgentPatchCategory(current, before, after, categoryId, semantic) });
       setSaveState('已保存');
     }
     return result;
@@ -923,7 +927,7 @@ export default function App() {
     map: <NarrativeMap project={project} activate={activate} commit={commit} notify={show} requestText={requestText} />,
     characters: <CharacterManager project={project} commit={commit} notify={show} requestText={requestText} requestConfirm={requestConfirm} />,
     scenes: <SceneManager project={project} commit={commit} notify={show} requestText={requestText} requestConfirm={requestConfirm} activate={activate} />,
-    history: <HistoryPage entries={commandEntries} undoCount={undoCount} redoCount={redoCount} undo={undo} redo={redo} />,
+    history: <HistoryPage entries={commandEntries} undoCount={undoCount} redoCount={redoCount} undo={undo} redo={redo} undoCategory={undoCategory} />,
     ai: <AiAgentPanel project={project} applyPlan={applyAgentPlan} requestBuild={(target) => void runBuild(target)} notify={show} navigateTarget={(target) => { if (target.kind === 'fragment' && target.id) activate(target.id); else if (target.kind === 'chapter' && target.id) { const fragment = project.chapters.find((chapter) => chapter.id === target.id)?.fragments[0]; if (fragment) activate(fragment.id); } else if (target.kind === 'character') navigatePage('characters'); else if (target.kind === 'asset') navigatePage('assets'); else if (target.kind === 'variable') navigatePage('map'); else show('该差异项没有可打开的编辑位置'); }} />,
   };
   const openAssetSection = (section: string, target: Page = 'assets') => { setAssetSection(section); navigatePage(target); setAssetMenuOpen(false); };
