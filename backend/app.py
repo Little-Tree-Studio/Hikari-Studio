@@ -49,4 +49,8 @@ def main() -> None:
         background_color="#f4f6f8",
     )
     api._bind_window(window)
-    webview.start(debug=args.debug or os.getenv("HIKARI_DEBUG") == "1", private_mode=True)
+    api.start_background_services()
+    try:
+        webview.start(debug=args.debug or os.getenv("HIKARI_DEBUG") == "1", private_mode=True)
+    finally:
+        api.stop_background_services()

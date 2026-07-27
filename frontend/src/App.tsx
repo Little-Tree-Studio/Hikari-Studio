@@ -910,7 +910,7 @@ export default function App() {
     characters: <CharacterManager project={project} commit={commit} notify={show} requestText={requestText} requestConfirm={requestConfirm} />,
     scenes: <SceneManager project={project} commit={commit} notify={show} requestText={requestText} requestConfirm={requestConfirm} activate={activate} />,
     history: <HistoryPage entries={commandEntries} undoCount={undoCount} redoCount={redoCount} undo={undo} redo={redo} />,
-    ai: <AiAgentPanel project={project} applyPlan={applyAgentPlan} notify={show} />,
+    ai: <AiAgentPanel project={project} applyPlan={applyAgentPlan} requestBuild={(target) => void runBuild(target)} notify={show} />,
   };
   const openAssetSection = (section: string, target: Page = 'assets') => { setAssetSection(section); navigatePage(target); setAssetMenuOpen(false); };
   const openAudioSection = (category: AudioCategory) => { setAudioCategory(category); navigatePage('audio'); setAssetMenuOpen(false); };

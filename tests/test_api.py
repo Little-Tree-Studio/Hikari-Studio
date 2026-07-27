@@ -1,7 +1,9 @@
 import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from backend.api import DesktopApi
 from backend.project_store import ProjectStore
@@ -47,6 +49,63 @@ class DesktopApiTests(unittest.TestCase):
             self.assertIn("available", status)
             self.assertIn("loaded", status)
             self.assertTrue(status["message"])
+
+    def test_ai_model_discovery_bridge_is_serializable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            api = DesktopApi(ProjectStore(root / "data"), root)
+            discovery = {"models": [{"id": "gpt-5-mini", "category": "fast", "source": "upstream"}], "source": "upstream", "recommendedModelId": "gpt-5-mini"}
+            with patch.object(api._ai, "discover_models", return_value=discovery):
+                result = api.discover_ai_models({"url": "https://example.com/v1"})
+            self.assertEqual(json.loads(json.dumps(result))["recommendedModelId"], "gpt-5-mini")
+
+    def test_agent_task_bridge_persists_serializable_project_session(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            api = DesktopApi(ProjectStore(root / "data"), root)
+            project = api.load_project()
+            plan = {"summary": "完成", "assumptions": [], "operations": [], "toolCalls": [], "requestedBuilds": [], "usage": {}}
+            with patch.object(api._agent_tasks.ai_service, "run", return_value=plan):
+                started = api.start_ai_task("检查当前项目", project)
+                deadline = time.time() + 2
+                task = started
+                while task["status"] not in {"completed", "failed"} and time.time() < deadline:
+                    time.sleep(0.01)
+                    task = api.get_ai_task(started["id"])
+                self.assertEqual(task["status"], "completed")
+                payload = json.loads(json.dumps(task, ensure_ascii=False))
+                self.assertEqual(payload["plan"]["summary"], "完成")
+                self.assertEqual(api.list_ai_tasks()[0]["id"], started["id"])
+                session = api._store.project_root / ".hikari" / "agent" / "sessions" / f"{started['id']}.json"
+                self.assertTrue(session.exists())
+            api.stop_background_services()
+
+    def test_agent_checkpoint_restart_bridge_hides_internal_state(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            api = DesktopApi(ProjectStore(root / "data"), root)
+            project = api.load_project()
+            plan = {"summary": "完成", "assumptions": [], "operations": [], "toolCalls": [], "requestedBuilds": [], "usage": {}}
+            checkpoint = {"version": 1, "model": "test", "nextRound": 1, "messages": [{"role": "tool", "content": "private context"}], "usage": {}, "registry": {"proposedOperations": [], "requestedBuilds": [], "trace": [{"name": "get_project_overview", "permission": "read", "ok": True}]}}
+
+            def run(instruction, project, checkpoint=None, progress=None, cancellation=None, execution_checkpoint=None, save_execution_checkpoint=None):
+                if execution_checkpoint is None:
+                    save_execution_checkpoint(checkpoint_state)
+                return plan
+
+            checkpoint_state = checkpoint
+            with patch.object(api._agent_tasks.ai_service, "run", side_effect=run):
+                source = api.start_ai_task("生成检查点", project)
+                deadline = time.time() + 2
+                while source["status"] != "completed" and time.time() < deadline:
+                    time.sleep(0.01)
+                    source = api.get_ai_task(source["id"])
+                summary = source["checkpoints"][0]
+                self.assertNotIn("state", summary)
+                branch = api.restart_ai_task_from_checkpoint(source["id"], summary["id"], project)
+                self.assertEqual(branch["parentTaskId"], source["id"])
+                self.assertNotIn("state", json.loads(json.dumps(branch))["checkpoints"][0])
+            api.stop_background_services()
 
     def test_transcription_rejects_non_audio_and_missing_files(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

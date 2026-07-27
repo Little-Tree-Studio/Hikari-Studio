@@ -314,7 +314,15 @@ export interface DesktopApi {
   close_window(): Promise<boolean>;
   get_ai_settings(): Promise<AiSettings>;
   save_ai_settings(settings: AiSettingsInput): Promise<AiSettings>;
+  discover_ai_models(settings: AiSettingsInput): Promise<AiModelDiscovery>;
   run_ai_agent(instruction: string, project: Project): Promise<AgentPlan>;
+  start_ai_task(instruction: string, project: Project): Promise<AgentTask>;
+  list_ai_tasks(): Promise<AgentTask[]>;
+  get_ai_task(taskId: string, afterSeq?: number): Promise<AgentTask>;
+  pause_ai_task(taskId: string): Promise<AgentTask>;
+  resume_ai_task(taskId: string, project: Project): Promise<AgentTask>;
+  restart_ai_task_from_checkpoint(taskId: string, checkpointId: string, project: Project): Promise<AgentTask>;
+  cancel_ai_task(taskId: string): Promise<AgentTask>;
 }
 
 export interface RecentProject {
@@ -367,6 +375,7 @@ export interface ScriptImportPreview {
 export interface AiSettings {
   url: string;
   model: string;
+  fallbackModels: string[];
   temperature: number;
   hasKey: boolean;
 }
@@ -374,8 +383,45 @@ export interface AiSettings {
 export interface AiSettingsInput {
   url: string;
   model: string;
+  fallbackModels?: string[];
   temperature: number;
   apiKey?: string;
+  probe?: boolean;
+  probeLimit?: number;
+  forceRefresh?: boolean;
+}
+
+export type AiModelCategory = 'reasoning' | 'general' | 'vision' | 'fast' | 'unknown';
+export type AiModelSource = 'upstream' | 'builtin' | 'manual';
+
+export interface AiModelInfo {
+  id: string;
+  name: string;
+  category: AiModelCategory;
+  source: AiModelSource;
+  supportsTools: boolean;
+  supportsVision: boolean;
+  supportsStructuredOutput: boolean;
+  contextWindow?: number | null;
+  recommended?: boolean;
+  health: 'healthy' | 'degraded' | 'unavailable' | 'unknown';
+  healthScore: number;
+  latencyMs?: number | null;
+  healthMessage?: string;
+  lastCheckedAt?: string | null;
+  failureCount?: number | null;
+  circuitState?: 'closed' | 'open' | 'half_open' | null;
+  nextRetryAt?: string | null;
+}
+
+export interface AiModelDiscovery {
+  models: AiModelInfo[];
+  recommendedModelId?: string;
+  fallbackModelIds?: string[];
+  source: 'upstream' | 'builtin';
+  warning?: string;
+  catalogCached?: boolean;
+  healthCache?: { ttlSeconds: number; cachedHits: number; staleEntries: number; probed: number };
 }
 
 export type AgentOperation =
@@ -387,6 +433,68 @@ export interface AgentPlan {
   summary: string;
   assumptions: string[];
   operations: AgentOperation[];
+  toolCalls?: AgentToolTrace[];
+  requestedBuilds?: AgentBuildRequest[];
+  usage?: Record<string, number>;
+  model?: string;
+  failoverHistory?: Array<{ model: string; status: 'unavailable' | 'circuit_open'; message: string }>;
+}
+
+export interface AgentToolTrace {
+  name: string;
+  permission: 'read' | 'edit' | 'validate' | 'build' | 'unknown';
+  ok: boolean;
+  summary?: string;
+}
+
+export interface AgentBuildRequest {
+  target: 'web' | 'windows' | 'renpy';
+  blocked: boolean;
+  requiresConfirmation: true;
+}
+
+export type AgentTaskStatus = 'queued' | 'running' | 'pausing' | 'paused' | 'cancelling' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
+
+export interface AgentTaskEvent {
+  seq: number;
+  timestamp: string;
+  type: string;
+  message: string;
+  data: Record<string, unknown>;
+}
+
+export interface AgentCheckpoint {
+  id: string;
+  createdAt: string;
+  attempt: number;
+  step: number;
+  round: number;
+  model?: string | null;
+  toolNames: string[];
+  inherited?: boolean;
+}
+
+export interface AgentTask {
+  id: string;
+  instruction: string;
+  status: AgentTaskStatus;
+  projectId: string;
+  projectName: string;
+  createdAt: string;
+  updatedAt: string;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  attempt: number;
+  checkpointStep?: number;
+  checkpointModel?: string | null;
+  currentCheckpointId?: string | null;
+  checkpoints?: AgentCheckpoint[];
+  parentTaskId?: string | null;
+  sourceCheckpointId?: string | null;
+  lastEventSeq: number;
+  events?: AgentTaskEvent[];
+  plan?: AgentPlan | null;
+  error?: string | null;
 }
 
 declare global {

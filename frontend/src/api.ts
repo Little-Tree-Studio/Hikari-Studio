@@ -1,4 +1,4 @@
-import type { AgentPlan, AiSettings, AiSettingsInput, Asset, AssetFileStatus, AssetFolderRepairPreview, AssetRepairIssue, AssetRepairMatch, AudioCategory, Project, RecentProject, ScriptImportPreview } from './types';
+import type { AgentPlan, AgentTask, AiModelDiscovery, AiSettings, AiSettingsInput, Asset, AssetFileStatus, AssetFolderRepairPreview, AssetRepairIssue, AssetRepairMatch, AudioCategory, Project, RecentProject, ScriptImportPreview } from './types';
 import { readLargeValue, writeLargeValue } from './core/storage';
 
 const waitForDesktopApi = async () => {
@@ -186,8 +186,56 @@ export async function saveAiSettings(settings: AiSettingsInput): Promise<AiSetti
   return withTimeout(api.save_ai_settings(settings));
 }
 
+export async function discoverAiModels(settings: AiSettingsInput): Promise<AiModelDiscovery> {
+  const api = await waitForDesktopApi();
+  if (!api) throw new Error('模型发现仅在桌面应用中可用');
+  return withTimeout(api.discover_ai_models({ ...settings, probe: true, probeLimit: 4 }), 120000);
+}
+
 export async function runAiAgent(instruction: string, project: Project): Promise<AgentPlan> {
   const api = await waitForDesktopApi();
   if (!api) throw new Error('AI Agent 仅在桌面应用中可用');
   return withTimeout(api.run_ai_agent(instruction, project), 120000);
+}
+
+export async function startAiTask(instruction: string, project: Project): Promise<AgentTask> {
+  const api = await waitForDesktopApi();
+  if (!api) throw new Error('AI Agent 任务仅在桌面应用中可用');
+  return withTimeout(api.start_ai_task(instruction, project), 10000);
+}
+
+export async function listAiTasks(): Promise<AgentTask[]> {
+  const api = await waitForDesktopApi();
+  if (!api) return [];
+  return withTimeout(api.list_ai_tasks(), 10000);
+}
+
+export async function getAiTask(taskId: string, afterSeq = 0): Promise<AgentTask> {
+  const api = await waitForDesktopApi();
+  if (!api) throw new Error('AI Agent 任务仅在桌面应用中可用');
+  return withTimeout(api.get_ai_task(taskId, afterSeq), 10000);
+}
+
+export async function pauseAiTask(taskId: string): Promise<AgentTask> {
+  const api = await waitForDesktopApi();
+  if (!api) throw new Error('AI Agent 任务仅在桌面应用中可用');
+  return withTimeout(api.pause_ai_task(taskId), 10000);
+}
+
+export async function resumeAiTask(taskId: string, project: Project): Promise<AgentTask> {
+  const api = await waitForDesktopApi();
+  if (!api) throw new Error('AI Agent 任务仅在桌面应用中可用');
+  return withTimeout(api.resume_ai_task(taskId, project), 10000);
+}
+
+export async function restartAiTaskFromCheckpoint(taskId: string, checkpointId: string, project: Project): Promise<AgentTask> {
+  const api = await waitForDesktopApi();
+  if (!api) throw new Error('AI Agent 任务仅在桌面应用中可用');
+  return withTimeout(api.restart_ai_task_from_checkpoint(taskId, checkpointId, project), 10000);
+}
+
+export async function cancelAiTask(taskId: string): Promise<AgentTask> {
+  const api = await waitForDesktopApi();
+  if (!api) throw new Error('AI Agent 任务仅在桌面应用中可用');
+  return withTimeout(api.cancel_ai_task(taskId), 10000);
 }

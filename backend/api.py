@@ -9,6 +9,7 @@ from typing import Any
 
 from .exporters import build_web_game, export_renpy, safe_slug
 from .ai_service import AiService
+from .agent_tasks import AgentTaskManager
 from .asr_service import AsrService
 from .project_store import ProjectStore
 from .script_importer import preview_script_import
@@ -25,10 +26,18 @@ class DesktopApi:
         self._window: Any = None
         self._save_lock = threading.Lock()
         self._ai = AiService(store.data_dir)
+        self._agent_tasks = AgentTaskManager(self._ai)
         self._asr = AsrService()
 
     def _bind_window(self, window: Any) -> None:
         self._window = window
+
+    def start_background_services(self) -> None:
+        self._ai.start_health_monitor()
+
+    def stop_background_services(self) -> None:
+        self._agent_tasks.stop()
+        self._ai.stop_health_monitor()
 
     def get_app_info(self) -> dict[str, Any]:
         return {"name": "Hikari Studio", "version": "0.3.0", "platform": platform.system(), "projectPath": str(self._store.project_path)}
@@ -217,8 +226,32 @@ class DesktopApi:
     def save_ai_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
         return self._ai.save_settings(settings)
 
+    def discover_ai_models(self, settings: dict[str, Any]) -> dict[str, Any]:
+        return self._ai.discover_models(settings)
+
     def run_ai_agent(self, instruction: str, project: dict[str, Any]) -> dict[str, Any]:
         return self._ai.run(instruction, project)
+
+    def start_ai_task(self, instruction: str, project: dict[str, Any]) -> dict[str, Any]:
+        return self._agent_tasks.start_task(instruction, project, self._store.project_root)
+
+    def list_ai_tasks(self) -> list[dict[str, Any]]:
+        return self._agent_tasks.list_tasks(self._store.project_root)
+
+    def get_ai_task(self, task_id: str, after_seq: int = 0) -> dict[str, Any]:
+        return self._agent_tasks.get_task(task_id, self._store.project_root, after_seq)
+
+    def pause_ai_task(self, task_id: str) -> dict[str, Any]:
+        return self._agent_tasks.pause_task(task_id, self._store.project_root)
+
+    def resume_ai_task(self, task_id: str, project: dict[str, Any]) -> dict[str, Any]:
+        return self._agent_tasks.resume_task(task_id, project, self._store.project_root)
+
+    def restart_ai_task_from_checkpoint(self, task_id: str, checkpoint_id: str, project: dict[str, Any]) -> dict[str, Any]:
+        return self._agent_tasks.restart_from_checkpoint(task_id, checkpoint_id, project, self._store.project_root)
+
+    def cancel_ai_task(self, task_id: str) -> dict[str, Any]:
+        return self._agent_tasks.cancel_task(task_id, self._store.project_root)
 
     def minimize_window(self) -> bool:
         if self._window is not None:
