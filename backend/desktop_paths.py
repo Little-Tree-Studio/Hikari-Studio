@@ -35,6 +35,8 @@ def resource_root() -> Path:
     bundled = getattr(sys, "_MEIPASS", None)
     if getattr(sys, "frozen", False) and bundled:
         return Path(bundled).resolve()
+    if "__compiled__" in globals():
+        return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parents[1]
 
 

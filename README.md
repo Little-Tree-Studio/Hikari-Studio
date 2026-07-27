@@ -154,7 +154,7 @@ Windows 用户也可以在依赖安装完成后运行 `start.bat`。
 powershell -ExecutionPolicy Bypass -File scripts/build-editor.ps1
 ```
 
-产物位于 `dist/HikariStudio/HikariStudio.exe`，运行时不需要用户安装 Python、Node.js 或 pnpm。Windows 游戏构建所需的 WebView2 启动器也会预编译进编辑器目录。
+编辑器使用 Nuitka 编译为 Windows 本机 standalone 程序，产物位于 `dist/HikariStudio/HikariStudio.exe`，运行时不需要用户安装 Python、Node.js 或 pnpm。Windows 游戏构建所需的 WebView2 启动器也会预编译进编辑器目录。
 
 ### 构建 Windows 安装程序
 

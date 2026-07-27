@@ -36,7 +36,13 @@ jobs:
         working-directory: frontend
       - run: python -m pip install -r requirements.txt -r requirements-build.txt
       - run: dotnet publish launcher/Hikari.GameLauncher/Hikari.GameLauncher.csproj --configuration Release --runtime win-x64 --self-contained true -p:DebugType=None -p:DebugSymbols=false --output launcher/dist/win-x64
-      - run: python -m PyInstaller --noconfirm --clean --workpath build/pyinstaller --distpath dist HikariStudio.spec
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}\HikariStudioNuitkaCache
+          key: nuitka-${{ runner.os }}-${{ hashFiles('requirements-build.txt', 'scripts/build-editor.ps1') }}
+      - run: powershell -ExecutionPolicy Bypass -File scripts/build-editor.ps1 -SkipInstall -SkipLauncher
+        env:
+          HIKARI_NUITKA_CACHE: ${{ runner.temp }}\HikariStudioNuitkaCache
       - run: choco install innosetup --no-progress -y
       - run: powershell -ExecutionPolicy Bypass -File scripts/build-installer.ps1 -SkipEditor
       - uses: actions/upload-artifact@v4
