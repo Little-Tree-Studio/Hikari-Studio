@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { Activity, ArrowRight, Bot, Box, Check, Clock3, Database, GitCompare, GitFork, KeyRound, ListTodo, LoaderCircle, Pause, Play, RefreshCw, RotateCcw, Settings2, Sparkles, Star, Wrench, XCircle } from 'lucide-react';
-import { cancelAiTask, compareAiTaskResults, discoverAiModels, getAiSettings, getAiTask, listAiTasks, pauseAiTask, restartAiTaskFromCheckpoint, resumeAiTask, retryAiTaskOperations, saveAiSettings, startAiTask } from '../api';
-import type { AgentComparisonTarget, AgentOperation, AgentPlan, AgentResultComparison, AgentResultRef, AgentTask, AgentTaskEvent, AgentTaskStatus, AiModelDiscovery, AiSettingsInput, Project } from '../types';
+import { Activity, AlertTriangle, ArrowRight, Bot, Box, Check, Clock3, Database, GitCompare, GitFork, KeyRound, ListTodo, LoaderCircle, Pause, Play, RefreshCw, RotateCcw, Settings2, Sparkles, Star, Wrench, XCircle } from 'lucide-react';
+import { cancelAiTask, checkAiPatchPreconditions, compareAiTaskResults, discoverAiModels, getAiSettings, getAiTask, listAiTasks, pauseAiTask, rebaseAiPatch, restartAiTaskFromCheckpoint, resumeAiTask, retryAiTaskOperations, saveAiSettings, startAiTask } from '../api';
+import type { AgentComparisonTarget, AgentOperation, AgentPatchPreconditionResult, AgentPlan, AgentResultComparison, AgentResultRef, AgentTask, AgentTaskEvent, AgentTaskStatus, AiModelDiscovery, AiSettingsInput, Project } from '../types';
 import { groupModels, MODEL_CATEGORY_LABEL, recommendedModelId } from './aiModelCatalog';
 
 interface AiAgentPanelProps {
@@ -53,6 +53,8 @@ export function AiAgentPanel({ project, applyPlan, requestBuild, notify, navigat
   const [plan, setPlan] = useState<AgentPlan | null>(null);
   const [selectedOperationIndexes, setSelectedOperationIndexes] = useState<Set<number>>(new Set());
   const [appliedOperationIndexes, setAppliedOperationIndexes] = useState<Set<number>>(new Set());
+  const [patchCheck, setPatchCheck] = useState<AgentPatchPreconditionResult | null>(null);
+  const [checkingPatch, setCheckingPatch] = useState(false);
   const [busy, setBusy] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [discovering, setDiscovering] = useState(false);
@@ -108,6 +110,7 @@ export function AiAgentPanel({ project, applyPlan, requestBuild, notify, navigat
               planOwnerRef.current = snapshot.id;
               setSelectedOperationIndexes(new Set(snapshot.plan.operations.map((_, index) => index)));
               setAppliedOperationIndexes(new Set());
+              setPatchCheck(null);
             }
             setPlan(snapshot.plan);
           }
@@ -245,14 +248,22 @@ export function AiAgentPanel({ project, applyPlan, requestBuild, notify, navigat
     finally { setComparing(false); }
   };
 
-  const toggleOperation = (index: number) => setSelectedOperationIndexes((current) => { const next = new Set(current); if (next.has(index)) next.delete(index); else next.add(index); return next; });
-  const applySelectedOperations = () => {
-    if (!plan || !selectedPendingIndexes.length) return;
-    const acceptedPlan = { ...plan, operations: selectedPendingIndexes.map((index) => plan.operations[index]) };
-    if (!applyPlan(acceptedPlan)) return;
-    setAppliedOperationIndexes((current) => new Set([...current, ...selectedPendingIndexes]));
-    setSelectedOperationIndexes(new Set());
-    notify(`已接受并应用 ${selectedPendingIndexes.length} 项修改`, 'success');
+  const toggleOperation = (index: number) => { setPatchCheck(null); setSelectedOperationIndexes((current) => { const next = new Set(current); if (next.has(index)) next.delete(index); else next.add(index); return next; }); };
+  const applySelectedOperations = async () => {
+    if (!plan || !activeTask || !selectedPendingIndexes.length) return;
+    try {
+      setCheckingPatch(true);
+      const check = await checkAiPatchPreconditions(activeTask.id, selectedPendingIndexes, project);
+      setPatchCheck(check);
+      if (!check.canApply) { notify(`检测到 ${check.conflicts.length} 项过期冲突，Patch 尚未应用`, 'error'); return; }
+      const acceptedPlan = { ...plan, operations: selectedPendingIndexes.map((index) => plan.operations[index]) };
+      if (!applyPlan(acceptedPlan)) return;
+      setAppliedOperationIndexes((current) => new Set([...current, ...selectedPendingIndexes]));
+      setSelectedOperationIndexes(new Set());
+      setPatchCheck(null);
+      notify(`已接受并应用 ${selectedPendingIndexes.length} 项修改`, 'success');
+    } catch (error) { notify(String(error), 'error'); }
+    finally { setCheckingPatch(false); }
   };
   const retryRemainingOperations = async () => {
     if (!activeTask || !pendingOperationIndexes.length) return;
@@ -268,6 +279,21 @@ export function AiAgentPanel({ project, applyPlan, requestBuild, notify, navigat
       setSelectedOperationIndexes(new Set());
       setAppliedOperationIndexes(new Set());
       notify(`已创建派生任务，重新规划 ${pendingOperationIndexes.length} 项未接受修改`);
+    } catch (error) { notify(String(error), 'error'); }
+    finally { setSubmitting(false); }
+  };
+  const rebaseConflictedOperations = async () => {
+    if (!activeTask || !patchCheck?.conflicts.length) return;
+    const indexes = [...new Set(patchCheck.conflicts.map((conflict) => conflict.operationIndex))];
+    try {
+      setSubmitting(true);
+      const next = await rebaseAiPatch(activeTask.id, indexes, project);
+      eventCursor.current = 0;
+      planOwnerRef.current = null;
+      setTasks((current) => [next, ...current.filter((task) => task.id !== next.id)]);
+      setActiveTaskId(next.id); setActiveTask(next); setPlan(null); setPatchCheck(null);
+      setSelectedOperationIndexes(new Set()); setAppliedOperationIndexes(new Set());
+      notify(`已基于最新项目重新生成 ${indexes.length} 项冲突 Patch`);
     } catch (error) { notify(String(error), 'error'); }
     finally { setSubmitting(false); }
   };
@@ -299,10 +325,11 @@ export function AiAgentPanel({ project, applyPlan, requestBuild, notify, navigat
         {comparison && <section className="agent-comparison-result"><header><GitCompare /><div><strong>{comparison.left.label} → {comparison.right.label}</strong><span>{comparison.categories.reduce((sum, category) => sum + category.items.length, 0)} 项结构化差异</span></div></header>{comparison.categories.length === 0 ? <div className="agent-no-changes">两个结果没有结构化差异</div> : comparison.categories.map((category) => <div className="agent-diff-category" key={category.name}><strong>{category.name}<span>{category.items.length}</span></strong>{category.items.map((item, index) => <article className={`diff-${item.status}`} key={`${category.name}-${index}`}><i>{item.status === 'added' ? '+' : item.status === 'removed' ? '−' : '~'}</i><span>{item.summary}</span>{item.target && navigateTarget && <button type="button" className="icon-button" title="在编辑器中打开" onClick={() => navigateTarget(item.target!)}><ArrowRight /></button>}</article>)}</div>)}</section>}
         {!plan && !activeTask && <div className="agent-empty"><Bot /><strong>等待制作任务</strong><span>Agent 的修改不会自动写入项目。</span></div>}{!plan && activeTask && !activeTask.events?.length && <div className="agent-empty compact"><LoaderCircle className="spin" /><strong>正在准备任务</strong><span>状态更新会在这里实时显示。</span></div>}{plan && <><div className="plan-summary"><strong>{plan.summary}</strong>{plan.model && <span>实际模型：{plan.model}{plan.failoverHistory?.length ? ` · 已自动切换 ${plan.failoverHistory.length} 次` : ''}</span>}{plan.assumptions.map((item) => <span key={item}>{item}</span>)}</div>
         {!!plan.toolCalls?.length && <div className="agent-tool-trace"><header><Wrench /><strong>工具执行记录</strong><small>{plan.toolCalls.length} 次</small></header>{plan.toolCalls.map((call, index) => <div className={call.ok ? '' : 'failed'} key={`${call.name}-${index}`}><span>{call.name}</span><em>{call.permission}</em><small>{call.ok ? call.summary ?? '完成' : call.summary ?? '失败'}</small></div>)}</div>}
-        {!!plan.operations.length && <div className="operation-selection-toolbar"><label><input type="checkbox" checked={pendingOperationIndexes.length > 0 && selectedPendingIndexes.length === pendingOperationIndexes.length} onChange={(event) => setSelectedOperationIndexes(event.target.checked ? new Set(pendingOperationIndexes) : new Set())} />选择全部未处理项</label><span>已接受 {appliedOperationIndexes.size} · 未接受 {pendingOperationIndexes.length - selectedPendingIndexes.length}</span></div>}
+        {patchCheck?.stale && <section className={`agent-patch-conflicts ${patchCheck.canApply ? 'safe' : 'blocked'}`}><header>{patchCheck.canApply ? <Check /> : <AlertTriangle />}<div><strong>{patchCheck.canApply ? '项目版本已变化，选中目标未冲突' : 'Patch 已过期，检测到目标冲突'}</strong><span>{patchCheck.canApply ? '可以继续应用当前选择' : `${patchCheck.conflicts.length} 个前置条件不再成立`}</span></div></header>{patchCheck.conflicts.map((conflict, index) => <article key={`${conflict.operationIndex}-${conflict.scope}-${index}`}><span>#{conflict.operationIndex + 1}</span><div><strong>{operationName[conflict.operationType as AgentOperation['type']] ?? conflict.operationType}</strong><small>{conflict.message} · {conflict.scope}</small></div></article>)}{!patchCheck.canApply && <div className="agent-conflict-actions"><button className="button ghost" onClick={() => { const blocked = new Set(patchCheck.conflicts.map((conflict) => conflict.operationIndex)); setSelectedOperationIndexes((current) => new Set([...current].filter((index) => !blocked.has(index)))); setPatchCheck(null); }}>排除冲突项</button><button className="button primary" disabled={submitting} onClick={() => void rebaseConflictedOperations()}><RefreshCw />基于当前项目重新生成</button></div>}</section>}
+        {!!plan.operations.length && <div className="operation-selection-toolbar"><label><input type="checkbox" checked={pendingOperationIndexes.length > 0 && selectedPendingIndexes.length === pendingOperationIndexes.length} onChange={(event) => { setPatchCheck(null); setSelectedOperationIndexes(event.target.checked ? new Set(pendingOperationIndexes) : new Set()); }} />选择全部未处理项</label><span>已接受 {appliedOperationIndexes.size} · 未接受 {pendingOperationIndexes.length - selectedPendingIndexes.length}</span></div>}
         <div className="operation-list selectable">{plan.operations.map((operation, index) => { const applied = appliedOperationIndexes.has(index); const selected = selectedOperationIndexes.has(index); return <article className={`${applied ? 'applied' : ''} ${!applied && !selected ? 'excluded' : ''}`} key={index}><label className="operation-check"><input type="checkbox" disabled={applied} checked={applied || selected} onChange={() => toggleOperation(index)} /><span>{index + 1}</span></label><div><strong>{operationName[operation.type]}</strong><small>{operationDetail(operation)}</small></div><em>{applied ? '已接受' : selected ? '待应用' : '未接受'}</em></article>; })}</div>
         {!!plan.requestedBuilds?.length && <div className="agent-build-requests">{plan.requestedBuilds.map((request) => <article key={request.target}><Box /><div><strong>{request.target === 'web' ? 'Web 游戏' : request.target === 'windows' ? 'Windows 游戏' : "Ren'Py"} 构建请求</strong><small>{request.blocked ? '诊断存在错误，暂时无法构建' : pendingOperationIndexes.length ? '请先处理项目修改' : '需要单独确认，不会随项目修改自动执行'}</small></div><button className="button ghost" disabled={request.blocked || pendingOperationIndexes.length > 0} onClick={() => requestBuild(request.target)}>确认构建</button></article>)}</div>}
-        {plan.operations.length > 0 ? pendingOperationIndexes.length > 0 ? <div className="agent-patch-actions"><button className="button ghost" disabled={submitting || !activeTask} onClick={() => void retryRemainingOperations()}><RotateCcw />重新执行未接受项（{pendingOperationIndexes.length}）</button><button className="button primary" disabled={!selectedPendingIndexes.length} onClick={applySelectedOperations}><Check />应用选中的 {selectedPendingIndexes.length} 项</button></div> : <div className="agent-no-changes">全部修改已接受并应用</div> : <div className="agent-no-changes">Agent 未请求项目写入</div>}</>}</section>
+        {plan.operations.length > 0 ? pendingOperationIndexes.length > 0 ? <div className="agent-patch-actions"><button className="button ghost" disabled={submitting || !activeTask} onClick={() => void retryRemainingOperations()}><RotateCcw />重新执行未接受项（{pendingOperationIndexes.length}）</button><button className="button primary" disabled={!selectedPendingIndexes.length || checkingPatch} onClick={() => void applySelectedOperations()}>{checkingPatch ? <LoaderCircle className="spin" /> : <Check />}{checkingPatch ? '检查项目版本' : `应用选中的 ${selectedPendingIndexes.length} 项`}</button></div> : <div className="agent-no-changes">全部修改已接受并应用</div> : <div className="agent-no-changes">Agent 未请求项目写入</div>}</>}</section>
     </div>
   </div>;
 }

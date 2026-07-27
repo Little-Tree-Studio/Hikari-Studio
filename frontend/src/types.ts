@@ -318,6 +318,8 @@ export interface DesktopApi {
   run_ai_agent(instruction: string, project: Project): Promise<AgentPlan>;
   start_ai_task(instruction: string, project: Project): Promise<AgentTask>;
   retry_ai_task_operations(taskId: string, operationIndexes: number[], project: Project): Promise<AgentTask>;
+  check_ai_patch_preconditions(taskId: string, operationIndexes: number[], project: Project): Promise<AgentPatchPreconditionResult>;
+  rebase_ai_patch(taskId: string, operationIndexes: number[], project: Project): Promise<AgentTask>;
   list_ai_tasks(): Promise<AgentTask[]>;
   get_ai_task(taskId: string, afterSeq?: number): Promise<AgentTask>;
   pause_ai_task(taskId: string): Promise<AgentTask>;
@@ -499,12 +501,16 @@ export interface AgentTask {
   parentTaskId?: string | null;
   sourceCheckpointId?: string | null;
   remainingOperationIndexes?: number[];
+  projectVersion?: { fingerprint: string; capturedAt: string } | null;
   lastEventSeq: number;
   events?: AgentTaskEvent[];
   plan?: AgentPlan | null;
   hasPlan?: boolean;
   error?: string | null;
 }
+
+export interface AgentPatchConflict { operationIndex: number; operationType: AgentOperation['type'] | 'unknown'; scope: string; expectedHash?: string; currentHash?: string; message: string }
+export interface AgentPatchPreconditionResult { taskId: string; stale: boolean; canApply: boolean; baseFingerprint?: string | null; currentFingerprint: string; conflicts: AgentPatchConflict[] }
 
 export interface AgentResultRef { taskId: string; checkpointId?: string | null }
 export interface AgentComparisonTarget { kind: 'fragment' | 'chapter' | 'character' | 'asset' | 'variable' | 'project'; id?: string | null }

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import queue
@@ -53,7 +54,7 @@ class AgentTaskManager:
     def start_task(self, instruction: str, project: dict[str, Any], project_root: Path) -> dict[str, Any]:
         return self._enqueue_new_task(instruction, project, project_root)
 
-    def _enqueue_new_task(self, instruction: str, project: dict[str, Any], project_root: Path, parent_task_id: str | None = None, remaining_operation_indexes: list[int] | None = None, display_instruction: str | None = None) -> dict[str, Any]:
+    def _enqueue_new_task(self, instruction: str, project: dict[str, Any], project_root: Path, parent_task_id: str | None = None, remaining_operation_indexes: list[int] | None = None, display_instruction: str | None = None, initial_event: tuple[str, str] | None = None) -> dict[str, Any]:
         instruction = instruction.strip()
         if not instruction:
             raise ValueError("请先描述希望 Agent 完成的任务")
@@ -80,6 +81,8 @@ class AgentTaskManager:
             "parentTaskId": parent_task_id,
             "sourceCheckpointId": None,
             "remainingOperationIndexes": remaining_operation_indexes or [],
+            "projectVersion": self._project_version(project),
+            "patchPreconditions": [],
             "events": [],
             "lastEventSeq": 0,
             "plan": None,
@@ -90,7 +93,10 @@ class AgentTaskManager:
             self._projects[task_id] = deepcopy(project)
             self._roots[task_id] = project_root.resolve()
             self._controls[task_id] = TaskControl()
-            if parent_task_id:
+            if initial_event:
+                event_type, message = initial_event
+                self._append_event_locked(task_id, event_type, message, {"sourceTaskId": parent_task_id, "operationIndexes": remaining_operation_indexes or []})
+            elif parent_task_id:
                 self._append_event_locked(task_id, "remaining_retry", "正在重新规划未接受的修改", {"sourceTaskId": parent_task_id, "operationIndexes": remaining_operation_indexes or []})
             self._append_event_locked(task_id, "queued", "任务已加入队列", {})
             self._ensure_worker_locked()
@@ -119,6 +125,49 @@ class AgentTaskManager:
         )
         display = f"重新执行 {len(indexes)} 项未接受修改 · {source.get('displayInstruction') or source.get('instruction', '')}"
         return self._enqueue_new_task(instruction, project, root, source["id"], indexes, display)
+
+    def check_patch_preconditions(self, task_id: str, operation_indexes: list[int], project: dict[str, Any], project_root: Path) -> dict[str, Any]:
+        root = project_root.resolve()
+        with self._lock:
+            task = deepcopy(self._find_task_locked(task_id, root))
+        plan = task.get("plan") or {}
+        operations = plan.get("operations") or []
+        indexes = self._validated_operation_indexes(operation_indexes, len(operations))
+        baseline = task.get("projectVersion") or {}
+        current = self._project_version(project)
+        preconditions = {int(item.get("operationIndex", -1)): item for item in task.get("patchPreconditions") or []}
+        conflicts: list[dict[str, Any]] = []
+        for index in indexes:
+            operation = operations[index]
+            item = preconditions.get(index)
+            if not item:
+                conflicts.append({"operationIndex": index, "operationType": operation.get("type", "unknown"), "scope": "project", "message": "该历史 Patch 没有版本前置条件，需要基于当前项目重新生成"})
+                continue
+            for scope in item.get("scopes") or []:
+                expected = str(item.get("expected", {}).get(scope, "missing"))
+                actual = str(current["scopes"].get(scope, "missing"))
+                if expected != actual:
+                    conflicts.append({"operationIndex": index, "operationType": operation.get("type", "unknown"), "scope": scope, "expectedHash": expected, "currentHash": actual, "message": self._conflict_message(operation, scope)})
+        return {"taskId": task_id, "stale": baseline.get("fingerprint") != current["fingerprint"], "canApply": not conflicts, "baseFingerprint": baseline.get("fingerprint"), "currentFingerprint": current["fingerprint"], "conflicts": conflicts}
+
+    def rebase_patch(self, task_id: str, operation_indexes: list[int], project: dict[str, Any], project_root: Path) -> dict[str, Any]:
+        root = project_root.resolve()
+        with self._lock:
+            source = deepcopy(self._find_task_locked(task_id, root))
+        operations = (source.get("plan") or {}).get("operations") or []
+        indexes = self._validated_operation_indexes(operation_indexes, len(operations))
+        payload = json.dumps([operations[index] for index in indexes], ensure_ascii=False, separators=(",", ":"))
+        instruction = f"基于当前项目重新生成过期的 Agent Patch。保留原任务目标，但只重新规划以下冲突操作，不要重复其它内容：\n{payload[:20000]}"
+        display = f"重新生成 {len(indexes)} 项过期 Patch · {source.get('displayInstruction') or source.get('instruction', '')}"
+        return self._enqueue_new_task(
+            instruction,
+            project,
+            root,
+            source["id"],
+            indexes,
+            display,
+            ("patch_rebase", "正在基于最新项目重新生成 Patch"),
+        )
 
     def restart_from_checkpoint(self, task_id: str, checkpoint_id: str, project: dict[str, Any], project_root: Path) -> dict[str, Any]:
         root = project_root.resolve()
@@ -156,6 +205,8 @@ class AgentTaskManager:
                 "parentTaskId": source["id"],
                 "sourceCheckpointId": checkpoint_id,
                 "remainingOperationIndexes": [],
+                "projectVersion": self._project_version(project),
+                "patchPreconditions": [],
                 "events": [],
                 "lastEventSeq": 0,
                 "plan": None,
@@ -312,6 +363,7 @@ class AgentTaskManager:
                     task = self._tasks[task_id]
                     task["status"] = "completed"
                     task["plan"] = plan
+                    task["patchPreconditions"] = self._patch_preconditions(plan, task.get("projectVersion") or {})
                     task["executionCheckpoint"] = None
                     task["completedAt"] = self._now()
                     self._append_event_locked(task_id, "completed", "任务已完成，等待确认修改", {"operationCount": len(plan.get("operations", []))})
@@ -431,6 +483,64 @@ class AgentTaskManager:
         return {**snapshot, "ref": {"taskId": task_id, "checkpointId": checkpoint_id, "label": label, "instruction": task.get("displayInstruction") or task.get("instruction", "")}}
 
     @staticmethod
+    def _hash_value(value: Any) -> str:
+        encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def _project_version(cls, project: dict[str, Any]) -> dict[str, Any]:
+        clean = deepcopy(project)
+        clean.get("meta", {}).pop("updatedAt", None)
+        clean.pop("activeFragmentId", None)
+        settings = clean.get("settings")
+        if isinstance(settings, dict):
+            settings.pop("editorSession", None)
+        scopes: dict[str, str] = {
+            "meta": cls._hash_value(clean.get("meta", {})), "chapters": cls._hash_value(clean.get("chapters", [])),
+            "characters": cls._hash_value(clean.get("characters", [])), "assets": cls._hash_value(clean.get("assets", [])),
+            "variables": cls._hash_value({"values": clean.get("variables", {}), "definitions": clean.get("variableDefinitions", {})}),
+            "settings": cls._hash_value(clean.get("settings", {})), "scenes": cls._hash_value(clean.get("scenes", [])),
+        }
+        for fragment_id, blocks in clean.get("scripts", {}).items(): scopes[f"script:{fragment_id}"] = cls._hash_value(blocks)
+        for character in clean.get("characters", []): scopes[f"character:{character.get('id')}"] = cls._hash_value(character)
+        for asset in clean.get("assets", []): scopes[f"asset:{asset.get('id')}"] = cls._hash_value(asset)
+        variables = clean.get("variables", {})
+        definitions = clean.get("variableDefinitions", {})
+        for name in set(variables) | set(definitions):
+            scopes[f"variable:{name}"] = cls._hash_value({"value": variables.get(name), "definition": definitions.get(name)})
+        return {"fingerprint": cls._hash_value(clean), "capturedAt": cls._now(), "scopes": scopes}
+
+    @staticmethod
+    def _operation_scopes(operation: dict[str, Any]) -> list[str]:
+        kind = operation.get("type")
+        if kind == "update_project": return ["meta"]
+        if kind in {"add_blocks", "update_branch"}: return [f"script:{operation.get('fragmentId')}"]
+        if kind == "create_fragment": return ["chapters"]
+        if kind == "upsert_character": return [f"character:{operation['characterId']}"] if operation.get("characterId") else ["characters"]
+        if kind == "update_asset": return [f"asset:{operation.get('assetId')}"]
+        if kind == "upsert_variable": return [f"variable:{operation.get('name')}"]
+        return ["meta"]
+
+    @classmethod
+    def _patch_preconditions(cls, plan: dict[str, Any], version: dict[str, Any]) -> list[dict[str, Any]]:
+        scopes = version.get("scopes") or {}
+        return [{"operationIndex": index, "scopes": targets, "expected": {target: scopes.get(target, "missing") for target in targets}} for index, operation in enumerate(plan.get("operations") or []) for targets in [cls._operation_scopes(operation)]]
+
+    @staticmethod
+    def _conflict_message(operation: dict[str, Any], scope: str) -> str:
+        labels = {"add_blocks": "目标 Fragment 的剧本", "update_branch": "目标分支所在剧本", "create_fragment": "章节结构", "upsert_character": "目标角色配置", "update_asset": "目标素材配置", "upsert_variable": "目标变量", "update_project": "项目基本信息"}
+        return f"{labels.get(str(operation.get('type')), scope)}在 Patch 生成后已被修改"
+
+    @staticmethod
+    def _validated_operation_indexes(operation_indexes: list[int], operation_count: int) -> list[int]:
+        if not isinstance(operation_indexes, list) or not operation_indexes or any(not isinstance(index, int) or isinstance(index, bool) for index in operation_indexes):
+            raise ValueError("Patch 操作索引无效")
+        indexes = sorted(set(operation_indexes))
+        if any(index < 0 or index >= operation_count for index in indexes):
+            raise ValueError("Patch 操作索引无效")
+        return indexes
+
+    @staticmethod
     def _checkpoint_snapshot(checkpoint: dict[str, Any]) -> dict[str, Any]:
         registry = checkpoint.get("registry") or {}
         return {"operations": deepcopy(registry.get("proposedOperations") or []), "builds": deepcopy(registry.get("requestedBuilds") or []), "diagnostics": AgentTaskManager._diagnostic_trace(registry.get("trace") or [])}
@@ -519,6 +629,10 @@ class AgentTaskManager:
         result["hasPlan"] = bool(result.get("plan"))
         result.pop("executionCheckpoint", None)
         result.pop("executionInstruction", None)
+        version = result.get("projectVersion")
+        if isinstance(version, dict):
+            result["projectVersion"] = {key: version.get(key) for key in ("fingerprint", "capturedAt")}
+        result.pop("patchPreconditions", None)
         result["checkpoints"] = [{key: item.get(key) for key in ("id", "createdAt", "attempt", "step", "round", "model", "toolNames", "inherited")} for item in result.get("checkpoints", [])]
         if not include_events:
             result.pop("events", None)
@@ -534,6 +648,8 @@ class AgentTaskManager:
         task.setdefault("remainingOperationIndexes", [])
         task.setdefault("displayInstruction", task.get("instruction", ""))
         task.setdefault("executionInstruction", None)
+        task.setdefault("projectVersion", None)
+        task.setdefault("patchPreconditions", [])
         if not task["checkpoints"] and isinstance(task.get("executionCheckpoint"), dict):
             checkpoint = task["executionCheckpoint"]
             checkpoint_id = uuid.uuid5(uuid.NAMESPACE_URL, f"hikari:{task.get('id')}:{checkpoint.get('nextRound', 0)}").hex

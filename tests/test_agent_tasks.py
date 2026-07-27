@@ -298,6 +298,63 @@ class AgentTaskManagerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "索引无效"):
             manager.retry_remaining_operations(source["id"], [8], sample_project(), self.root)
 
+    def test_patch_preconditions_allow_unchanged_and_unrelated_project_changes(self) -> None:
+        manager = self.manager(PartialRetryAi())
+        source = manager.start_task("配置角色和分支", sample_project(), self.root)
+        source = wait_status(manager, self.root, source["id"], {"completed"})
+
+        unchanged = manager.check_patch_preconditions(source["id"], [1], sample_project(), self.root)
+        self.assertFalse(unchanged["stale"])
+        self.assertTrue(unchanged["canApply"])
+
+        current = sample_project()
+        current["characters"][0]["name"] = "用户修改后的角色名"
+        unrelated = manager.check_patch_preconditions(source["id"], [1], current, self.root)
+        self.assertTrue(unrelated["stale"])
+        self.assertTrue(unrelated["canApply"])
+        self.assertEqual(unrelated["conflicts"], [])
+
+    def test_patch_preconditions_block_changed_target_and_rebase_from_latest_project(self) -> None:
+        ai = PartialRetryAi()
+        manager = self.manager(ai)
+        source = manager.start_task("配置角色和分支", sample_project(), self.root)
+        source = wait_status(manager, self.root, source["id"], {"completed"})
+        current = sample_project()
+        current["scripts"]["opening"][0]["text"] = "用户已经修改了当前片段。"
+
+        check = manager.check_patch_preconditions(source["id"], [1], current, self.root)
+        self.assertTrue(check["stale"])
+        self.assertFalse(check["canApply"])
+        self.assertEqual(check["conflicts"][0]["scope"], "script:opening")
+
+        child = manager.rebase_patch(source["id"], [1], current, self.root)
+        self.assertEqual(child["parentTaskId"], source["id"])
+        self.assertEqual(child["remainingOperationIndexes"], [1])
+        self.assertEqual(child["events"][0]["type"], "patch_rebase")
+        self.assertNotIn("executionInstruction", child)
+        self.assertNotIn("patchPreconditions", child)
+        self.assertNotIn("scopes", child["projectVersion"])
+        wait_status(manager, self.root, child["id"], {"completed"})
+        self.assertEqual(ai.calls[1][1]["scripts"]["opening"][0]["text"], "用户已经修改了当前片段。")
+
+    def test_legacy_patch_without_preconditions_requires_rebase(self) -> None:
+        manager = self.manager(PartialRetryAi())
+        source = manager.start_task("配置角色和分支", sample_project(), self.root)
+        source = wait_status(manager, self.root, source["id"], {"completed"})
+        with manager._lock:
+            manager._tasks[source["id"]]["patchPreconditions"] = []
+        check = manager.check_patch_preconditions(source["id"], [0], sample_project(), self.root)
+        self.assertFalse(check["canApply"])
+        self.assertIn("重新生成", check["conflicts"][0]["message"])
+
+    def test_project_version_tracks_definition_only_variables(self) -> None:
+        project = sample_project()
+        project["variableDefinitions"]["player_name"] = {"type": "string", "persistence": "slot"}
+        before = AgentTaskManager._project_version(project)
+        project["variableDefinitions"]["player_name"]["persistence"] = "shared"
+        after = AgentTaskManager._project_version(project)
+        self.assertNotEqual(before["scopes"]["variable:player_name"], after["scopes"]["variable:player_name"])
+
 
 if __name__ == "__main__":
     unittest.main()

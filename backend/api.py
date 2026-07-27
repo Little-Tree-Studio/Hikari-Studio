@@ -238,6 +238,12 @@ class DesktopApi:
     def retry_ai_task_operations(self, task_id: str, operation_indexes: list[int], project: dict[str, Any]) -> dict[str, Any]:
         return self._agent_tasks.retry_remaining_operations(task_id, operation_indexes, project, self._store.project_root)
 
+    def check_ai_patch_preconditions(self, task_id: str, operation_indexes: list[int], project: dict[str, Any]) -> dict[str, Any]:
+        return self._agent_tasks.check_patch_preconditions(task_id, operation_indexes, project, self._store.project_root)
+
+    def rebase_ai_patch(self, task_id: str, operation_indexes: list[int], project: dict[str, Any]) -> dict[str, Any]:
+        return self._agent_tasks.rebase_patch(task_id, operation_indexes, project, self._store.project_root)
+
     def list_ai_tasks(self) -> list[dict[str, Any]]:
         return self._agent_tasks.list_tasks(self._store.project_root)
 
