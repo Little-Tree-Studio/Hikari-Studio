@@ -1,0 +1,29 @@
+@keyframes ds-popover-in { from { opacity: 0; transform: translateY(-6px) scale(.98); } }
+@keyframes ds-modal-in { from { opacity: 0; transform: translateY(28px) scale(.98); } }
+@keyframes ds-toast-in { from { opacity: 0; transform: translateY(18px) scale(.97); } }
+@keyframes ds-panel-in { from { opacity: 0; transform: translateX(18px); } }
+@keyframes ds-item-in { from { opacity: 0; transform: translateY(7px); } }
+
+html[data-motion="full"] .top-dropdown,
+html[data-motion="full"] .context-menu { animation: ds-popover-in var(--motion-base) var(--motion-ease) both; transform-origin: top center; }
+html[data-motion="full"] .modal-backdrop:not(.ds-modal-backdrop) .modal { animation: ds-modal-in var(--motion-panel) var(--motion-ease) both; }
+html[data-motion="full"] .toast { animation: ds-toast-in var(--motion-panel) var(--motion-ease) both; }
+html[data-motion="full"] .notification-panel,
+html[data-motion="full"] .agent-sidebar { animation: ds-panel-in var(--motion-panel) var(--motion-ease) both; }
+html[data-motion="full"] .story-block,
+html[data-motion="full"] .asset-card { animation: ds-item-in var(--motion-base) var(--motion-ease) both; }
+
+html[data-motion="reduced"] *,
+html[data-motion="reduced"] *::before,
+html[data-motion="reduced"] *::after {
+  scroll-behavior: auto !important;
+  animation-duration: .01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: .01ms !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:not([data-motion="full"]) *,
+  html:not([data-motion="full"]) *::before,
+  html:not([data-motion="full"]) *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import {
   AlignLeft, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, AudioLines, Bell, BookOpen, Box, Braces, BugPlay,
-  CheckCircle2, ChevronDown, ChevronsUpDown, CirclePlay, Code2, Copy, CornerDownRight,
+  CheckCircle2, ChevronDown, ChevronsUpDown, CirclePlay, Clapperboard, Code2, Copy, CornerDownRight,
   ExternalLink, FileCode2, FilePlus2, FileText, FileUp, Flag, FolderOpen, FolderPlus,
   GitBranch, GitFork, GripVertical, HardDrive, History, Image, LocateFixed, Maximize2,
   LogOut, Menu, MessageSquareText, Minus, Music2, NotebookPen, PackageCheck, Palette, Plus,
@@ -9,7 +10,7 @@ import {
   Sparkles, Trash2, Undo2, UserPlus, UserRound, Users, X, PanelBottom, PanelRight, PictureInPicture2,
 } from 'lucide-react';
 import {
-  buildWeb, buildWindows, callWindow, exportRenpy, importAssets, loadProject, newProject,
+  buildWeb, buildWindows, callWindow, createProject, exportRenpy, importAssets, loadProject,
   applyAiPatch, loadCommandHistory, loadCommandHistoryStats, loadRecoverySnapshot, openProject, openProjectPath, openRecentProject, previewScriptImport, replaceAssetFile, saveCommandHistory, saveProject, saveProjectAs,
 } from './api';
 import { Preview } from './components/Preview';
@@ -17,6 +18,7 @@ import { AiAgentPanel } from './components/AiAgentPanel';
 import { NotificationCenter } from './components/NotificationCenter';
 import { RuntimeSettingsDialog } from './components/RuntimeSettingsDialog';
 import { GameUiThemeDialog } from './components/GameUiThemeDialog';
+import { EditorAppearanceDialog } from './components/EditorAppearanceDialog';
 import { ChapterSchedulingDialog } from './components/ChapterSchedulingDialog';
 import { SearchPalette, type SearchLocation } from './components/SearchPalette';
 import { ScriptImportDialog } from './components/ScriptImportDialog';
@@ -26,6 +28,8 @@ import { SceneManager } from './components/SceneManager';
 import { AudioManager } from './components/AudioManager';
 import { AssetManager } from './components/AssetManager';
 import { EditorAssetImportDialog, type EditorImportAction } from './components/EditorAssetImportDialog';
+import { StageTimelineWorkspace } from './components/StageTimelineWorkspace';
+import { ProjectLaunchScreen } from './components/ProjectLaunchScreen';
 import { analyzeAssetReferences } from './core/assetReferences';
 import { audioCategoryOf, matchingVoice } from './core/audio';
 import { log } from './core/logger';
@@ -33,10 +37,12 @@ import { buildAgentPatchSemanticRecord, restoreAgentPatchCategory, type AgentPat
 import { diffProjects, type ProjectDiff } from './core/projectDiff';
 import { readSmallValue, removeSmallValue, writeSmallValue } from './core/storage';
 import { projectScenes, sceneBlockSnapshot } from './core/scenes';
+import { useEditorAppearance } from './core/editorAppearance';
+import { remapTimeline } from './core/timeline';
 import { createBlock } from './engine-core/blocks';
 import { diagnosticSummary } from './engine-core/diagnostics';
 import { useCommandHistory, type CommandRestoreStrategies, type CommandSnapshotEntry, type PersistedCommandHistory } from './hooks/useCommandHistory';
-import type { AgentOperation, AppNotification, Asset, AudioCategory, BlockType, CommandHistoryStorageStats, ConditionOperator, InspectorDock, Project, RecoverySnapshot, ScriptImportPreview, StoryBlock, StoryBlockPatch } from './types';
+import type { AgentOperation, AppNotification, Asset, AudioCategory, BlockType, CommandHistoryStorageStats, ConditionOperator, InspectorDock, Project, ProjectCreationOptions, RecoverySnapshot, ScriptImportPreview, StoryBlock, StoryBlockPatch } from './types';
 
 const SaveAs = Copy;
 
@@ -44,7 +50,7 @@ const commandRestoreStrategies: CommandRestoreStrategies<Project> = {
   'agent-patch': (current, before, after, categoryId, payload) => restoreAgentPatchCategory(current, before, after, categoryId, payload as AgentPatchSemanticRecord),
 };
 
-type Page = 'script' | 'assets' | 'audio' | 'map' | 'characters' | 'scenes' | 'history' | 'ai';
+type Page = 'script' | 'stage' | 'assets' | 'audio' | 'map' | 'characters' | 'scenes' | 'history' | 'ai';
 type View = 'cards' | 'plain' | 'code' | 'json';
 type Modal = 'search' | 'publish' | 'blocks' | null;
 type Toast = { text: string; tone?: 'error' | 'success' } | null;
@@ -206,7 +212,7 @@ function StoryCard({ project, block, selected, asset, onSelect, onContextMenu, o
   const Icon = meta.icon;
   const dialogueCharacter = block.type === 'dialogue' ? project.characters.find((character) => character.name === block.speaker) : undefined;
   const dialogueVoice = block.type === 'dialogue' && block.voice ? project.assets.find((item) => item.id === block.voice || item.name === block.voice || item.path.endsWith(block.voice ?? '')) : undefined;
-  return <div className={`story-block ${dragging ? 'dragging' : ''}`}>
+  return <motion.div layout={!dragging} transition={{ layout: { type: 'spring', stiffness: 520, damping: 42 } }} className={`story-block ${dragging ? 'dragging' : ''}`}>
     <button className="block-handle" title="拖动 Block" aria-label={`拖动 ${meta.name}`} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}><GripVertical /></button>
     <div className={`block-card ${block.type} ${selected ? 'selected' : ''}`} onClick={onSelect} onContextMenu={onContextMenu}>
       <div className="block-meta"><Icon /><span>{meta.name}</span><span className="duration">{block.duration ? `${block.duration}s` : '--'}</span><div className="block-commands"><button title="上移" onClick={(e) => { e.stopPropagation(); onMove(-1); }}><ArrowUp /></button><button title="下移" onClick={(e) => { e.stopPropagation(); onMove(1); }}><ArrowDown /></button><button title="复制" onClick={(e) => { e.stopPropagation(); onDuplicate(); }}><Copy /></button><button title="删除" onClick={(e) => { e.stopPropagation(); onDelete(); }}><Trash2 /></button></div></div>
@@ -223,7 +229,7 @@ function StoryCard({ project, block, selected, asset, onSelect, onContextMenu, o
       {(block.type === 'jump' || block.type === 'call') && <div className="control-summary"><Flag /><strong>{block.target ?? '未设置目标'}</strong></div>}
       {block.type === 'return' && <div className="control-summary"><CornerDownRight /><strong>返回上一个调用位置</strong></div>}
     </div>
-  </div>;
+  </motion.div>;
 }
 
 function Inspector({ project, block, update, dock, setDock, notify }: { project: Project; block?: StoryBlock; update: (patch: StoryBlockPatch) => void; dock: InspectorDock; setDock: (dock: InspectorDock) => void; notify: (message: string, tone?: 'error' | 'success') => void }) {
@@ -727,6 +733,7 @@ function ModalLayer({ modal, project, close, addBlock, runBuild }: ModalLayerPro
 }
 
 export default function App() {
+  const { reducedMotion } = useEditorAppearance();
   const history = useCommandHistory(fallbackProject);
   const project = history.value;
   const [page, setPage] = useState<Page>('script');
@@ -741,15 +748,18 @@ export default function App() {
   const [assetSection, setAssetSection] = useState('全部');
   const [audioCategory, setAudioCategory] = useState<AudioCategory>('bgm');
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
-  const [projectClosed, setProjectClosed] = useState(false);
+  const [projectClosed, setProjectClosed] = useState(() => !new URLSearchParams(window.location.search).has('editor'));
+  const [createWizardRequested, setCreateWizardRequested] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [debugRunning, setDebugRunning] = useState(false);
   const [openFragmentIds, setOpenFragmentIds] = useState<string[]>(() => [fallbackProject.activeFragmentId]);
   const [inspectorDock, setInspectorDock] = useState<InspectorDock>(() => fallbackProject.settings.editorSession?.inspectorDock ?? 'preview');
   const [creatorName, setCreatorName] = useState(() => readSmallValue('hikari-creator-name') ?? '');
   const [saveState, setSaveState] = useState('正在载入');
+  const [startupReady, setStartupReady] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
+  const [gameThemeOpen, setGameThemeOpen] = useState(false);
   const [chapterSettingsOpen, setChapterSettingsOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
@@ -761,6 +771,7 @@ export default function App() {
   const hydrated = useRef(false);
   const autoSaveTimerRef = useRef<number | null>(null);
   const pendingSaveRef = useRef<Promise<unknown> | null>(null);
+  const projectSwitchingRef = useRef(false);
   const historyReadyRef = useRef(false);
   const historySaveQueueRef = useRef<Promise<unknown>>(Promise.resolve());
   const { toast, show: showToast } = useToast();
@@ -814,22 +825,49 @@ export default function App() {
     await historySaveQueueRef.current;
   };
 
-  useEffect(() => { void loadProject(fallbackProject).then(restoreProjectAndHistory).catch((error) => { log('error', 'project', '项目加载失败，使用浏览器恢复副本', error); resetProject(fallbackProject); historyReadyRef.current = true; }).finally(() => { hydrated.current = true; setSaveState('已保存'); }); }, []);
+  const prepareProjectSwitch = async () => {
+    projectSwitchingRef.current = true;
+    if (autoSaveTimerRef.current !== null) {
+      window.clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+    await pendingSaveRef.current;
+    if (dirty) {
+      await saveProject(project);
+      markSaved();
+    }
+    await flushCommandHistory();
+  };
+
+  useEffect(() => {
+    void loadProject(fallbackProject).then(async (loaded) => {
+      await restoreProjectAndHistory(loaded);
+      hydrated.current = true;
+      setStartupReady(true);
+      setSaveState('已保存');
+    }).catch((error) => {
+      hydrated.current = false;
+      historyReadyRef.current = false;
+      setStartupReady(true);
+      setSaveState('加载失败');
+      log('error', 'project', '项目加载失败；为保护磁盘项目，编辑与自动保存保持停用', error);
+      show(`项目加载失败：${String(error)}`, 'error');
+    });
+  }, []);
   useEffect(() => {
     const handler = (event: Event) => {
       const path = (event as CustomEvent<string>).detail;
       if (!path) return;
       void (async () => {
         try {
-          if (autoSaveTimerRef.current !== null) { window.clearTimeout(autoSaveTimerRef.current); autoSaveTimerRef.current = null; }
-          await pendingSaveRef.current;
-          if (dirty) { await saveProject(project); markSaved(); }
-          await flushCommandHistory();
+          await prepareProjectSwitch();
           await restoreProjectAndHistory(await openProjectPath(path));
           setProjectClosed(false);
           show('已从 Windows 打开项目');
         } catch (error) {
           show(String(error), 'error');
+        } finally {
+          projectSwitchingRef.current = false;
         }
       })();
     };
@@ -838,7 +876,7 @@ export default function App() {
   }, [project, dirty, historyVersion]);
   useEffect(() => { if (!historyReadyRef.current) return; void persistCommandHistory().catch((error) => log('error', 'history', 'Command 历史持久化失败', error)); }, [historyVersion]);
   useEffect(() => {
-    if (!hydrated.current || !project.settings.autoSave || !dirty) return;
+    if (!hydrated.current || projectSwitchingRef.current || !project.settings.autoSave || !dirty) return;
     setSaveState('保存中');
     autoSaveTimerRef.current = window.setTimeout(() => {
       autoSaveTimerRef.current = null;
@@ -871,13 +909,13 @@ export default function App() {
     const referenced = Object.values(project.scripts).flat().some((block) => block.type === 'branch' ? block.options?.some((option) => option.target === fragmentId) : block.type === 'condition' ? block.trueTarget === fragmentId || block.falseTarget === fragmentId : (block.type === 'jump' || block.type === 'call') ? block.target === fragmentId : false);
     if (referenced) { show('该片段仍被分支、条件、跳转或调用引用，请先解除引用', 'error'); return; }
     if (!await requestConfirm({ title: '删除片段', message: '删除片段会同时删除其中的全部 Block，是否继续？', confirmText: '删除片段', danger: true })) return;
-    commit((current) => { const chapters = current.chapters.map((chapter) => chapter.id === chapterId ? { ...chapter, fragments: chapter.fragments.filter((fragment) => fragment.id !== fragmentId) } : chapter); const scripts = { ...current.scripts }; delete scripts[fragmentId]; const first = chapters.flatMap((chapter) => chapter.fragments)[0].id; return { ...current, chapters, scripts, activeFragmentId: current.activeFragmentId === fragmentId ? first : current.activeFragmentId }; }); setSelected(0);
+    commit((current) => { const chapters = current.chapters.map((chapter) => chapter.id === chapterId ? { ...chapter, fragments: chapter.fragments.filter((fragment) => fragment.id !== fragmentId) } : chapter); const scripts = { ...current.scripts }; delete scripts[fragmentId]; const timelines = { ...(current.timelines ?? {}) }; delete timelines[fragmentId]; const first = chapters.flatMap((chapter) => chapter.fragments)[0].id; return { ...current, chapters, scripts, timelines, activeFragmentId: current.activeFragmentId === fragmentId ? first : current.activeFragmentId }; }); setSelected(0);
   };
   const structureAction = async (action: 'copy' | 'cut' | 'duplicate' | 'paste', chapterId: string, fragmentId?: string) => {
     const chapter = project.chapters.find((item) => item.id === chapterId); if (!chapter) return;
     const payload = fragmentId
-      ? { kind: 'fragment', sourceId: fragmentId, fragment: clone(chapter.fragments.find((item) => item.id === fragmentId)), blocks: clone(project.scripts[fragmentId] ?? []) }
-      : { kind: 'chapter', chapter: clone(chapter), scripts: Object.fromEntries(chapter.fragments.map((fragment) => [fragment.id, clone(project.scripts[fragment.id] ?? [])])) };
+      ? { kind: 'fragment', sourceId: fragmentId, fragment: clone(chapter.fragments.find((item) => item.id === fragmentId)), blocks: clone(project.scripts[fragmentId] ?? []), timeline: clone(project.timelines?.[fragmentId]) }
+      : { kind: 'chapter', chapter: clone(chapter), scripts: Object.fromEntries(chapter.fragments.map((fragment) => [fragment.id, clone(project.scripts[fragment.id] ?? [])])), timelines: Object.fromEntries(chapter.fragments.flatMap((fragment) => project.timelines?.[fragment.id] ? [[fragment.id, clone(project.timelines[fragment.id])]] : [])) };
     const writePayload = async (value: unknown) => {
       const encoded = `HIKARI_STRUCTURE_V1\n${JSON.stringify(value)}`;
       writeSmallValue('hikari-structure-clipboard', encoded);
@@ -896,8 +934,11 @@ export default function App() {
       if (source.kind === 'fragment' && source.fragment && Array.isArray(source.blocks)) {
         const id = makeId('fragment');
         const name = uniqueName(String(source.fragment.name || '片段'), chapter.fragments.map((item) => item.name));
-        const remap = (block: StoryBlock): StoryBlock => { const next = { ...clone(block), id: makeId('block') } as StoryBlock; if (next.type === 'branch') next.options = next.options?.map((option) => ({ ...option, target: option.target === source.sourceId ? id : option.target })); if (next.type === 'condition') { if (next.trueTarget === source.sourceId) next.trueTarget = id; if (next.falseTarget === source.sourceId) next.falseTarget = id; } if ((next.type === 'jump' || next.type === 'call') && next.target === source.sourceId) next.target = id; return next; };
-        commit((current) => ({ ...current, activeFragmentId: id, chapters: current.chapters.map((item) => item.id === chapterId ? { ...item, fragments: [...item.fragments, { id, name }] } : item), scripts: { ...current.scripts, [id]: source.blocks.map(remap) } }), `粘贴片段 ${name}`);
+        const blockIds = new Map<string, string>();
+        const remap = (block: StoryBlock): StoryBlock => { const nextId = makeId('block'); blockIds.set(block.id, nextId); const next = { ...clone(block), id: nextId } as StoryBlock; if (next.type === 'branch') next.options = next.options?.map((option) => ({ ...option, target: option.target === source.sourceId ? id : option.target })); if (next.type === 'condition') { if (next.trueTarget === source.sourceId) next.trueTarget = id; if (next.falseTarget === source.sourceId) next.falseTarget = id; } if ((next.type === 'jump' || next.type === 'call') && next.target === source.sourceId) next.target = id; return next; };
+        const blocks = source.blocks.map(remap);
+        const timeline = source.timeline ? remapTimeline(source.timeline, id, blockIds, makeId) : undefined;
+        commit((current) => ({ ...current, activeFragmentId: id, chapters: current.chapters.map((item) => item.id === chapterId ? { ...item, fragments: [...item.fragments, { id, name }] } : item), scripts: { ...current.scripts, [id]: blocks }, timelines: timeline ? { ...(current.timelines ?? {}), [id]: timeline } : current.timelines }), `粘贴片段 ${name}`);
         setOpenFragmentIds((items) => [...items, id]); setSelected(0); show(`已粘贴片段“${name}”`); return;
       }
       if (source.kind === 'chapter' && source.chapter && source.scripts) {
@@ -906,9 +947,15 @@ export default function App() {
         const fragments = source.chapter.fragments.map((fragment: { id: string; name: string }) => ({ id: idMap.get(fragment.id)!, name: fragment.name }));
         const name = uniqueName(String(source.chapter.name || '章节'), project.chapters.map((item) => item.name));
         const scripts: Record<string, StoryBlock[]> = {};
-        for (const fragment of source.chapter.fragments as { id: string }[]) scripts[idMap.get(fragment.id)!] = (source.scripts[fragment.id] ?? []).map((raw: StoryBlock) => { const next = { ...clone(raw), id: makeId('block') } as StoryBlock; const mapTarget = (target?: string) => target ? idMap.get(target) ?? target : target; if (next.type === 'branch') next.options = next.options?.map((option) => ({ ...option, target: mapTarget(option.target)! })); if (next.type === 'condition') { next.trueTarget = mapTarget(next.trueTarget); next.falseTarget = mapTarget(next.falseTarget); } if (next.type === 'jump' || next.type === 'call') next.target = mapTarget(next.target); return next; });
+        const timelines: NonNullable<Project['timelines']> = {};
+        for (const fragment of source.chapter.fragments as { id: string }[]) {
+          const targetFragmentId = idMap.get(fragment.id)!;
+          const blockIds = new Map<string, string>();
+          scripts[targetFragmentId] = (source.scripts[fragment.id] ?? []).map((raw: StoryBlock) => { const nextId = makeId('block'); blockIds.set(raw.id, nextId); const next = { ...clone(raw), id: nextId } as StoryBlock; const mapTarget = (target?: string) => target ? idMap.get(target) ?? target : target; if (next.type === 'branch') next.options = next.options?.map((option) => ({ ...option, target: mapTarget(option.target)! })); if (next.type === 'condition') { next.trueTarget = mapTarget(next.trueTarget); next.falseTarget = mapTarget(next.falseTarget); } if (next.type === 'jump' || next.type === 'call') next.target = mapTarget(next.target); return next; });
+          if (source.timelines?.[fragment.id]) timelines[targetFragmentId] = remapTimeline(source.timelines[fragment.id], targetFragmentId, blockIds, makeId);
+        }
         const firstId = fragments[0]?.id;
-        commit((current) => { const index = current.chapters.findIndex((item) => item.id === chapterId); const chapters = [...current.chapters]; chapters.splice(index + 1, 0, { id: newChapterId, name, fragments }); return { ...current, chapters, scripts: { ...current.scripts, ...scripts }, activeFragmentId: firstId ?? current.activeFragmentId }; }, `粘贴章节 ${name}`);
+        commit((current) => { const index = current.chapters.findIndex((item) => item.id === chapterId); const chapters = [...current.chapters]; chapters.splice(index + 1, 0, { id: newChapterId, name, fragments }); return { ...current, chapters, scripts: { ...current.scripts, ...scripts }, timelines: { ...(current.timelines ?? {}), ...timelines }, activeFragmentId: firstId ?? current.activeFragmentId }; }, `粘贴章节 ${name}`);
         if (firstId) { setOpenFragmentIds((items) => [...items, firstId]); setSelected(0); } show(`已粘贴章节“${name}”`);
       }
     };
@@ -921,7 +968,7 @@ export default function App() {
     if (referenced(targetIds)) { show('内容仍被剧情流程引用，请先解除引用', 'error'); return; }
     if (fragmentId) { await removeFragment(chapterId, fragmentId); return; }
     if (!await requestConfirm({ title: '剪切章节', message: `从项目中移除“${chapter.name}”？内容已复制到剪贴板。`, confirmText: '剪切', danger: true })) return;
-    commit((current) => { const scripts = { ...current.scripts }; for (const fragment of chapter.fragments) delete scripts[fragment.id]; const chapters = current.chapters.filter((item) => item.id !== chapterId); const activeFragmentId = chapter.fragments.some((item) => item.id === current.activeFragmentId) ? chapters[0].fragments[0].id : current.activeFragmentId; return { ...current, chapters, scripts, activeFragmentId }; }, `剪切章节 ${chapter.name}`);
+    commit((current) => { const scripts = { ...current.scripts }; const timelines = { ...(current.timelines ?? {}) }; for (const fragment of chapter.fragments) { delete scripts[fragment.id]; delete timelines[fragment.id]; } const chapters = current.chapters.filter((item) => item.id !== chapterId); const activeFragmentId = chapter.fragments.some((item) => item.id === current.activeFragmentId) ? chapters[0].fragments[0].id : current.activeFragmentId; return { ...current, chapters, scripts, timelines, activeFragmentId }; }, `剪切章节 ${chapter.name}`);
   };
   const toggleChapterDisabled = (chapterId: string) => commit((current) => ({ ...current, chapters: current.chapters.map((chapter) => chapter.id === chapterId && !chapter.entry ? { ...chapter, disabled: !chapter.disabled } : chapter) }), '切换章节启用状态');
   const addBlock = (type: BlockType) => { const block = createBlock(type, project); const nextIndex = (project.scripts[project.activeFragmentId] ?? []).length; commit((current) => ({ ...current, scripts: { ...current.scripts, [current.activeFragmentId]: [...(current.scripts[current.activeFragmentId] ?? []), block] } }), `添加${blockMeta[type].name}`); setSelected(nextIndex); setModal(null); };
@@ -941,12 +988,21 @@ export default function App() {
     setScriptImportPreview(null);
     show(`已从 ${scriptImportPreview.sourceName} 导入 ${blocks.length} 个 Block`);
   };
-  const doNew = async () => { const name = await requestText({ title: '新建项目', message: '创建新的 Hikari Studio 项目。', placeholder: '项目名称', confirmText: '创建项目' }); if (!name) return; try { await flushCommandHistory(); await restoreProjectAndHistory(await newProject(name)); setProjectClosed(false); show('新项目已创建'); } catch (error) { show(String(error), 'error'); } };
-  const doOpen = async () => { try { await flushCommandHistory(); const opened = await openProject(); if (opened) { await restoreProjectAndHistory(opened); setProjectClosed(false); show('项目已打开'); } } catch (error) { show(String(error), 'error'); } };
-  const doOpenRecent = async (path: string) => { try { await flushCommandHistory(); await restoreProjectAndHistory(await openRecentProject(path)); setProjectClosed(false); show('最近项目已打开'); } catch (error) { show(String(error), 'error'); throw error; } };
+  const doNew = async () => { setCreateWizardRequested(true); setProjectClosed(true); };
+  const doCreateProject = async (options: ProjectCreationOptions) => {
+    try {
+      await prepareProjectSwitch();
+      const created = await createProject(options);
+      await restoreProjectAndHistory(created);
+      show('新项目已创建');
+      return created;
+    } finally { projectSwitchingRef.current = false; }
+  };
+  const doOpen = async (rethrow = false) => { try { await prepareProjectSwitch(); const opened = await openProject(); if (opened) { await restoreProjectAndHistory(opened); setProjectClosed(false); show('项目已打开'); } } catch (error) { show(String(error), 'error'); if (rethrow) throw error; } finally { projectSwitchingRef.current = false; } };
+  const doOpenRecent = async (path: string) => { try { await prepareProjectSwitch(); await restoreProjectAndHistory(await openRecentProject(path)); setProjectClosed(false); show('最近项目已打开'); } catch (error) { show(String(error), 'error'); throw error; } finally { projectSwitchingRef.current = false; } };
   const renameProject = async () => { const name = await requestText({ title: '重命名项目', initialValue: project.meta.name, confirmText: '重命名' }); if (!name || name === project.meta.name) return; commit((current) => ({ ...current, meta: { ...current.meta, name } }), `重命名项目为 ${name}`); show('项目已重命名'); };
   const doSaveAs = async () => { try { const result = await saveProjectAs(project); if (result) show(`项目副本已保存：${result.path}`); } catch (error) { show(String(error), 'error'); } };
-  const closeProject = async () => { if (!await requestConfirm({ title: '关闭项目', message: `关闭“${project.meta.name}”？未保存修改会先由自动保存处理。`, confirmText: '关闭项目' })) return; await flushCommandHistory(); setProjectClosed(true); setProjectMenuOpen(false); };
+  const closeProject = async () => { if (!await requestConfirm({ title: '关闭项目', message: `关闭“${project.meta.name}”？未保存修改会先由自动保存处理。`, confirmText: '关闭项目' })) return; await flushCommandHistory(); setCreateWizardRequested(false); setProjectClosed(true); setProjectMenuOpen(false); };
   const exitApplication = async () => {
     try { await flushCommandHistory(); }
     catch (error) { log('error', 'history', '退出前保存 Command 历史失败', error); }
@@ -1056,6 +1112,7 @@ export default function App() {
   const activeName = project.chapters.flatMap((chapter) => chapter.fragments).find((fragment) => fragment.id === project.activeFragmentId)?.name ?? '片段';
   const pages: Record<Page, ReactNode> = {
     script: <ScriptPage project={project} commit={commit} selected={selected} setSelected={setSelected} view={view} setView={setView} openBlocks={() => setModal('blocks')} openImport={() => setScriptImportOpen(true)} requestConfirm={requestConfirm} openFragmentIds={openFragmentIds} activateFragment={activate} closeFragment={closeFragment} reorderFragmentTabs={reorderFragmentTabs} inspectorDock={inspectorDock} setInspectorDock={setInspectorDock} initialScrollTop={project.settings.editorSession?.scrollTopByFragment?.[project.activeFragmentId] ?? 0} saveScrollTop={saveFragmentScrollTop} debugRunning={debugRunning} notify={show} />,
+    stage: <StageTimelineWorkspace project={project} selectedBlock={selected} commit={commit} locateBlock={(index) => setSelected(index)} notify={show} />,
     assets: <AssetManager project={project} commit={commit} notify={show} requestConfirm={requestConfirm} activate={activate} />,
     audio: <AudioManager project={project} category={audioCategory} setCategory={setAudioCategory} commit={commit} notify={show} requestConfirm={requestConfirm} activate={activate} />,
     map: <NarrativeMap project={project} activate={activate} commit={commit} notify={show} requestText={requestText} />,
@@ -1067,17 +1124,20 @@ export default function App() {
   const openAssetSection = (section: string, target: Page = 'assets') => { setAssetSection(section); navigatePage(target); setAssetMenuOpen(false); };
   const openAudioSection = (category: AudioCategory) => { setAudioCategory(category); navigatePage('audio'); setAssetMenuOpen(false); };
 
+  if (projectClosed) return <ProjectLaunchScreen key={createWizardRequested ? 'create' : 'home'} startInWizard={createWizardRequested} ready={startupReady} onOpen={() => doOpen(true)} onOpenRecent={doOpenRecent} onCreate={doCreateProject} onCreated={() => { setCreateWizardRequested(false); setProjectClosed(false); }} onExit={() => void exitApplication()} />;
+
   return <div className={`app-shell desktop-app ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}><header className="topbar titlebar-drag pywebview-drag-region"><div className="brand-lockup"><div className="brand-mark">H</div><div><strong>Hikari Studio</strong><span>{projectClosed ? '未打开项目' : project.meta.name}</span></div></div><div className="navigation-controls titlebar-no-drag"><button className="icon-button" disabled={!backPages.length} title="后退" onClick={navigateBack}><ArrowLeft /></button><button className="icon-button" disabled={!forwardPages.length} title="前进" onClick={navigateForward}><ArrowRight /></button></div><div className="top-project-menu titlebar-no-drag"><button className="project-menu-trigger" aria-expanded={projectMenuOpen} onClick={() => setProjectMenuOpen((value) => !value)}><Menu /><span>{project.meta.name}</span><ChevronDown /></button>{projectMenuOpen && <div className="top-dropdown project-actions-menu"><button onClick={() => { setProjectMenuOpen(false); void doOpen(); }}><FolderOpen />打开项目</button><button onClick={() => { setProjectMenuOpen(false); void renameProject(); }}><FileText />重命名</button><button onClick={() => { setProjectMenuOpen(false); void doSaveAs(); }}><SaveAs />另存为</button><button onClick={() => { setProjectMenuOpen(false); navigatePage('history'); }}><History />项目历史</button><button onClick={() => void closeProject()}><X />关闭项目</button><button onClick={() => void exitApplication()}><LogOut />退出应用</button></div>}</div><button className="search-trigger titlebar-no-drag" onClick={() => setModal('search')}><Search /><span>搜索台词、指令和资源...</span><kbd>Ctrl K</kbd></button><div className="top-actions titlebar-no-drag"><div className="save-state"><span />{saveState}</div><button className="icon-button notification-trigger" title="通知" onClick={() => setNotificationsOpen((value) => !value)}><Bell />{notifications.some((item) => !item.read) && <span />}</button><div className="account-entry"><button className="avatar-button" title="创作者账号" onClick={() => setAccountMenuOpen((value) => !value)}>{creatorName ? creatorName.slice(0, 1).toUpperCase() : <UserRound />}</button>{accountMenuOpen && <div className="top-dropdown account-menu">{creatorName ? <><strong>{creatorName}</strong><button onClick={() => void loginCreator()}><Settings2 />账号设置</button><button onClick={logoutCreator}><LogOut />退出账号</button></> : <button onClick={() => void loginCreator()}><UserRound />登录创作者账号</button>}</div>}</div><WindowChrome onClose={() => void exitApplication()} /></div></header>
-    <nav className="module-nav"><div className="module-links"><button className={`module-link ${page === 'script' ? 'active' : ''}`} onClick={() => navigatePage('script')}><NotebookPen />{debugRunning ? '调试' : '剧本'}</button><div className="asset-nav-menu"><button className={`module-link ${page === 'assets' || page === 'characters' || page === 'scenes' || page === 'audio' ? 'active' : ''}`} aria-expanded={assetMenuOpen} onClick={() => setAssetMenuOpen((value) => !value)}><FolderOpen />资产<ChevronDown /></button>{assetMenuOpen && <div className="top-dropdown asset-submenu"><button onClick={() => openAssetSection('全部')}><PackageCheck />资源总览</button><button onClick={() => openAssetSection('全部', 'characters')}><Users />角色</button><button onClick={() => openAssetSection('全部', 'scenes')}><Image />场景</button><button onClick={() => openAudioSection('bgm')}><Music2 />BGM</button><button onClick={() => openAudioSection('sfx')}><AudioLines />SE</button><button onClick={() => openAudioSection('voice')}><MessageSquareText />语音</button></div>}</div><button className={`module-link ${page === 'map' ? 'active' : ''}`} onClick={() => navigatePage('map')}><GitBranch />叙事地图</button><button className={`module-link ${themeOpen ? 'active' : ''}`} onClick={() => setThemeOpen(true)}><Palette />个性化</button><button className={`module-link ${page === 'ai' ? 'active' : ''}`} onClick={() => navigatePage('ai')}><Sparkles />AI Agent</button></div><div className="module-actions"><button className={`button ghost ${debugRunning ? 'active' : ''}`} onClick={() => { setDebugRunning((value) => !value); navigatePage('script'); setSelected(0); show(debugRunning ? '已退出调试运行' : '已进入调试运行'); }}><BugPlay />{debugRunning ? '停止调试' : '调试运行'}</button><button className="button primary" onClick={() => setModal('publish')}><Rocket />发布游戏</button><button className="icon-button" title="设置" onClick={() => setSettingsOpen(true)}><Settings2 /></button></div></nav>
-    <main className={`workspace ${page === 'map' || page === 'characters' || page === 'scenes' || page === 'audio' ? 'map-workspace' : ''}`}>{!projectClosed && !['map', 'characters', 'scenes', 'audio'].includes(page) && !sidebarCollapsed && <Sidebar project={project} activate={activate} addChapter={addChapter} addFragment={addFragment} removeFragment={removeFragment} openSettings={() => setChapterSettingsOpen(true)} toggleChapterDisabled={toggleChapterDisabled} collapseSidebar={() => setSidebarCollapsed(true)} structureAction={(action, chapterId, fragmentId) => void structureAction(action, chapterId, fragmentId)} />}{!projectClosed && !['map', 'characters', 'scenes', 'audio'].includes(page) && sidebarCollapsed && <button className="sidebar-expand" title="展开章节列表" onClick={() => setSidebarCollapsed(false)}><ArrowRight /></button>}<section className="page-content">{projectClosed ? <div className="closed-project"><FolderOpen /><strong>没有打开的项目</strong><span>新建项目或打开本地 Hikari v3 项目继续创作。</span><div><button className="button primary" onClick={() => void doNew()}><FilePlus2 />新建项目</button><button className="button ghost" onClick={() => void doOpen()}><FolderOpen />打开项目</button></div></div> : pages[page]}</section></main>
+    <nav className="module-nav"><div className="module-links"><button className={`module-link ${page === 'script' ? 'active' : ''}`} onClick={() => navigatePage('script')}><NotebookPen />{debugRunning ? '调试' : '剧本'}</button><button className={`module-link ${page === 'stage' ? 'active' : ''}`} onClick={() => navigatePage('stage')}><Clapperboard />演出</button><div className="asset-nav-menu"><button className={`module-link ${page === 'assets' || page === 'characters' || page === 'scenes' || page === 'audio' ? 'active' : ''}`} aria-expanded={assetMenuOpen} onClick={() => setAssetMenuOpen((value) => !value)}><FolderOpen />资产<ChevronDown /></button>{assetMenuOpen && <div className="top-dropdown asset-submenu"><button onClick={() => openAssetSection('全部')}><PackageCheck />资源总览</button><button onClick={() => openAssetSection('全部', 'characters')}><Users />角色</button><button onClick={() => openAssetSection('全部', 'scenes')}><Image />场景</button><button onClick={() => openAudioSection('bgm')}><Music2 />BGM</button><button onClick={() => openAudioSection('sfx')}><AudioLines />SE</button><button onClick={() => openAudioSection('voice')}><MessageSquareText />语音</button></div>}</div><button className={`module-link ${page === 'map' ? 'active' : ''}`} onClick={() => navigatePage('map')}><GitBranch />叙事地图</button><button className={`module-link ${themeOpen ? 'active' : ''}`} onClick={() => setThemeOpen(true)}><Palette />个性化</button><button className={`module-link ${page === 'ai' ? 'active' : ''}`} onClick={() => navigatePage('ai')}><Sparkles />AI Agent</button></div><div className="module-actions"><button className={`button ghost ${debugRunning ? 'active' : ''}`} onClick={() => { setDebugRunning((value) => !value); navigatePage('script'); setSelected(0); show(debugRunning ? '已退出调试运行' : '已进入调试运行'); }}><BugPlay />{debugRunning ? '停止调试' : '调试运行'}</button><button className="button primary" onClick={() => setModal('publish')}><Rocket />发布游戏</button><button className="icon-button" title="设置" onClick={() => setSettingsOpen(true)}><Settings2 /></button></div></nav>
+    <main className={`workspace ${page === 'map' || page === 'stage' || page === 'characters' || page === 'scenes' || page === 'audio' ? 'map-workspace' : ''}`}>{!projectClosed && !['map', 'stage', 'characters', 'scenes', 'audio'].includes(page) && !sidebarCollapsed && <Sidebar project={project} activate={activate} addChapter={addChapter} addFragment={addFragment} removeFragment={removeFragment} openSettings={() => setChapterSettingsOpen(true)} toggleChapterDisabled={toggleChapterDisabled} collapseSidebar={() => setSidebarCollapsed(true)} structureAction={(action, chapterId, fragmentId) => void structureAction(action, chapterId, fragmentId)} />}{!projectClosed && !['map', 'stage', 'characters', 'scenes', 'audio'].includes(page) && sidebarCollapsed && <button className="sidebar-expand" title="展开章节列表" onClick={() => setSidebarCollapsed(false)}><ArrowRight /></button>}<section className="page-content"><AnimatePresence mode="wait" initial={false}><motion.div className="page-transition" key={projectClosed ? 'closed' : page} initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 9 }} animate={{ opacity: 1, y: 0 }} exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -7 }} transition={{ duration: reducedMotion ? .08 : .22, ease: [.2, .8, .2, 1] }}>{projectClosed ? <div className="closed-project"><FolderOpen /><strong>没有打开的项目</strong><span>新建项目或打开本地 Hikari v3 项目继续创作。</span><div><button className="button primary" onClick={() => void doNew()}><FilePlus2 />新建项目</button><button className="button ghost" onClick={() => void doOpen()}><FolderOpen />打开项目</button></div></div> : pages[page]}</motion.div></AnimatePresence></section></main>
     <ModalLayer modal={modal} project={project} close={() => setModal(null)} addBlock={addBlock} runBuild={(kind) => void runBuild(kind)} />
     {modal === 'search' && <SearchPalette project={project} close={() => setModal(null)} locate={locateSearchResult} replaceText={replaceProjectText} />}
     <RuntimeSettingsDialog open={settingsOpen} project={project} close={() => setSettingsOpen(false)} apply={(settings, resolution) => { commit((current) => ({ ...current, settings, meta: { ...current.meta, resolution } }), '更新运行设置'); setSettingsOpen(false); show('运行设置已更新'); }} />
-    <GameUiThemeDialog open={themeOpen} project={project} close={() => setThemeOpen(false)} relinkAsset={async (assetId) => { const replacement = await replaceAssetFile(assetId); if (!replacement) return; commit((current) => { const existing = current.assets.find((asset) => asset.id === assetId); const next = { ...existing, ...replacement, id: assetId, forceBundle: existing?.forceBundle } as Asset; return { ...current, assets: existing ? current.assets.map((asset) => asset.id === assetId ? next : asset) : [...current.assets, next] }; }, `重新定位游戏 UI 素材 ${assetId}`); show('游戏 UI 素材已恢复'); }} apply={(ui, gameVersion) => { commit((current) => ({ ...current, ui, meta: { ...current.meta, gameVersion } }), '更新游戏 UI 主题'); setThemeOpen(false); show('游戏 UI 主题已应用'); }} />
+    <EditorAppearanceDialog open={themeOpen} close={() => setThemeOpen(false)} openGameTheme={() => setGameThemeOpen(true)} />
+    <GameUiThemeDialog open={gameThemeOpen} project={project} close={() => setGameThemeOpen(false)} relinkAsset={async (assetId) => { const replacement = await replaceAssetFile(assetId); if (!replacement) return; commit((current) => { const existing = current.assets.find((asset) => asset.id === assetId); const next = { ...existing, ...replacement, id: assetId, forceBundle: existing?.forceBundle } as Asset; return { ...current, assets: existing ? current.assets.map((asset) => asset.id === assetId ? next : asset) : [...current.assets, next] }; }, `重新定位游戏 UI 素材 ${assetId}`); show('游戏 UI 素材已恢复'); }} apply={(ui, gameVersion) => { commit((current) => ({ ...current, ui, meta: { ...current.meta, gameVersion } }), '更新游戏 UI 主题'); setGameThemeOpen(false); show('游戏 UI 主题已应用'); }} />
     <ChapterSchedulingDialog open={chapterSettingsOpen} project={project} close={() => setChapterSettingsOpen(false)} apply={(chapterScheduling) => { commit((current) => ({ ...current, settings: { ...current.settings, chapterScheduling } }), '更新章节调度'); setChapterSettingsOpen(false); show('章节运行设置已更新'); }} />
     <NotificationCenter open={notificationsOpen} items={notifications} close={() => setNotificationsOpen(false)} markAllRead={() => setNotifications((items) => items.map((item) => ({ ...item, read: true })))} clear={() => setNotifications([])} />
     <ScriptImportDialog open={scriptImportOpen} busy={scriptImportBusy} preview={scriptImportPreview} close={() => { setScriptImportOpen(false); setScriptImportPreview(null); }} selectFile={() => void selectScriptImport()} apply={applyScriptImport} />
     <FrontendDialog dialog={appDialog} updateValue={(value) => setAppDialog((current) => current ? { ...current, value } : current)} close={closeAppDialog} />
-    {toast && <div className={`toast show ${toast.tone === 'error' ? 'error' : ''}`}><CheckCircle2 /><span>{toast.text}</span></div>}
+    <AnimatePresence>{toast && <motion.div className={`toast show ${toast.tone === 'error' ? 'error' : ''}`} initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 18, scale: .97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 10, scale: .98 }} transition={{ duration: reducedMotion ? .08 : .2 }}><CheckCircle2 /><span>{toast.text}</span></motion.div>}</AnimatePresence>
   </div>;
 }

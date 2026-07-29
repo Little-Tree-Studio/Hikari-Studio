@@ -4,6 +4,7 @@ import { SaveGameDialog } from '../components/SaveGameDialog';
 import { gameUiThemeCssVariables, normalizeGameUiTheme } from '../core/gameUiTheme';
 import { captureSaveThumbnail, listSaveSlots, readSaveSlot, readSharedVariables, writeSaveSlot, writeSharedVariables } from '../core/saveGames';
 import { readLargeValue, writeLargeValue } from '../core/storage';
+import { evaluateTimelineAtTime, timelineForProject } from '../core/timeline';
 import { advanceEngine, chooseBranch, createEngineState, currentBlock, loadSaveGame, resolveDialogueSpeaker, rollbackEngine } from '../engine-core/runtime';
 import type { EngineState } from '../engine-core/types';
 import type { Project } from '../types';
@@ -38,6 +39,7 @@ export function GameRuntime({ project }: { project: Project }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [saveMode, setSaveMode] = useState<'save' | 'load' | null>(null);
   const [notice, setNotice] = useState('');
+  const [timelineTime, setTimelineTime] = useState(0);
   const settingsKey = `hikari-runtime-settings:${project.meta.id}`;
   const [preferences, setPreferences] = useState<RuntimePreferences>(() => {
     const defaults: RuntimePreferences = {
@@ -62,7 +64,10 @@ export function GameRuntime({ project }: { project: Project }) {
   const audioFadeFrames = useRef<Record<string, number>>({});
   const dialogueCopyRef = useRef<HTMLDivElement>(null);
   const dialogueMeasureRef = useRef<HTMLDivElement>(null);
+  const timelineFragmentRef = useRef(state.fragmentId);
   const current = currentBlock(project, state);
+  const activeTimeline = useMemo(() => timelineForProject(project, state.fragmentId), [project, state.fragmentId]);
+  const timelinePreview = useMemo(() => evaluateTimelineAtTime(activeTimeline, timelineTime), [activeTimeline, timelineTime]);
   const fullText = current && 'text' in current ? current.text ?? '' : '';
   const textCharacters = useMemo(() => Array.from(fullText), [fullText]);
   const [visibleCharacters, setVisibleCharacters] = useState(0);
@@ -71,7 +76,7 @@ export function GameRuntime({ project }: { project: Project }) {
   const sharedNames = useMemo(() => Object.entries(project.variableDefinitions ?? {}).filter(([, definition]) => definition.persistence === 'shared').map(([name]) => name), [project.variableDefinitions]);
   const assetUri = (assetId?: string) => project.assets.find((asset) => asset.id === assetId)?.uri;
   const background = assetUri(state.stage.backgroundAssetId);
-  const camera = state.stage.camera;
+  const camera = { ...state.stage.camera, ...timelinePreview.camera };
   const cameraFilter = camera.filter === 'monochrome' ? 'grayscale(1)' : camera.filter === 'sepia' ? 'sepia(.85)' : camera.filter === 'blur' ? 'blur(3px)' : 'none';
   const titleBackground = assetUri(project.ui?.title?.backgroundAssetId ?? project.scenes?.[0]?.layers.at(-1)?.assetId ?? project.assets.find((asset) => asset.kind === 'scene' || asset.kind === 'image')?.id);
   const titleLogo = assetUri(project.ui?.title?.logoAssetId);
@@ -79,6 +84,34 @@ export function GameRuntime({ project }: { project: Project }) {
   const fastForwardActive = skipMode || controlFastForward;
   const runtimeTheme = normalizeGameUiTheme(project.ui?.runtimeTheme);
   const runtimeFontUri = assetUri(runtimeTheme.fontAssetId);
+
+  useEffect(() => {
+    if (screen !== 'playing') return;
+    const fragmentChanged = timelineFragmentRef.current !== state.fragmentId;
+    timelineFragmentRef.current = state.fragmentId;
+    const script = project.scripts[state.fragmentId] ?? [];
+    const currentIndex = current ? script.findIndex((block) => block.id === current.id) : state.instructionPointer;
+    const linked = activeTimeline.tracks.flatMap((track) => track.clips)
+      .filter((clip) => {
+        const index = clip.blockId ? script.findIndex((block) => block.id === clip.blockId) : -1;
+        return index >= 0 && index <= currentIndex;
+      })
+      .sort((left, right) => right.start - left.start)[0];
+    const target = Math.min(activeTimeline.duration, linked ? linked.start + linked.duration : 0);
+    let start = fragmentChanged ? 0 : timelineTime;
+    if (target < start || target - start > 12) start = linked?.start ?? 0;
+    setTimelineTime(start);
+    if (target <= start + .001) return;
+    const clock = performance.now();
+    let frame = 0;
+    const tick = (now: number) => {
+      const next = Math.min(target, start + (now - clock) / 1000);
+      setTimelineTime(next);
+      if (next < target) frame = window.requestAnimationFrame(tick);
+    };
+    frame = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeTimeline, current?.id, project.scripts, screen, state.fragmentId, state.instructionPointer]);
 
   useLayoutEffect(() => {
     const copy = dialogueCopyRef.current;
@@ -314,6 +347,16 @@ export function GameRuntime({ project }: { project: Project }) {
     }
   }, [preferences.bgmVolume, preferences.masterVolume, preferences.sfxVolume, preferences.voiceVolume, project.assets, state.audio]);
 
+  useEffect(() => {
+    for (const channel of ['bgm', 'sfx', 'voice'] as const) {
+      const audio = audioRefs.current[channel];
+      if (!audio) continue;
+      const channelPreference = channel === 'bgm' ? preferences.bgmVolume : channel === 'sfx' ? preferences.sfxVolume : preferences.voiceVolume;
+      const automation = timelinePreview.audio[channel]?.volume ?? 1;
+      audio.volume = clamp(state.audio[channel].volume * automation * preferences.masterVolume * channelPreference);
+    }
+  }, [preferences.bgmVolume, preferences.masterVolume, preferences.sfxVolume, preferences.voiceVolume, state.audio, timelinePreview.audio]);
+
   useEffect(() => () => {
     Object.values(audioFadeFrames.current).forEach((frame) => window.cancelAnimationFrame(frame));
     Object.values(audioRefs.current).forEach((audio) => audio.pause());
@@ -414,14 +457,15 @@ export function GameRuntime({ project }: { project: Project }) {
     {runtimeFontUri && <style>{`@font-face{font-family:"Hikari Project Font";src:url(${JSON.stringify(runtimeFontUri)})}`}</style>}
     <section className="game-stage" onClick={() => { if (screen === 'playing' && !systemMenuOpen) advance(); }}>
       <div className="game-camera" style={{ transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.zoom}) rotate(${camera.rotation}deg)`, filter: cameraFilter, transitionDuration: `${camera.duration}s` }}>
-        {background && <img className="game-background" src={background} alt="" />}
+        {background && <img className="game-background" src={background} alt="" style={{ opacity: timelinePreview.sceneOpacity ?? 1 }} />}
         {state.stage.sceneLayers.map((layer) => {
           const uri = assetUri(layer.assetId);
           const distance = layer.distance ?? 1;
           const relativeScale = Math.max(.1, 1 + (camera.zoom - 1) * (distance - 1));
-          return uri ? <img className="game-scene-layer" key={layer.id} src={uri} alt="" style={{ left: `${layer.x}%`, top: `${layer.y}%`, opacity: layer.opacity, transform: `translate(calc(-50% + ${camera.x * (distance - 1)}px), calc(-50% + ${camera.y * (distance - 1)}px)) scale(${layer.scale * relativeScale})`, mixBlendMode: layer.blendMode, zIndex: layer.layer + 1 }} /> : null;
+          return uri ? <img className="game-scene-layer" key={layer.id} src={uri} alt="" style={{ left: `${layer.x}%`, top: `${layer.y}%`, opacity: layer.opacity * (timelinePreview.sceneOpacity ?? 1), transform: `translate(calc(-50% + ${camera.x * (distance - 1)}px), calc(-50% + ${camera.y * (distance - 1)}px)) scale(${layer.scale * relativeScale})`, mixBlendMode: layer.blendMode, zIndex: layer.layer + 1 }} /> : null;
         })}
-        {Object.values(state.stage.characters).sort((left, right) => left.layer - right.layer).map((actor) => {
+        {Object.values(state.stage.characters).sort((left, right) => left.layer - right.layer).map((stageActor) => {
+          const actor = { ...stageActor, ...(timelinePreview.characters[stageActor.characterId] ?? {}) };
           const character = project.characters.find((item) => item.id === actor.characterId);
           const uri = assetUri(actor.assetId);
           return <div className={`game-character enter-${actor.animation}`} key={actor.characterId} style={{ left: `${actor.x}%`, bottom: `${100 - actor.y}%`, width: dimensionCss(actor.width), height: dimensionCss(actor.height), transform: `translateX(-50%) scale(${actor.scale})`, opacity: actor.opacity, zIndex: actor.layer + 20 }}>

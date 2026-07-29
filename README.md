@@ -2,6 +2,8 @@
 
 <img src="https://capsule-render.vercel.app/api?type=waving&height=190&color=0:102a2a,45:176b5b,100:e56b4f&text=Hikari%20Studio&fontColor=ffffff&fontSize=52&fontAlignY=36&desc=AI%20Native%20Visual%20Novel%20Studio&descAlignY=58&animation=fadeIn" width="100%" alt="Hikari Studio" />
 
+<img src="frontend/public/assets/logo1.png" width="96" alt="Hikari Studio logo" />
+
 <a href="https://github.com/kylemarvin884/Hikari-Studio/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/kylemarvin884/Hikari-Studio/ci.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=Build" alt="Build status" /></a>
 <img src="https://img.shields.io/badge/Platform-Windows-16706a?style=for-the-badge&logo=windows11&logoColor=white" alt="Windows" />
 <img src="https://img.shields.io/badge/Python-3.12-e56b4f?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.12" />
@@ -30,7 +32,7 @@
   <a href="https://github.com/kylemarvin884/Hikari-Studio/releases"><img src="https://img.shields.io/badge/查看-全部版本-176b5b?style=for-the-badge&logo=github" alt="查看全部版本" /></a>
 </p>
 
-当前 Release 提供可复现的源码归档，适合开发者试用和参与开发。Windows 编辑器安装包仍在稳定化阶段，正式提供前不会用启动器或不完整构建冒充安装包。
+当前 `v0.3.0` 工程已经能够生成完整 Windows 安装程序，并完成“创建项目、重启恢复最近项目、双击 `.hikari` 文件接管与 v2/v3 迁移”的真实安装版验收。Release 页面用于发布签名后的预览安装包；每次提交仍会提供可复现的源码与 CI 构建记录。
 
 ## 编辑器预览
 
@@ -44,16 +46,18 @@
 
 | 工作区 | 当前能力 |
 | --- | --- |
+| **项目启动中心** | 最近项目、固定项目、新建与打开；四步创建向导支持模板、路径、画布、作者与高级窗口配置 |
 | **剧本编辑** | 对白、旁白、场景、声音、角色演出、变量、条件、分支、跳转与 Fragment 调用 |
 | **四种视图** | 卡片编辑、纯文本、Ren'Py 风格摘要、底层 JSON OP |
 | **角色与场景** | 每个表情独立立绘、多层场景、视差距离、图层偏移、立绘拖拽与吸附辅助线 |
 | **资源管线** | 图片、音频、视频、字体管理，引用分析、缺失诊断、强制打包与文件夹批量修复 |
 | **叙事地图** | 可移动流程节点、章节与 Fragment 关系、变量因果追踪、分支连线 |
+| **演出时间轴** | 多轨道编排、裁剪、跨轨拖动、框选、波纹编辑、分组折叠、标记与循环区间、音频波形和贝塞尔关键帧 |
 | **实时调试** | 编辑器与 OP 双向定位、变量观察、调用栈、Console、快速存档与流程回滚 |
 | **游戏运行时** | 打字机文本、自动播放、快进、历史、存读档、音量与文本速度设置 |
-| **主题系统** | 对白字体、颜色、渐变高度、姓名样式、系统菜单和存档界面实时预览 |
-| **构建发布** | Web 游戏、Windows WebView2 启动器与 Ren'Py 导出 |
-| **AI Agent** | 模型自动发现与健康评分、自动故障转移、流式任务队列、网络级取消、暂停恢复和历史检查点重跑 |
+| **双主题系统** | 四套编辑器主题、强调色、减少动效，以及独立的游戏对白、菜单和存档界面主题编辑器 |
+| **构建发布** | Web 游戏、Windows WebView2 游戏、Ren'Py 导出，以及基于 Nuitka 与 Inno Setup 的编辑器安装程序 |
+| **AI Agent** | 模型发现与故障转移、流式任务、检查点分支、结构化 Patch、导演模式、制作记忆和全分支模拟 |
 
 <details>
 <summary><strong>展开查看素材健康与自动修复规则</strong></summary>
@@ -75,9 +79,11 @@ flowchart LR
     Host --> FS["v3 目录项目 / 文件系统"]
     Host --> Build["构建 / Git / AI / 系统能力"]
     Editor --> Core["engine-core"]
+    Editor --> Timeline["舞台与演出时间轴"]
     Core --> Preview["编辑器实时预览"]
     Core --> Web["Web 游戏"]
     Core --> Win["Windows WebView2 游戏"]
+    Timeline --> Core
 ```
 
 编辑器预览、Web 游戏和 Windows 游戏共享同一套 TypeScript `engine-core`，避免三套运行逻辑逐渐产生行为差异。
@@ -103,12 +109,16 @@ flowchart LR
 - 长任务提供流式文本、步骤状态、暂停、继续和 Provider 级请求中止。
 - 会话与检查点保存在项目 `.hikari/agent/sessions`，可以在可视化时间线中选择任意历史节点派生重跑。
 - 历史重跑创建独立派生任务，原始任务、事件和结果保持不变；检查点内部执行状态不会暴露到前端。
+- 制作记忆保存世界观、角色规则、剧情事实和文风约束，并在 Agent 写作前参与一致性检查。
+- 导演模式可以编排场景、角色、镜头、音频与转场，结果统一进入逐项确认、冲突检测、原子应用和语义撤销流程。
+- 全分支模拟由共享 `engine-core` 在 Web Worker 中执行，提供进度、取消、缓存、覆盖率、死路与循环诊断。
 
 | 目录 | 职责 |
 | --- | --- |
 | `backend/` | Python 桌面宿主、项目存储、桌面 API、导入与构建能力 |
 | `frontend/src/` | React + TypeScript 编辑器界面 |
 | `frontend/src/engine-core/` | Block 注册、运行状态、诊断和共享执行逻辑 |
+| `frontend/src/core/timeline.ts` | 演出时间轴计算、吸附、波纹编辑、关键帧与运行时求值 |
 | `frontend/src/runtime/` | 导出游戏使用的玩家运行时 |
 | `launcher/Hikari.GameLauncher/` | 基于 .NET 8 WebView2 的 Windows 游戏启动器 |
 | `data/star-sea-echo/` | v3 格式示例项目 |
@@ -185,11 +195,13 @@ chapters/*.json
 scripts/*.json
 characters/*.json
 scenes/*.json
+timelines/*.json
 assets/index.json
 assets/files/*
 locales/zh-CN.json
 settings/editor.json
 ui/theme.json
+.hikari/agent/memory.json
 ```
 
 打开 v1/v2 项目时会先生成带时间戳的备份，再迁移到 v3。项目写入采用临时文件原子替换，并维护本地崩溃恢复副本。
@@ -198,19 +210,21 @@ ui/theme.json
 
 ```text
 工程基础与 v3 项目格式   ██████████  完成
+项目启动与桌面体验       █████████░  安装版可用
+编辑器设计系统与多主题   ████████░░  全工作区迁移中
 核心运行时与编辑器接线   ████████░░  持续完善
-舞台与演出工具           ██████░░░░  开发中
+舞台与演出时间轴         █████████░  正式编辑能力可用
 生产级资源管线           ███████░░░  开发中
-全局 AI 制作 Agent       ███████░░░  核心任务系统可用
-Windows / Web 发布       ██████░░░░  可用，待稳定化
+全局 AI 制作 Agent       ████████░░  智能制作闭环可用
+Windows / Web 发布       ████████░░  已通过安装版主流程验收
 ```
 
 接下来的重点：
 
-1. 为 Agent 检查点增加任务分支树、结果差异比较与结构化修改确认。
-2. 完成导演模式、制作记忆和全分支模拟，并扩展项目工具注册表。
-3. 补齐所有 Block 的运行时行为、诊断和 SaveGame 迁移测试。
-4. 完善 Windows 安装包、自动升级与 Beta 回归流程。
+1. 完成安装版“编辑剧本、预览调试、保存恢复、Web/Windows 构建”的全链路回归。
+2. 补齐剩余 Block 的运行时边界行为、诊断和 SaveGame 迁移测试。
+3. 优化大型项目的时间轴、资源索引、全分支模拟和 Agent 上下文性能。
+4. 加入代码签名、自动升级、崩溃报告脱敏与 Beta 发布流程。
 
 完整阶段规划见 [`docs/phase-2-roadmap.md`](docs/phase-2-roadmap.md)。
 
@@ -223,7 +237,17 @@ cd frontend
 pnpm test
 pnpm run typecheck
 pnpm run build
+pnpm exec playwright test
 ```
+
+最近一次 Windows 验证结果：Python `136` 项、Vitest `54` 项、Playwright `9` 项全部通过；TypeScript 严格检查、前端生产构建、Nuitka standalone 和 Inno Setup 安装程序构建通过。
+
+安装版还通过了以下真实桌面流程：
+
+- 创建示范项目并生成完整 v3 目录。
+- 关闭并重启编辑器后，从最近项目继续打开。
+- 在编辑器运行时双击 `.hikari`，由现有单实例接管并切换项目。
+- 自动备份 v2 单文件项目，再迁移为 v3 目录项目。
 
 每次推送和 Pull Request 都会在 Windows runner 上执行 Python 测试、TypeScript 检查、两套前端构建和 .NET 启动器发布验证。
 

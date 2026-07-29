@@ -1,15 +1,17 @@
-import type { AgentContext, AgentPatchApplyResult, AgentPatchPreconditionResult, AgentPlan, AgentResultComparison, AgentResultRef, AgentTask, AiModelDiscovery, AiSettings, AiSettingsInput, Asset, AssetFileStatus, AssetFolderRepairPreview, AssetRepairIssue, AssetRepairMatch, AudioCategory, CommandHistoryStorageStats, Project, RecentProject, RecoverySnapshot, ScriptImportPreview } from './types';
+import type { AgentContext, AgentPatchApplyResult, AgentPatchPreconditionResult, AgentPlan, AgentResultComparison, AgentResultRef, AgentTask, AiModelDiscovery, AiSettings, AiSettingsInput, Asset, AssetFileStatus, AssetFolderRepairPreview, AssetRepairIssue, AssetRepairMatch, AudioCategory, CommandHistoryStorageStats, DesktopProjectSession, EditorAppearance, Project, ProjectCreationOptions, RecentProject, RecoverySnapshot, ScriptImportPreview } from './types';
 import { readLargeValue, writeLargeValue } from './core/storage';
 import type { PersistedCommandHistory } from './hooks/useCommandHistory';
 
 const waitForDesktopApi = async () => {
-  if (window.pywebview?.api) return window.pywebview.api;
+  const ready = () => typeof window.pywebview?.api?.load_project_session === 'function';
+  if (ready()) return window.pywebview!.api;
   const desktopHost = window.__HIKARI_DESKTOP__ === true;
   if (!desktopHost) return undefined;
   await new Promise<void>((resolve) => {
     let interval = 0;
     let timeout = 0;
     const finish = () => {
+      if (!ready()) return;
       window.clearInterval(interval);
       window.clearTimeout(timeout);
       resolve();
@@ -20,7 +22,14 @@ const waitForDesktopApi = async () => {
     timeout = window.setTimeout(finish, 30000);
     window.addEventListener('pywebviewready', finish, { once: true });
   });
-  return window.pywebview?.api;
+  return ready() ? window.pywebview!.api : undefined;
+};
+
+let currentProjectSession: Omit<DesktopProjectSession, 'project'> | null = null;
+
+const acceptProjectSession = (session: DesktopProjectSession): Project => {
+  currentProjectSession = { projectPath: session.projectPath, sessionToken: session.sessionToken };
+  return session.project;
 };
 
 const withTimeout = async <T>(promise: Promise<T>, milliseconds = 4000): Promise<T> => {
@@ -35,38 +44,51 @@ const withTimeout = async <T>(promise: Promise<T>, milliseconds = 4000): Promise
   }
 };
 
+export async function getEditorAppearance(): Promise<EditorAppearance | null> {
+  const api = await waitForDesktopApi();
+  return api ? withTimeout(api.get_editor_appearance()) : null;
+}
+
+export async function saveEditorAppearance(appearance: EditorAppearance): Promise<EditorAppearance> {
+  const api = await waitForDesktopApi();
+  if (api) return withTimeout(api.save_editor_appearance(appearance));
+  localStorage.setItem('hikari-editor-appearance', JSON.stringify(appearance));
+  return appearance;
+}
+
 export async function loadProject(fallback: Project): Promise<Project> {
   try {
     const api = await waitForDesktopApi();
     if (api) {
-      const encoded = await withTimeout(api.load_project_json(), 30000);
-      return JSON.parse(encoded) as Project;
+      return acceptProjectSession(await withTimeout(api.load_project_session(), 30000));
     }
   } catch (error) {
     console.error('Python project loading failed', error);
+    if (window.__HIKARI_DESKTOP__ === true) throw error;
   }
+  if (window.__HIKARI_DESKTOP__ === true) throw new Error('桌面项目服务未就绪，已停止加载以保护项目文件');
   const cached = await readLargeValue('hikari-project');
   return cached ? JSON.parse(cached) as Project : fallback;
 }
 
 export async function saveProject(project: Project) {
-  try {
-    const api = await waitForDesktopApi();
-    if (api) return await withTimeout(api.save_project(project));
-  } catch (error) {
-    console.error('Python project saving failed', error);
+  const api = await waitForDesktopApi();
+  if (api) {
+    if (!currentProjectSession) throw new Error('桌面项目会话尚未建立，请重新打开项目');
+    return withTimeout(api.save_project(project, project.meta.id, currentProjectSession.projectPath, currentProjectSession.sessionToken));
   }
-  {
-    const encoded = JSON.stringify(project);
-    await writeLargeValue('hikari-project', encoded);
-    return { ok: true, path: '浏览器预览缓存', bytes: encoded.length };
-  }
+  if (window.__HIKARI_DESKTOP__ === true) throw new Error('桌面项目服务未就绪，未执行保存');
+  const encoded = JSON.stringify(project);
+  await writeLargeValue('hikari-project', encoded);
+  return { ok: true, path: '浏览器预览缓存', bytes: encoded.length };
 }
 
 export async function saveProjectAs(project: Project) {
   const api = await waitForDesktopApi();
   if (!api) throw new Error('另存为仅在桌面应用中可用');
-  return withTimeout(api.save_project_as(project), 30000);
+  const result = await withTimeout(api.save_project_as_session(project), 30000);
+  if (result) currentProjectSession = { projectPath: result.projectPath, sessionToken: result.sessionToken };
+  return result;
 }
 
 export async function callWindow(action: 'minimize_window' | 'toggle_maximize' | 'close_window') {
@@ -74,16 +96,22 @@ export async function callWindow(action: 'minimize_window' | 'toggle_maximize' |
   return api?.[action]();
 }
 
+export async function setProjectCreationWindowMode(enabled: boolean) {
+  const api = await waitForDesktopApi();
+  return api?.set_project_creation_mode(enabled);
+}
+
 export async function newProject(name: string): Promise<Project> {
   const api = await waitForDesktopApi();
   if (!api) throw new Error('新建项目仅在桌面应用中可用');
-  return withTimeout(api.new_project(name));
+  return acceptProjectSession(await withTimeout(api.new_project_session(name), 30000));
 }
 
 export async function openProject(): Promise<Project | null> {
   const api = await waitForDesktopApi();
   if (!api) throw new Error('打开项目仅在桌面应用中可用');
-  return withTimeout(api.open_project_dialog(), 30000);
+  const session = await withTimeout(api.open_project_dialog_session(), 30000);
+  return session ? acceptProjectSession(session) : null;
 }
 
 export async function listRecentProjects(): Promise<RecentProject[]> {
@@ -94,13 +122,25 @@ export async function listRecentProjects(): Promise<RecentProject[]> {
 export async function openRecentProject(path: string): Promise<Project> {
   const api = await waitForDesktopApi();
   if (!api) throw new Error('最近项目仅在桌面应用中可用');
-  return withTimeout(api.open_recent_project(path), 30000);
+  return acceptProjectSession(await withTimeout(api.open_recent_project_session(path), 30000));
+}
+
+export async function createProject(options: ProjectCreationOptions): Promise<Project> {
+  const api = await waitForDesktopApi();
+  if (!api) throw new Error('新建项目仅在桌面应用中可用');
+  return acceptProjectSession(await withTimeout(api.create_project_session(options), 60000));
+}
+
+export async function selectProjectLocation(): Promise<string | null> {
+  const api = await waitForDesktopApi();
+  if (!api) return null;
+  return withTimeout(api.select_project_location(), 30000);
 }
 
 export async function openProjectPath(path: string): Promise<Project> {
   const api = await waitForDesktopApi();
   if (!api) throw new Error('项目路径打开仅在桌面应用中可用');
-  return withTimeout(api.open_project_path(path), 30000);
+  return acceptProjectSession(await withTimeout(api.open_project_path_session(path), 30000));
 }
 
 export async function setProjectPinned(path: string, pinned: boolean): Promise<RecentProject[]> {

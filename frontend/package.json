@@ -5,15 +5,18 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build && vite build --config vite.runtime.config.ts",
+    "clean": "node -e \"for (const dir of ['dist','runtime-dist']) require('node:fs').rmSync(dir,{recursive:true,force:true})\"",
+    "clean:editor": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "pnpm run clean && tsc -b && vite build && vite build --config vite.runtime.config.ts",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run",
-    "test:e2e": "vite build && playwright test",
+    "test:e2e": "pnpm run clean:editor && vite build && playwright test",
     "test:watch": "vitest"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
     "lucide-react": "latest",
+    "motion": "^12.23.24",
     "react": "latest",
     "react-dom": "latest",
     "typescript": "latest",

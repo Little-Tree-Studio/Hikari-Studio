@@ -95,6 +95,7 @@ def default_project(name: str = "星海回声") -> dict[str, Any]:
             "old-school": [{"id": new_id("block"), "type": "scene", "title": "旧校舍"}, {"id": new_id("block"), "type": "narration", "text": "尘埃在走廊的光束中缓缓飘落。"}],
             "rain-call": [], "rooftop": [], "planetarium": [],
         },
+        "timelines": {},
         "assets": [
             {"id": "lake", "kind": "scene", "name": "晨雾湖畔", "path": "builtin/lake.jpg", "uri": "./assets/lake.jpg"},
             {"id": "mountain", "kind": "scene", "name": "远山晴空", "path": "builtin/mountain.jpg", "uri": "./assets/mountain.jpg"},
@@ -108,6 +109,23 @@ def default_project(name: str = "星海回声") -> dict[str, Any]:
         "ui": {"theme": "hikari-light", "dialogueStyle": "glass"},
         "productionMemory": default_production_memory(),
     }
+
+
+def blank_project(name: str = "未命名项目") -> dict[str, Any]:
+    project = default_project(name)
+    project.update({
+        "characters": [],
+        "scenes": [],
+        "sceneGroups": [],
+        "chapters": [{"id": "start", "name": "开始", "entry": True, "fragments": [{"id": "opening", "name": "主线"}]}],
+        "activeFragmentId": "opening",
+        "scripts": {"opening": []},
+        "timelines": {},
+        "assets": [],
+        "variables": {},
+        "variableDefinitions": {},
+    })
+    return project
 
 
 class ProjectStore:
@@ -363,6 +381,50 @@ class ProjectStore:
         self.save(project)
         return self.load()
 
+    def create_configured(self, options: dict[str, Any]) -> dict[str, Any]:
+        name = str(options.get("name", "")).strip() or "未命名项目"
+        template = str(options.get("template", "blank"))
+        if template not in {"blank", "sample"}:
+            raise ValueError("未知的项目模板")
+        resolution = options.get("resolution", [1280, 720])
+        if not isinstance(resolution, list) or len(resolution) != 2:
+            raise ValueError("画布分辨率格式无效")
+        width, height = (int(resolution[0]), int(resolution[1]))
+        if width < 640 or height < 360 or width > 7680 or height > 4320:
+            raise ValueError("画布分辨率必须在 640x360 到 7680x4320 之间")
+        requested_directory = str(options.get("projectDirectory", "")).strip()
+        if requested_directory:
+            candidate = Path(requested_directory).expanduser().resolve()
+        else:
+            candidate = (self.data_dir / _safe_name(name, "new-project")).resolve()
+            suffix = 2
+            while candidate.exists():
+                candidate = (self.data_dir / f"{_safe_name(name, 'new-project')}-{suffix}").resolve()
+                suffix += 1
+        if (candidate / MANIFEST_NAME).exists() or (candidate.exists() and any(candidate.iterdir())):
+            raise ValueError("目标项目文件夹已存在且不为空，请选择其他位置")
+        candidate.mkdir(parents=True, exist_ok=True)
+        previous = self.project_path
+        self.project_path = candidate / MANIFEST_NAME
+        project = blank_project(name) if template == "blank" else default_project(name)
+        background_color = str(options.get("backgroundColor", "#101718"))
+        if not re.fullmatch(r"#[0-9a-fA-F]{6}", background_color):
+            background_color = "#101718"
+        project["meta"].update({
+            "author": str(options.get("author", "")).strip(),
+            "description": str(options.get("description", "")).strip(),
+            "resolution": [width, height],
+            "windowTitle": str(options.get("windowTitle", "")).strip() or name,
+            "backgroundColor": background_color,
+        })
+        project.setdefault("ui", {}).setdefault("title", {})["backgroundColor"] = project["meta"]["backgroundColor"]
+        try:
+            self.save(project)
+            return self.load()
+        except Exception:
+            self.project_path = previous
+            raise
+
     def open(self, path: Path) -> dict[str, Any]:
         resolved = path.expanduser().resolve()
         if resolved.is_dir():
@@ -415,7 +477,7 @@ class ProjectStore:
                     return recovered
                 raise
 
-    def save(self, project: dict[str, Any]) -> dict[str, Any]:
+    def save(self, project: dict[str, Any], expected_project_id: str | None = None) -> dict[str, Any]:
         project = self._migrate(project)
         self._validate(project)
         payload = deepcopy(project)
@@ -426,6 +488,18 @@ class ProjectStore:
             self.project_path = self._upgrade_destination(self.project_path)
 
         with self._lock:
+            if expected_project_id:
+                incoming_id = payload.get("meta", {}).get("id")
+                if incoming_id != expected_project_id:
+                    raise ValueError("Project save payload does not match the expected project")
+                if self.project_path.name == MANIFEST_NAME and self.project_path.is_file():
+                    try:
+                        current_manifest = self._read_json(self.project_path)
+                    except (OSError, json.JSONDecodeError):
+                        current_manifest = {}
+                    current_id = current_manifest.get("meta", {}).get("id") if isinstance(current_manifest, dict) else None
+                    if current_id and current_id != expected_project_id:
+                        raise ValueError("Project save target changed; refusing to overwrite another project")
             root = self.project_root
             root.mkdir(parents=True, exist_ok=True)
             manifest = {
@@ -443,6 +517,7 @@ class ProjectStore:
             expected: dict[Path, Any] = {self.project_path: manifest}
             expected.update({root / "chapters" / f"{_component_id(chapter['id'])}.json": chapter for chapter in payload["chapters"]})
             expected.update({root / "scripts" / f"{_component_id(fragment_id)}.json": blocks for fragment_id, blocks in payload["scripts"].items()})
+            expected.update({root / "timelines" / f"{_component_id(fragment_id)}.json": timeline for fragment_id, timeline in payload.get("timelines", {}).items()})
             expected.update({root / "characters" / f"{_component_id(character['id'])}.json": character for character in payload.get("characters", [])})
             expected.update({root / "scenes" / f"{_component_id(scene['id'])}.json": scene for scene in payload.get("scenes", [])})
             assets = [{key: value for key, value in asset.items() if key != "uri"} for asset in payload.get("assets", [])]
@@ -458,6 +533,7 @@ class ProjectStore:
             self._write_json_atomic(self.project_path, manifest)
             self._remove_stale_json(root / "chapters", {path for path in expected if path.parent == root / "chapters"})
             self._remove_stale_json(root / "scripts", {path for path in expected if path.parent == root / "scripts"})
+            self._remove_stale_json(root / "timelines", {path for path in expected if path.parent == root / "timelines"})
             self._remove_stale_json(root / "characters", {path for path in expected if path.parent == root / "characters"})
             self._remove_stale_json(root / "scenes", {path for path in expected if path.parent == root / "scenes"})
             self._write_json_atomic(self.recovery_path, payload)
@@ -601,6 +677,11 @@ class ProjectStore:
         scenes = [self._read_json(root / "scenes" / f"{_component_id(scene_id)}.json") for scene_id in manifest.get("sceneOrder", [])]
         fragment_ids = [fragment["id"] for chapter in chapters for fragment in chapter.get("fragments", [])]
         scripts = {fragment_id: self._read_json(root / "scripts" / f"{_component_id(fragment_id)}.json") for fragment_id in fragment_ids}
+        timelines = {
+            fragment_id: self._read_json(root / "timelines" / f"{_component_id(fragment_id)}.json")
+            for fragment_id in fragment_ids
+            if (root / "timelines" / f"{_component_id(fragment_id)}.json").is_file()
+        }
         assets = self._read_json(root / "assets" / "index.json")
         for asset in assets:
             path_value = str(asset.get("path", ""))
@@ -617,6 +698,7 @@ class ProjectStore:
             "chapters": chapters,
             "activeFragmentId": manifest["activeFragmentId"],
             "scripts": scripts,
+            "timelines": timelines,
             "assets": assets,
             "variables": manifest.get("variables", {}),
             "variableDefinitions": manifest.get("variableDefinitions", {}),
@@ -724,6 +806,15 @@ class ProjectStore:
         settings.setdefault("autoPlayDelay", 1.5)
         settings.setdefault("fastForward", True)
         settings.setdefault("narrativeMap", {"positions": {}})
+        timelines = result.get("timelines")
+        if not isinstance(timelines, dict):
+            timelines = {}
+            result["timelines"] = timelines
+        valid_fragments = {fragment.get("id") for chapter in result.get("chapters", []) for fragment in chapter.get("fragments", [])}
+        result["timelines"] = {
+            str(fragment_id): timeline for fragment_id, timeline in timelines.items()
+            if fragment_id in valid_fragments and isinstance(timeline, dict)
+        }
         result.setdefault("meta", {}).setdefault("gameVersion", "1.0.0")
         if not isinstance(result.get("locale"), dict):
             result["locale"] = {"default": "zh-CN", "languages": ["zh-CN"]}
@@ -814,6 +905,9 @@ class ProjectStore:
             raise ValueError("Active fragment does not exist")
         if not all(isinstance(project["scripts"].get(fragment_id, []), list) for fragment_id in fragment_ids):
             raise ValueError("Every fragment script must be a list")
+        timelines = project.get("timelines", {})
+        if not isinstance(timelines, dict) or any(fragment_id not in fragment_ids or not isinstance(timeline, dict) for fragment_id, timeline in timelines.items()):
+            raise ValueError("Project timelines are invalid")
         memory = project.get("productionMemory", default_production_memory())
         if not isinstance(memory, dict) or int(memory.get("version", 0)) != 1 or not isinstance(memory.get("world", ""), str):
             raise ValueError("Production memory is invalid")

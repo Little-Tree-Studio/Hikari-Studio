@@ -29,6 +29,7 @@ CloseApplications=yes
 RestartApplications=no
 ChangesAssociations=yes
 UninstallDisplayIcon={app}\{#MyAppExeName}
+SetupIconFile=HikariStudio.ico
 VersionInfoVersion={#MyAppVersion}
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppName} Windows Installer
@@ -58,7 +59,7 @@ Filename: "{app}\{#MyAppExeName}"; Description: "启动 {#MyAppName}"; Flags: no
 
 [Code]
 const
-  WebView2ClientId = '{F1E7E5F0-2142-4BD1-8F07-DAE8E4F12D52}';
+  WebView2ClientId = '{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
   EdgeStableClientId = '{56EB18F8-B008-4CBD-B6D2-8C97FE7E9062}';
 
 function HasWebView2Version(RootKey: Integer; KeyName: String): Boolean;

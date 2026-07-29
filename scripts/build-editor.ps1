@@ -9,10 +9,33 @@ $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 
+$PythonVersion = (& $Python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')").Trim()
+$PythonVersionParts = $PythonVersion.Split('.')
+if ($LASTEXITCODE -ne 0 -or $PythonVersionParts.Count -ne 2) {
+  throw "Unable to determine the build Python version from: $Python"
+}
+if ([int]$PythonVersionParts[0] -ne 3 -or [int]$PythonVersionParts[1] -ge 14) {
+  throw "Nuitka desktop builds require Python 3.12 or 3.13; found Python $PythonVersion. Pass -Python with a supported interpreter."
+}
+Write-Host "Hikari Studio build Python: $PythonVersion"
+
+& (Join-Path $PSScriptRoot 'prepare-brand-assets.ps1')
+
 if (-not $SkipInstall) {
   & $Python -m pip install -r requirements.txt -r requirements-build.txt
   Push-Location frontend
   try { pnpm install --frozen-lockfile } finally { Pop-Location }
+}
+
+$FrontendRoot = Join-Path $Root 'frontend'
+foreach ($FrontendOutput in @((Join-Path $FrontendRoot 'dist'), (Join-Path $FrontendRoot 'runtime-dist'))) {
+  if (Test-Path $FrontendOutput) {
+    $ResolvedOutput = (Resolve-Path $FrontendOutput).Path
+    if (-not $ResolvedOutput.StartsWith($FrontendRoot + [IO.Path]::DirectorySeparatorChar)) {
+      throw "Refusing to remove frontend output outside its workspace: $ResolvedOutput"
+    }
+    Remove-Item -LiteralPath $ResolvedOutput -Recurse -Force
+  }
 }
 
 Push-Location frontend
@@ -59,6 +82,7 @@ New-Item -ItemType Directory -Force -Path (Join-Path $StagingRoot 'frontend') | 
 Copy-Item -LiteralPath (Join-Path $Root 'frontend\dist') -Destination (Join-Path $StagingRoot 'frontend\dist') -Recurse
 Copy-Item -LiteralPath (Join-Path $Root 'frontend\runtime-dist') -Destination (Join-Path $StagingRoot 'frontend\runtime-dist') -Recurse
 Copy-Item -LiteralPath (Join-Path $Root 'assets') -Destination (Join-Path $StagingRoot 'assets') -Recurse
+Copy-Item -LiteralPath (Join-Path $Root 'installer\HikariStudio.ico') -Destination (Join-Path $StagingRoot 'HikariStudio.ico')
 
 $NuitkaArgs = @(
   '-m', 'nuitka', 'run.py',
@@ -66,6 +90,7 @@ $NuitkaArgs = @(
   '--msvc=latest',
   '--assume-yes-for-downloads',
   '--windows-console-mode=disable',
+  '--windows-icon-from-ico=HikariStudio.ico',
   '--output-dir=build/nuitka',
   '--output-filename=HikariStudio.exe',
   '--include-package=pythonnet',

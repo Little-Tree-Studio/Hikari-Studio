@@ -139,6 +139,32 @@ class ExporterTests(unittest.TestCase):
             self.assertTrue((root / "build" / "assets" / "mountain.jpg").exists())
             self.assertIn("engine-core shared runtime", (root / "build" / "player.js").read_text(encoding="utf-8"))
 
+    def test_web_build_collects_timeline_assets_and_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            builtin = root / "builtin"
+            builtin.mkdir()
+            (builtin / "lake.jpg").write_bytes(b"lake")
+            (builtin / "mountain.jpg").write_bytes(b"mountain")
+            project = default_project()
+            project["timelines"]["lake-meeting"] = {
+                "version": 1,
+                "fragmentId": "lake-meeting",
+                "duration": 8,
+                "fps": 30,
+                "groups": [{"id": "visuals", "name": "视觉轨道", "collapsed": True}],
+                "markers": [{"id": "intro", "name": "开场", "time": 1}],
+                "loopRegion": {"start": 1, "end": 3, "enabled": True},
+                "tracks": [{"id": "scene", "name": "场景", "kind": "scene", "groupId": "visuals", "clips": [{"id": "clip", "name": "远景", "start": 0, "duration": 2, "assetId": "mountain", "keyframes": [{"id": "fade", "time": 0, "property": "opacity", "value": 0, "easing": "linear"}]}]}],
+            }
+            project_file = root / "game.hikari.json"
+            project_file.write_text("{}", encoding="utf-8")
+            build_web_game(project, root / "build", project_file, builtin, runtime_dist=self.runtime(root))
+            web_project = (root / "build" / "project.js").read_text(encoding="utf-8")
+            self.assertTrue((root / "build" / "assets" / "mountain.jpg").exists())
+            self.assertIn('"loopRegion": {"start": 1, "end": 3, "enabled": true}', web_project)
+            self.assertIn('"property": "opacity"', web_project)
+
     def test_web_build_collects_voice_by_asset_id_and_includes_audio_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -168,6 +194,7 @@ class ExporterTests(unittest.TestCase):
             (builtin / "lake.jpg").write_bytes(b"lake")
             project = default_project()
             project["chapters"][1]["disabled"] = True
+            project["timelines"]["lake-meeting"] = {"version": 1, "fragmentId": "lake-meeting", "duration": 8, "fps": 30, "tracks": []}
             project_file = root / "game.hikari.json"
             project_file.write_text("{}", encoding="utf-8")
             build_web_game(project, root / "build", project_file, builtin, runtime_dist=self.runtime(root))

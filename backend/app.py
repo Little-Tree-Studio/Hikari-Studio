@@ -93,13 +93,24 @@ def main() -> None:
         if args.project:
             api.open_project_path(str(Path(args.project).expanduser().resolve()))
         state_store = WindowStateStore(paths.config_dir / "window-state.json")
-        placement = state_store.load()
+        screens = list(webview.screens or [])
+        scale_factor = 1.0
+        if os.name == "nt":
+            try:
+                from ctypes import windll
+                scale_factor = windll.shcore.GetScaleFactorForDevice(0) / 100
+            except Exception:
+                logger.exception("Failed to detect Windows display scale")
+        placement = state_store.load(screens=screens, scale_factor=scale_factor)
         window_options: dict[str, Any] = {
             "title": "Hikari Studio",
             "url": (frontend_dist / "desktop.html").as_uri(),
             "js_api": api,
-            "width": placement.width,
-            "height": placement.height,
+            "width": round(placement.width * scale_factor),
+            "height": round(placement.height * scale_factor),
+            # pywebview receives logical pixels for both resize and min_size.
+            # Scaling this tuple a second time prevents the compact project
+            # wizard from reaching its intended 1080 x 680 client size.
             "min_size": (1080, 680),
             "frameless": True,
             "easy_drag": False,

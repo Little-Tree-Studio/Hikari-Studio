@@ -23,21 +23,68 @@ class WindowStateStore:
         self.path = path
         self._lock = threading.RLock()
 
-    def load(self) -> WindowPlacement:
+    @staticmethod
+    def _screen_bounds(screen: Any) -> tuple[int, int, int, int]:
+        frame = getattr(screen, "frame", None)
+        return (
+            int(getattr(frame, "X", getattr(screen, "x", 0))),
+            int(getattr(frame, "Y", getattr(screen, "y", 0))),
+            int(getattr(frame, "Width", getattr(screen, "width", 0))),
+            int(getattr(frame, "Height", getattr(screen, "height", 0))),
+        )
+
+    @classmethod
+    def fit_to_screens(cls, placement: WindowPlacement, screens: list[Any] | tuple[Any, ...]) -> WindowPlacement:
+        bounds = [cls._screen_bounds(screen) for screen in screens]
+        bounds = [item for item in bounds if item[2] > 0 and item[3] > 0]
+        if not bounds:
+            return placement
+
+        target = bounds[0]
+        if placement.x is not None and placement.y is not None:
+            center_x = placement.x + placement.width // 2
+            center_y = placement.y + placement.height // 2
+            target = next(
+                (item for item in bounds if item[0] <= center_x < item[0] + item[2] and item[1] <= center_y < item[1] + item[3]),
+                target,
+            )
+
+        frame_x, frame_y, frame_width, frame_height = target
+        width = min(placement.width, frame_width)
+        height = min(placement.height, frame_height)
+        if placement.x is None or placement.y is None:
+            x = frame_x + max(0, frame_width - width) // 2
+            y = frame_y + max(0, frame_height - height) // 2
+        else:
+            x = min(max(placement.x, frame_x), frame_x + max(0, frame_width - width))
+            y = min(max(placement.y, frame_y), frame_y + max(0, frame_height - height))
+        return WindowPlacement(width, height, x, y, placement.maximized)
+
+    def load(self, *, screens: list[Any] | tuple[Any, ...] = (), scale_factor: float = 1) -> WindowPlacement:
         try:
             value = json.loads(self.path.read_text(encoding="utf-8"))
             if not isinstance(value, dict):
                 raise ValueError
-            width = min(7680, max(1080, int(value.get("width", 1440))))
-            height = min(4320, max(680, int(value.get("height", 900))))
+            version = int(value.get("version", 1))
+            factor = scale_factor if version < 2 and 1 <= scale_factor <= 4 else 1
+            width = min(7680, max(1080, round(int(value.get("width", 1440)) / factor)))
+            height = min(4320, max(680, round(int(value.get("height", 900)) / factor)))
             x = value.get("x")
             y = value.get("y")
-            return WindowPlacement(width, height, int(x) if x is not None else None, int(y) if y is not None else None, bool(value.get("maximized", False)))
+            placement = WindowPlacement(
+                width,
+                height,
+                round(int(x) / factor) if x is not None else None,
+                round(int(y) / factor) if y is not None else None,
+                bool(value.get("maximized", False)),
+            )
+            return self.fit_to_screens(placement, screens) if screens else placement
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
-            return WindowPlacement()
+            placement = WindowPlacement()
+            return self.fit_to_screens(placement, screens) if screens else placement
 
     def save(self, placement: WindowPlacement) -> None:
-        payload = json.dumps(asdict(placement), ensure_ascii=False, indent=2)
+        payload = json.dumps({"version": 2, **asdict(placement)}, ensure_ascii=False, indent=2)
         with self._lock:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             descriptor, temporary_name = tempfile.mkstemp(prefix=".window-state-", suffix=".tmp", dir=self.path.parent)
@@ -54,8 +101,17 @@ class WindowStateStore:
                     pass
                 raise
 
-    def capture(self, window: Any, *, maximized: bool, previous: WindowPlacement | None = None) -> WindowPlacement:
+    def capture(
+        self,
+        window: Any,
+        *,
+        maximized: bool,
+        previous: WindowPlacement | None = None,
+        scale_factor: float = 1,
+        screens: list[Any] | tuple[Any, ...] = (),
+    ) -> WindowPlacement:
         previous = previous or self.load()
+        factor = scale_factor if 1 <= scale_factor <= 4 else 1
 
         def window_value(name: str, fallback: int | None) -> int | None:
             try:
@@ -68,11 +124,13 @@ class WindowStateStore:
             placement = WindowPlacement(previous.width, previous.height, previous.x, previous.y, True)
         else:
             placement = WindowPlacement(
-                width=max(1080, window_value("width", previous.width) or previous.width),
-                height=max(680, window_value("height", previous.height) or previous.height),
-                x=window_value("x", previous.x),
-                y=window_value("y", previous.y),
+                width=max(1080, round((window_value("width", round(previous.width * factor)) or round(previous.width * factor)) / factor)),
+                height=max(680, round((window_value("height", round(previous.height * factor)) or round(previous.height * factor)) / factor)),
+                x=round(value / factor) if (value := window_value("x", None)) is not None else previous.x,
+                y=round(value / factor) if (value := window_value("y", None)) is not None else previous.y,
                 maximized=False,
             )
+            if screens:
+                placement = self.fit_to_screens(placement, screens)
         self.save(placement)
         return placement

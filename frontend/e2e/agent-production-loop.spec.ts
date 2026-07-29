@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 test('production memory, director mode, and branch simulation stay inside the application UI', async ({ page }) => {
   const nativeDialogs: string[] = [];
   page.on('dialog', async (dialog) => { nativeDialogs.push(dialog.message()); await dialog.dismiss(); });
-  await page.goto('/');
+  await page.goto('/?editor=1');
 
   await page.getByRole('button', { name: 'AI Agent' }).click();
   await page.getByRole('button', { name: '制作记忆' }).click();

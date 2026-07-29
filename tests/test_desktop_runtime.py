@@ -9,17 +9,112 @@ from pathlib import Path
 from unittest.mock import patch
 
 from backend.desktop_paths import migrate_legacy_desktop_data, resolve_desktop_paths
+from backend.api import DesktopApi
 from backend.project_store import ProjectStore
 from backend.single_instance import SingleInstance
-from backend.webview2_runtime import _valid_version
+from backend.webview2_runtime import _installed_file_version, _valid_version
 from backend.window_state import WindowPlacement, WindowStateStore
 
 
 class DesktopRuntimeTests(unittest.TestCase):
+    def test_project_creation_mode_uses_a_centered_compact_window_and_restores_editor_placement(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = ProjectStore(root / "projects", state_dir=root / "state")
+            state_store = WindowStateStore(root / "state" / "config" / "window-state.json")
+            placement = WindowPlacement(1480, 920, 120, 70, True)
+            state_store.save(placement)
+
+            class FakeWindow:
+                width = 1920
+                height = 1080
+                x = 0
+                y = 0
+                screen = type("Screen", (), {"x": 0, "y": 0, "width": 1920, "height": 1080})()
+
+                def __init__(self) -> None:
+                    self.calls: list[tuple[object, ...]] = []
+
+                def restore(self) -> None:
+                    self.calls.append(("restore",))
+
+                def resize(self, width: int, height: int) -> None:
+                    self.width, self.height = width, height
+                    self.calls.append(("resize", width, height))
+
+                def move(self, x: int, y: int) -> None:
+                    self.x, self.y = x, y
+                    self.calls.append(("move", x, y))
+
+                def maximize(self) -> None:
+                    self.calls.append(("maximize",))
+
+            window = FakeWindow()
+            api = DesktopApi(store, root, state_dir=root / "state")
+            api._bind_window(window, state_store, placement)
+
+            self.assertTrue(api.set_project_creation_mode(True))
+            self.assertIn(("resize", 1080, 680), window.calls)
+            self.assertIn(("move", 420, 200), window.calls)
+            self.assertEqual(state_store.load(), placement)
+            self.assertFalse(api.toggle_maximize())
+
+            self.assertTrue(api.set_project_creation_mode(False))
+            self.assertIn(("resize", 1480, 920), window.calls)
+            self.assertIn(("move", 120, 70), window.calls)
+            self.assertEqual(window.calls[-1], ("maximize",))
+
+    def test_project_creation_mode_keeps_compact_logical_size_for_windows_dpi(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = ProjectStore(root / "projects", state_dir=root / "state")
+            state_store = WindowStateStore(root / "state" / "config" / "window-state.json")
+            placement = WindowPlacement(1500, 900, 125, 75, False)
+            state_store.save(placement)
+
+            class FakeWindow:
+                width, height, x, y = 1875, 1125, 156, 94
+                native = type("Native", (), {"scale_factor": 1.25})()
+                screen = type("Screen", (), {"x": 0, "y": 0, "width": 1920, "height": 1080, "frame": None})()
+
+                def __init__(self) -> None:
+                    self.calls: list[tuple[object, ...]] = []
+
+                def restore(self) -> None:
+                    self.calls.append(("restore",))
+
+                def resize(self, width: int, height: int) -> None:
+                    self.width, self.height = width, height
+                    self.calls.append(("resize", width, height))
+
+                def move(self, x: int, y: int) -> None:
+                    self.calls.append(("move", x, y))
+
+            window = FakeWindow()
+            api = DesktopApi(store, root, state_dir=root / "state")
+            api._bind_window(window, state_store, placement)
+
+            api.set_project_creation_mode(True)
+            self.assertIn(("resize", 1080, 680), window.calls)
+            self.assertIn(("move", 420, 200), window.calls)
+
+            api.set_project_creation_mode(False)
+            self.assertIn(("resize", 1875, 1125), window.calls)
+            self.assertIn(("move", 125, 75), window.calls)
+
     def test_webview2_version_validation_rejects_missing_runtime_marker(self) -> None:
         self.assertFalse(_valid_version(None))
         self.assertFalse(_valid_version("0.0.0.0"))
         self.assertTrue(_valid_version("126.0.2592.87"))
+
+    def test_webview2_file_fallback_uses_latest_complete_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "149.0.1.0").mkdir()
+            latest = root / "150.0.4078.99"
+            latest.mkdir()
+            latest.joinpath("msedgewebview2.exe").write_bytes(b"runtime")
+            self.assertEqual(_installed_file_version(root), "150.0.4078.99")
 
     def test_standard_paths_support_overrides_and_keep_state_outside_projects(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -73,6 +168,29 @@ class DesktopRuntimeTests(unittest.TestCase):
             self.assertEqual(restored, WindowPlacement(1500, 920, -1200, 80, False))
             path.write_text(json.dumps({"width": 20, "height": 10, "x": "bad"}), encoding="utf-8")
             self.assertEqual(store.load(), WindowPlacement())
+
+    def test_legacy_physical_window_state_migrates_to_logical_pixels_and_visible_screen(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config" / "window-state.json"
+            path.parent.mkdir(parents=True)
+            path.write_text(json.dumps({"width": 2564, "height": 1570, "x": -211, "y": 1000}), encoding="utf-8")
+            screen = type("Screen", (), {"x": 0, "y": 0, "width": 1707, "height": 1067, "frame": None})()
+            store = WindowStateStore(path)
+
+            placement = store.load(screens=[screen], scale_factor=1.5)
+
+            self.assertEqual(placement, WindowPlacement(1707, 1047, 0, 20, False))
+
+    def test_window_capture_persists_logical_pixels_at_high_dpi(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config" / "window-state.json"
+            store = WindowStateStore(path)
+            window = type("Window", (), {"width": 2160, "height": 1350, "x": 180, "y": 120})()
+
+            placement = store.capture(window, maximized=False, scale_factor=1.5)
+
+            self.assertEqual(placement, WindowPlacement(1440, 900, 120, 80, False))
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["version"], 2)
 
     def test_second_instance_forwards_payload_and_does_not_acquire_lock(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -9,6 +9,28 @@ from backend.project_store import ProjectStore, default_project
 
 
 class ProjectStoreTests(unittest.TestCase):
+    def test_stage_timeline_persists_per_fragment(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = ProjectStore(Path(directory))
+            project = store.load()
+            fragment_id = project["activeFragmentId"]
+            project["timelines"] = {
+                fragment_id: {
+                    "version": 1,
+                    "fragmentId": fragment_id,
+                    "duration": 12,
+                    "fps": 30,
+                    "tracks": [{"id": "track-camera", "name": "镜头", "kind": "camera", "clips": []}],
+                }
+            }
+            store.save(project)
+
+            timeline_path = store.project_root / "timelines" / f"{fragment_id}.json"
+            self.assertTrue(timeline_path.is_file())
+            reopened = ProjectStore(Path(directory)).load()
+            self.assertEqual(reopened["timelines"][fragment_id]["duration"], 12)
+            self.assertEqual(reopened["scripts"][fragment_id], project["scripts"][fragment_id])
+
     def test_production_memory_persists_outside_build_project_files(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = ProjectStore(Path(directory))
@@ -178,6 +200,20 @@ class ProjectStoreTests(unittest.TestCase):
             result = store.save(project)
             self.assertTrue(result["ok"])
             self.assertEqual(store.load()["meta"]["name"], "测试项目")
+
+    def test_save_rejects_project_from_another_open_target(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = ProjectStore(root / "source")
+            source_project = source.load()
+            target = ProjectStore(root / "target")
+            target_project = target.load()
+            original_target_id = target_project["meta"]["id"]
+
+            with self.assertRaisesRegex(ValueError, "refusing to overwrite another project"):
+                target.save(source_project, expected_project_id=source_project["meta"]["id"])
+
+            self.assertEqual(target.load()["meta"]["id"], original_target_id)
 
     def test_v3_round_trip_preserves_variable_definitions_and_locale(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

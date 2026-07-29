@@ -1,4 +1,5 @@
 import json
+import shutil
 import tempfile
 import time
 import unittest
@@ -50,6 +51,36 @@ class DesktopApiTests(unittest.TestCase):
             self.assertEqual(project["version"], 3)
             self.assertGreater(len(project["chapters"]), 0)
 
+    def test_project_session_rejects_stale_path_and_token_for_same_project_id(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            api = DesktopApi(ProjectStore(root / "data"), root)
+            original_session = api.load_project_session()
+            original_path = Path(original_session["projectPath"])
+            copy_root = root / "copied-project"
+            shutil.copytree(original_path.parent, copy_root)
+
+            copied_session = api.open_project_path_session(str(copy_root / "project.hikari.json"))
+            self.assertEqual(copied_session["project"]["meta"]["id"], original_session["project"]["meta"]["id"])
+            with self.assertRaisesRegex(ValueError, "Project session changed"):
+                api.save_project(
+                    original_session["project"],
+                    original_session["project"]["meta"]["id"],
+                    original_session["projectPath"],
+                    original_session["sessionToken"],
+                )
+
+            changed = copied_session["project"]
+            changed["meta"]["name"] = "只修改副本"
+            api.save_project(
+                changed,
+                changed["meta"]["id"],
+                copied_session["projectPath"],
+                copied_session["sessionToken"],
+            )
+            self.assertEqual(api.load_project()["meta"]["name"], "只修改副本")
+            self.assertNotEqual(json.loads(original_path.read_text(encoding="utf-8"))["meta"]["name"], "只修改副本")
+
     def test_runtime_storage_bridge_persists_across_api_instances(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -72,6 +103,31 @@ class DesktopApiTests(unittest.TestCase):
             self.assertTrue(next(item for item in pinned if item["path"] == entry["path"])["pinned"])
             opened = api.open_recent_project(entry["path"])
             self.assertEqual(opened["meta"]["id"], created["meta"]["id"])
+
+    def test_configured_project_creation_supports_blank_template_and_custom_location(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            api = DesktopApi(ProjectStore(root / "data"), root)
+            target = root / "projects" / "night-voyage"
+            session = api.create_project_session({
+                "template": "blank",
+                "name": "夜航",
+                "projectDirectory": str(target),
+                "resolution": [1920, 1080],
+                "author": "Hikari Team",
+                "description": "一段夜间航行的故事",
+                "windowTitle": "夜航 - Demo",
+                "backgroundColor": "#112233",
+            })
+            project = session["project"]
+            self.assertEqual(Path(session["projectPath"]), target / "project.hikari.json")
+            self.assertTrue((target / "project.hikari.json").is_file())
+            self.assertEqual(project["meta"]["resolution"], [1920, 1080])
+            self.assertEqual(project["meta"]["windowTitle"], "夜航 - Demo")
+            self.assertEqual(project["ui"]["title"]["backgroundColor"], "#112233")
+            self.assertEqual(project["characters"], [])
+            self.assertEqual(project["chapters"][0]["name"], "开始")
+            self.assertEqual(project["scripts"], {"opening": []})
 
     def test_asr_status_is_serializable_without_optional_model(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

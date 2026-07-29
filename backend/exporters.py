@@ -162,6 +162,11 @@ def _referenced_asset_ids(project: dict[str, Any]) -> set[str]:
                 referenced.add(voice)
             elif voice and voice in by_name:
                 referenced.add(by_name[voice])
+    for timeline in project.get("timelines", {}).values():
+        for track in timeline.get("tracks", []):
+            for clip in track.get("clips", []):
+                if clip.get("assetId"):
+                    referenced.add(str(clip["assetId"]))
     return referenced
 
 
@@ -193,6 +198,10 @@ def build_web_game(
     exported["chapters"] = [chapter for chapter in exported.get("chapters", []) if not chapter.get("disabled")]
     exported["scripts"] = {
         fragment_id: blocks for fragment_id, blocks in exported.get("scripts", {}).items()
+        if fragment_id in enabled_fragment_ids
+    }
+    exported["timelines"] = {
+        fragment_id: timeline for fragment_id, timeline in exported.get("timelines", {}).items()
         if fragment_id in enabled_fragment_ids
     }
     if exported.get("activeFragmentId") not in enabled_fragment_ids and enabled_fragment_ids:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import platform
 import logging
+import secrets
 import threading
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ from .exporters import build_web_game, export_renpy, safe_slug
 from .ai_service import AiService
 from .agent_tasks import AgentTaskManager
 from .asr_service import AsrService
+from .editor_appearance import EditorAppearanceStore
 from .project_store import ProjectStore
 from .script_importer import preview_script_import
 from .windows_builder import build_windows_game
@@ -29,11 +31,14 @@ class DesktopApi:
         self._window_state_store: Any = None
         self._window_placement: Any = None
         self._window_maximized = False
+        self._project_creation_mode = False
         self._window_state_timer: threading.Timer | None = None
-        self._save_lock = threading.Lock()
+        self._save_lock = threading.RLock()
+        self._project_session_token = secrets.token_urlsafe(32)
         self._ai = AiService(self._state_dir)
         self._agent_tasks = AgentTaskManager(self._ai)
         self._asr = AsrService()
+        self._editor_appearance = EditorAppearanceStore(self._state_dir / "config")
 
     def _bind_window(self, window: Any, window_state_store: Any = None, placement: Any = None) -> None:
         self._window = window
@@ -42,15 +47,31 @@ class DesktopApi:
         self._window_maximized = bool(getattr(placement, "maximized", False))
 
     def persist_window_state(self, maximized: bool | None = None) -> None:
+        if self._project_creation_mode:
+            return
         if maximized is not None:
             self._window_maximized = maximized
         if self._window is not None and self._window_state_store is not None:
             try:
-                self._window_placement = self._window_state_store.capture(self._window, maximized=self._window_maximized, previous=self._window_placement)
+                screens: list[Any] = []
+                try:
+                    import webview
+                    screens = list(webview.screens or [])
+                except Exception:
+                    pass
+                self._window_placement = self._window_state_store.capture(
+                    self._window,
+                    maximized=self._window_maximized,
+                    previous=self._window_placement,
+                    scale_factor=self._window_scale_factor(),
+                    screens=screens,
+                )
             except Exception:
                 LOGGER.exception("Window state persistence failed")
 
     def schedule_window_state(self, maximized: bool | None = None) -> None:
+        if self._project_creation_mode:
+            return
         if maximized is not None:
             self._window_maximized = maximized
         if self._window_state_timer is not None:
@@ -70,6 +91,12 @@ class DesktopApi:
     def get_app_info(self) -> dict[str, Any]:
         return {"name": "Hikari Studio", "version": "0.3.0", "platform": platform.system(), "projectPath": str(self._store.project_path), "dataPath": str(self._state_dir), "buildPath": str(self._output_root)}
 
+    def get_editor_appearance(self) -> dict[str, Any]:
+        return self._editor_appearance.load()
+
+    def save_editor_appearance(self, appearance: dict[str, Any]) -> dict[str, Any]:
+        return self._editor_appearance.save(appearance)
+
     def load_project(self) -> dict[str, Any]:
         LOGGER.info("Project load requested: %s", self._store.project_path)
         project = self._store.load()
@@ -79,9 +106,36 @@ class DesktopApi:
     def load_project_json(self) -> str:
         return json.dumps(self.load_project(), ensure_ascii=False)
 
-    def save_project(self, project: dict[str, Any]) -> dict[str, Any]:
+    def _project_session(self, project: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "project": project,
+            "projectPath": str(self._store.project_path.resolve()),
+            "sessionToken": self._project_session_token,
+        }
+
+    def _rotate_project_session(self) -> None:
+        self._project_session_token = secrets.token_urlsafe(32)
+
+    def load_project_session(self) -> dict[str, Any]:
         with self._save_lock:
-            result = self._store.save(project)
+            return self._project_session(self.load_project())
+
+    def save_project(
+        self,
+        project: dict[str, Any],
+        expected_project_id: str | None = None,
+        expected_project_path: str | None = None,
+        session_token: str | None = None,
+    ) -> dict[str, Any]:
+        with self._save_lock:
+            if expected_project_path is not None or session_token is not None:
+                if not expected_project_path or not session_token:
+                    raise ValueError("Project session path and token are both required")
+                current_path = str(self._store.project_path.resolve())
+                requested_path = str(Path(expected_project_path).expanduser().resolve())
+                if session_token != self._project_session_token or requested_path != current_path:
+                    raise ValueError("Project session changed; reload before saving")
+            result = self._store.save(project, expected_project_id=expected_project_id)
             LOGGER.info("Project saved: %s", result["path"])
             return result
 
@@ -122,16 +176,46 @@ class DesktopApi:
             LOGGER.info("Project saved as: %s", saved["path"])
             return saved
 
+    def save_project_as_session(self, project: dict[str, Any]) -> dict[str, Any] | None:
+        with self._save_lock:
+            saved = self.save_project_as(project)
+            if saved is None:
+                return None
+            self._rotate_project_session()
+            return {**saved, "projectPath": str(self._store.project_path.resolve()), "sessionToken": self._project_session_token}
+
     def new_project(self, name: str) -> dict[str, Any]:
         project = self._store.create(name)
         LOGGER.info("Project created: %s", self._store.project_path)
         return project
 
+    def new_project_session(self, name: str) -> dict[str, Any]:
+        with self._save_lock:
+            project = self.new_project(name)
+            self._rotate_project_session()
+            return self._project_session(project)
+
+    def create_project_session(self, options: dict[str, Any]) -> dict[str, Any]:
+        with self._save_lock:
+            project = self._store.create_configured(options)
+            self._rotate_project_session()
+            LOGGER.info("Configured project created: %s", self._store.project_path)
+            return self._project_session(project)
+
+    def select_project_location(self) -> str | None:
+        if self._window is None:
+            return None
+        import webview
+        result = self._window.create_file_dialog(webview.FOLDER_DIALOG)
+        if not result:
+            return None
+        return str(result[0] if isinstance(result, (tuple, list)) else result)
+
     def open_project_dialog(self) -> dict[str, Any] | None:
         if self._window is None:
             return None
         import webview
-        result = self._window.create_file_dialog(webview.OPEN_DIALOG, allow_multiple=False, file_types=("Hikari 项目 (project.hikari.json;*.hikari;*.hikari.json)",))
+        result = self._window.create_file_dialog(webview.OPEN_DIALOG, allow_multiple=False, file_types=("Hikari 项目 (*.json;*.hikari)",))
         if not result:
             return None
         path = result[0] if isinstance(result, (tuple, list)) else result
@@ -142,15 +226,35 @@ class DesktopApi:
     def list_recent_projects(self) -> list[dict[str, Any]]:
         return self._store.list_recent_projects()
 
+    def open_project_dialog_session(self) -> dict[str, Any] | None:
+        with self._save_lock:
+            project = self.open_project_dialog()
+            if project is None:
+                return None
+            self._rotate_project_session()
+            return self._project_session(project)
+
     def open_recent_project(self, path: str) -> dict[str, Any]:
         project = self._store.open(Path(path))
         LOGGER.info("Recent project opened: %s", self._store.project_path)
         return project
 
+    def open_recent_project_session(self, path: str) -> dict[str, Any]:
+        with self._save_lock:
+            project = self.open_recent_project(path)
+            self._rotate_project_session()
+            return self._project_session(project)
+
     def open_project_path(self, path: str) -> dict[str, Any]:
         project = self._store.open(Path(path))
         LOGGER.info("Project opened from desktop request: %s", self._store.project_path)
         return project
+
+    def open_project_path_session(self, path: str) -> dict[str, Any]:
+        with self._save_lock:
+            project = self.open_project_path(path)
+            self._rotate_project_session()
+            return self._project_session(project)
 
     def set_project_pinned(self, path: str, pinned: bool) -> list[dict[str, Any]]:
         return self._store.set_project_pinned(path, pinned)
@@ -332,7 +436,82 @@ class DesktopApi:
             self._window.minimize()
         return True
 
+    def _window_scale_factor(self) -> float:
+        try:
+            value = float(getattr(getattr(self._window, "native", None), "scale_factor", 1) or 1)
+            return value if 1 <= value <= 4 else 1
+        except (TypeError, ValueError):
+            return 1
+
+    def _move_window_physical(self, x: int, y: int) -> None:
+        if self._window is None:
+            return
+        scale_factor = self._window_scale_factor()
+        self._window.move(round(x / scale_factor), round(y / scale_factor))
+
+    def set_project_creation_mode(self, enabled: bool) -> bool:
+        if self._window is None or enabled == self._project_creation_mode:
+            return True
+
+        if enabled:
+            if self._window_state_timer is not None:
+                self._window_state_timer.cancel()
+                self._window_state_timer = None
+            self.persist_window_state()
+            self._project_creation_mode = True
+            self._window.restore()
+
+            screen = getattr(self._window, "screen", None)
+            if screen is None:
+                try:
+                    import webview
+                    screens = list(webview.screens or [])
+                    center_x = int(getattr(self._window, "x", 0) or 0) + int(getattr(self._window, "width", 1080) or 1080) // 2
+                    center_y = int(getattr(self._window, "y", 0) or 0) + int(getattr(self._window, "height", 680) or 680) // 2
+                    screen = next(
+                        (
+                            item for item in screens
+                            if item.x <= center_x < item.x + item.width and item.y <= center_y < item.y + item.height
+                        ),
+                        screens[0] if screens else None,
+                    )
+                except Exception:
+                    LOGGER.exception("Failed to resolve the screen for the project creation window")
+            # pywebview's WinForms resize API already uses Windows logical pixels.
+            # Applying the WebView scale factor again makes the compact wizard too
+            # large and leaves its layout viewport taller than the native client.
+            compact_width = 1080
+            compact_height = 680
+            self._window.resize(compact_width, compact_height)
+            if screen is not None:
+                frame = getattr(screen, "frame", None)
+                frame_x = int(getattr(frame, "X", screen.x))
+                frame_y = int(getattr(frame, "Y", screen.y))
+                frame_width = int(getattr(frame, "Width", screen.width))
+                frame_height = int(getattr(frame, "Height", screen.height))
+                self._window.move(
+                    int(frame_x + max(0, frame_width - 1080) / 2),
+                    int(frame_y + max(0, frame_height - 680) / 2),
+                )
+            self._window_maximized = False
+            return True
+
+        placement = self._window_placement
+        if placement is not None:
+            self._window.restore()
+            scale_factor = self._window_scale_factor()
+            self._window.resize(round(placement.width * scale_factor), round(placement.height * scale_factor))
+            if placement.x is not None and placement.y is not None:
+                self._window.move(placement.x, placement.y)
+            if placement.maximized:
+                self._window.maximize()
+            self._window_maximized = bool(placement.maximized)
+        self._project_creation_mode = False
+        return True
+
     def toggle_maximize(self) -> bool:
+        if self._project_creation_mode:
+            return False
         if self._window is not None:
             if self._window_maximized:
                 self._window.restore()

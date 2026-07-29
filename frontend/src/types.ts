@@ -258,15 +258,63 @@ export interface ProductionMemory {
   updatedAt: string;
 }
 
+export type TimelineTrackKind = 'scene' | 'character' | 'camera' | 'audio';
+export type TimelineEasing = 'linear' | 'easeIn' | 'easeOut' | 'easeInOut' | 'cubicBezier';
+export interface TimelineKeyframe {
+  id: string;
+  time: number;
+  property: string;
+  value: string | number | boolean;
+  easing: TimelineEasing;
+  bezier?: [number, number, number, number];
+}
+export interface TimelineClip {
+  id: string;
+  name: string;
+  start: number;
+  duration: number;
+  blockId?: string;
+  assetId?: string;
+  characterId?: string;
+  audioChannel?: AudioChannel;
+  sourceOffset?: number;
+  keyframes: TimelineKeyframe[];
+}
+export interface TimelineTrack {
+  id: string;
+  name: string;
+  kind: TimelineTrackKind;
+  muted?: boolean;
+  locked?: boolean;
+  height?: number;
+  collapsed?: boolean;
+  groupId?: string;
+  clips: TimelineClip[];
+}
+export interface TimelineTrackGroup { id: string; name: string; collapsed?: boolean }
+export interface TimelineMarker { id: string; name: string; time: number; color?: string }
+export interface TimelineLoopRegion { start: number; end: number; enabled: boolean }
+export interface StageTimeline {
+  version: 1;
+  fragmentId: string;
+  duration: number;
+  fps: number;
+  tracks: TimelineTrack[];
+  groups?: TimelineTrackGroup[];
+  markers?: TimelineMarker[];
+  loopRegion?: TimelineLoopRegion;
+}
+
 export interface Project {
   version: number;
-  meta: { id: string; name: string; author: string; resolution: [number, number]; updatedAt: string; gameVersion?: string };
+  meta: { id: string; name: string; author: string; resolution: [number, number]; updatedAt: string; gameVersion?: string; description?: string; windowTitle?: string; backgroundColor?: string };
   characters: Character[];
   scenes?: SceneDefinition[];
   sceneGroups?: SceneGroup[];
   chapters: Chapter[];
   activeFragmentId: string;
   scripts: Record<string, StoryBlock[]>;
+  timelines?: Record<string, StageTimeline>;
   assets: Asset[];
   variables: Record<string, string | number | boolean>;
   variableDefinitions?: Record<string, VariableDefinition>;
@@ -304,6 +352,15 @@ export interface DesktopApiResult<T> {
   error?: { code: string; message: string; diagnostics?: unknown[] };
 }
 
+export type EditorThemeId = 'hikari-light' | 'graphite' | 'sakura-studio' | 'high-contrast';
+export interface EditorAppearance {
+  version: 1;
+  mode: 'system' | 'fixed';
+  themeId: EditorThemeId;
+  accentColor?: string;
+  motion: 'system' | 'full' | 'reduced';
+}
+
 export interface RecoverySnapshot {
   project: Project;
   updatedAt: string;
@@ -321,11 +378,31 @@ export interface CommandHistoryStorageStats {
   snapshotCount: number;
 }
 
+export interface DesktopProjectSession {
+  project: Project;
+  projectPath: string;
+  sessionToken: string;
+}
+
+export interface ProjectCreationOptions {
+  template: 'blank' | 'sample';
+  name: string;
+  projectDirectory?: string;
+  author?: string;
+  description?: string;
+  resolution: [number, number];
+  windowTitle?: string;
+  backgroundColor?: string;
+}
+
 export interface DesktopApi {
+  get_editor_appearance(): Promise<EditorAppearance>;
+  save_editor_appearance(appearance: EditorAppearance): Promise<EditorAppearance>;
   get_app_info(): Promise<{ name: string; version: string; platform: string; projectPath: string }>;
   load_project(): Promise<Project>;
   load_project_json(): Promise<string>;
-  save_project(project: Project): Promise<{ ok: boolean; path: string; bytes: number }>;
+  load_project_session(): Promise<DesktopProjectSession>;
+  save_project(project: Project, expectedProjectId?: string, expectedProjectPath?: string, sessionToken?: string): Promise<{ ok: boolean; path: string; bytes: number }>;
   load_command_history(): Promise<import('./hooks/useCommandHistory').PersistedCommandHistory<Project> | null>;
   load_command_history_stats(): Promise<CommandHistoryStorageStats>;
   save_command_history(history: import('./hooks/useCommandHistory').PersistedCommandHistory<Project>): Promise<{ ok: boolean; path: string } & CommandHistoryStorageStats>;
@@ -334,11 +411,18 @@ export interface DesktopApi {
   write_runtime_value(key: string, value: string): Promise<boolean>;
   delete_runtime_value(key: string): Promise<boolean>;
   save_project_as(project: Project): Promise<{ ok: boolean; path: string; bytes: number } | null>;
+  save_project_as_session(project: Project): Promise<({ ok: boolean; path: string; bytes: number } & Omit<DesktopProjectSession, 'project'>) | null>;
   new_project(name: string): Promise<Project>;
+  new_project_session(name: string): Promise<DesktopProjectSession>;
+  create_project_session(options: ProjectCreationOptions): Promise<DesktopProjectSession>;
+  select_project_location(): Promise<string | null>;
   open_project_dialog(): Promise<Project | null>;
+  open_project_dialog_session(): Promise<DesktopProjectSession | null>;
   list_recent_projects(): Promise<RecentProject[]>;
   open_recent_project(path: string): Promise<Project>;
+  open_recent_project_session(path: string): Promise<DesktopProjectSession>;
   open_project_path(path: string): Promise<Project>;
+  open_project_path_session(path: string): Promise<DesktopProjectSession>;
   set_project_pinned(path: string, pinned: boolean): Promise<RecentProject[]>;
   import_assets(paths?: string[], audioCategory?: AudioCategory): Promise<Asset[]>;
   inspect_assets(assets: Asset[]): Promise<AssetFileStatus[]>;
@@ -353,6 +437,7 @@ export interface DesktopApi {
   build_web(project: Project): Promise<{ ok: boolean; path: string }>;
   build_windows(project: Project): Promise<{ ok: boolean; path: string }>;
   minimize_window(): Promise<boolean>;
+  set_project_creation_mode(enabled: boolean): Promise<boolean>;
   toggle_maximize(): Promise<boolean>;
   close_window(): Promise<boolean>;
   get_ai_settings(): Promise<AiSettings>;

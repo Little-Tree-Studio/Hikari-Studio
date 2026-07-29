@@ -14,14 +14,14 @@ function currentDesktopApi() {
 
 async function waitForDesktopStorageApi() {
   const current = currentDesktopApi();
-  if (current) return current;
+  if (typeof current?.read_runtime_value === 'function') return current;
   if (window.__HIKARI_DESKTOP__ !== true) return undefined;
   return new Promise<ReturnType<typeof currentDesktopApi>>((resolve) => {
     let settled = false;
     const finish = () => {
       if (settled) return;
       const api = currentDesktopApi();
-      if (!api) return;
+      if (typeof api?.read_runtime_value !== 'function') return;
       settled = true;
       window.clearInterval(interval);
       window.clearTimeout(timeout);

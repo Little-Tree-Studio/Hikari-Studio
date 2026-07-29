@@ -26,6 +26,7 @@ import {
   seekEngine,
 } from "../engine-core/runtime";
 import type { EngineState } from "../engine-core/types";
+import type { TimelinePreviewValues } from "../core/timeline";
 import type { Project } from "../types";
 import { writeLargeValue } from "../core/storage";
 import {
@@ -44,6 +45,7 @@ interface PreviewProps {
   debugMode?: boolean;
   onEditorLocationChange?: (fragmentId: string, blockIndex: number) => void;
   onStageCharacterMove?: (characterId: string, x: number, y: number) => void;
+  timelinePreview?: TimelinePreviewValues;
 }
 
 type StageGuide = {
@@ -74,6 +76,7 @@ export function Preview({
   debugMode = false,
   onEditorLocationChange,
   onStageCharacterMove,
+  timelinePreview,
 }: PreviewProps) {
   const [state, setState] = useState<EngineState>(() =>
     seekEngine(project, project.activeFragmentId, editorIndex),
@@ -127,7 +130,7 @@ export function Preview({
     .filter(([, definition]) => definition.persistence === "shared")
     .map(([name]) => name);
   const current = currentBlock(project, state);
-  const orderedStageCharacters = Object.values(state.stage.characters).sort(
+  const orderedStageCharacters = Object.values(state.stage.characters).map((character) => ({ ...character, ...(timelinePreview?.characters[character.characterId] ?? {}) })).sort(
     (left, right) => left.layer - right.layer,
   );
   const stageCharacterIds = orderedStageCharacters
@@ -320,6 +323,14 @@ export function Preview({
     return () => undefined;
   }, [project.assets, state.audio]);
 
+  useEffect(() => {
+    for (const channel of ["bgm", "sfx", "voice"] as const) {
+      const volume = timelinePreview?.audio[channel]?.volume;
+      const audio = audioRefs.current[channel];
+      if (audio && volume !== undefined) audio.volume = Math.max(0, Math.min(1, volume));
+    }
+  }, [timelinePreview?.audio]);
+
   useEffect(
     () => () => {
       for (const audio of Object.values(audioRefs.current)) audio.pause();
@@ -391,7 +402,7 @@ export function Preview({
       setRuntimeNotice(error instanceof Error ? error.message : String(error));
     }
   };
-  const camera = state.stage.camera;
+  const camera = { ...state.stage.camera, ...(timelinePreview?.camera ?? {}) };
   const displaySpeaker = resolveDialogueSpeaker(
     project,
     current,
@@ -590,7 +601,7 @@ export function Preview({
               transitionDuration: `${camera.duration}s`,
             }}
           >
-            <img className="stage-bg" src={background} alt="游戏场景" />
+            <img className="stage-bg" src={background} alt="游戏场景" style={{ opacity: timelinePreview?.sceneOpacity ?? 1 }} />
             {state.stage.sceneLayers.map((layer) => {
               const asset = project.assets.find(
                 (item) => item.id === layer.assetId,
@@ -609,7 +620,7 @@ export function Preview({
                   style={{
                     left: `${layer.x}%`,
                     top: `${layer.y}%`,
-                    opacity: layer.opacity,
+                    opacity: layer.opacity * (timelinePreview?.sceneOpacity ?? 1),
                     transform: `translate(calc(-50% + ${camera.x * (distance - 1)}px), calc(-50% + ${camera.y * (distance - 1)}px)) scale(${layer.scale * relativeScale})`,
                     mixBlendMode: layer.blendMode,
                     zIndex: layer.layer + 1,
