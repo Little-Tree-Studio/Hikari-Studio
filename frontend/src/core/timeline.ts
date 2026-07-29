@@ -169,8 +169,8 @@ const valueAtTime = (keyframes: TimelineKeyframe[], time: number): string | numb
   const sorted = [...keyframes].sort((left, right) => left.time - right.time);
   if (!sorted.length) return undefined;
   const rightIndex = sorted.findIndex((keyframe) => keyframe.time >= time);
-  if (rightIndex <= 0) return sorted[Math.max(0, rightIndex)].value;
   if (rightIndex < 0) return sorted.at(-1)?.value;
+  if (rightIndex === 0) return sorted[0].value;
   const left = sorted[rightIndex - 1]; const right = sorted[rightIndex];
   if (typeof left.value !== 'number' || typeof right.value !== 'number' || right.time <= left.time) return time < right.time ? left.value : right.value;
   const progress = (time - left.time) / (right.time - left.time);

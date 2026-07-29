@@ -101,6 +101,37 @@ describe('stage timeline', () => {
     expect(cubicBezierProgress(.5, [0, 0, 1, 1])).toBeCloseTo(.5, 3);
     expect(evaluateTimelineAtTime(timeline, camera.start + .5).camera.zoom).toBeCloseTo(1.5, 2);
     expect(evaluateTimelineAtTime(timeline, camera.start + 1).camera.zoom).toBe(2);
+    expect(evaluateTimelineAtTime(timeline, camera.start + camera.duration).camera.zoom).toBe(2);
+  });
+
+  it('holds the final scene, character, camera, and audio values after their last keyframes', () => {
+    const timeline = deriveTimeline(sampleProject(), 'opening');
+    const scene = timeline.tracks.find((track) => track.kind === 'scene')!.clips[0];
+    const character = timeline.tracks.find((track) => track.kind === 'character')!.clips[0];
+    const camera = timeline.tracks.find((track) => track.kind === 'camera')!.clips[0];
+    const audio = timeline.tracks.find((track) => track.kind === 'audio')!.clips[0];
+    scene.keyframes = [
+      { id: 'scene-from', time: 0, property: 'opacity', value: 0, easing: 'linear' },
+      { id: 'scene-to', time: 1, property: 'opacity', value: 1, easing: 'easeOut' },
+    ];
+    character.keyframes = [
+      { id: 'actor-from', time: 0, property: 'opacity', value: 0, easing: 'linear' },
+      { id: 'actor-to', time: 1, property: 'opacity', value: 1, easing: 'easeOut' },
+    ];
+    camera.keyframes = [
+      { id: 'camera-from', time: 0, property: 'zoom', value: 1, easing: 'linear' },
+      { id: 'camera-to', time: 1, property: 'zoom', value: 1.4, easing: 'easeInOut' },
+    ];
+    audio.keyframes = [
+      { id: 'audio-from', time: 0, property: 'volume', value: 0, easing: 'linear' },
+      { id: 'audio-to', time: 1, property: 'volume', value: .65, easing: 'easeOut' },
+    ];
+
+    const preview = evaluateTimelineAtTime(timeline, Math.max(scene.start, character.start, camera.start, audio.start) + 20);
+    expect(preview.sceneOpacity).toBe(1);
+    expect(preview.characters[character.characterId!]?.opacity).toBe(1);
+    expect(preview.camera.zoom).toBe(1.4);
+    expect(preview.audio[audio.audioChannel ?? 'bgm']?.volume).toBe(.65);
   });
 
   it('ripples following clips after moves and right-edge trims', () => {
