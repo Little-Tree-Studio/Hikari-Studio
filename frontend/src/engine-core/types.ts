@@ -135,7 +135,24 @@ export interface SaveGame {
   thumbnail?: string;
   state: EngineState;
   historySummary: { readCount: number; backlogCount: number };
-  migration?: { fromEngineVersion: number; migratedAt: string };
+  migration?: { fromEngineVersion: number; migratedAt: string; steps?: string[] };
+}
+
+export type SaveGameLoadErrorCode =
+  | 'PROJECT_MISMATCH'
+  | 'FUTURE_ENGINE_VERSION'
+  | 'INVALID_SAVE_STATE'
+  | 'MISSING_FRAGMENT';
+
+export interface SaveGameCompatibility {
+  warnings: string[];
+  migrated: boolean;
+  fromEngineVersion: number;
+}
+
+export interface SaveGameLoadResult extends SaveGameCompatibility {
+  save: SaveGame;
+  state: EngineState;
 }
 
 export interface ProjectDiagnostic extends BlockIssue {

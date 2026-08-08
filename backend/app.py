@@ -90,8 +90,10 @@ def main() -> None:
     background_services_started = False
     try:
         api = create_api(paths=paths)
+        api.install_crash_handlers()
         if args.project:
             api.open_project_path(str(Path(args.project).expanduser().resolve()))
+            api.mark_startup_project_requested()
         state_store = WindowStateStore(paths.config_dir / "window-state.json")
         screens = list(webview.screens or [])
         scale_factor = 1.0
@@ -138,9 +140,14 @@ def main() -> None:
         api.start_background_services()
         background_services_started = True
         webview.start(debug=args.debug or os.getenv("HIKARI_DEBUG") == "1", private_mode=True)
+    except Exception as exc:
+        if api is not None:
+            api.capture_python_crash("python-main", exc)
+        raise
     finally:
         if api is not None:
             api.persist_window_state()
             if background_services_started:
                 api.stop_background_services()
+            api.restore_crash_handlers()
         instance.close()

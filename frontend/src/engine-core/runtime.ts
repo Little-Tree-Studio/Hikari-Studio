@@ -1,12 +1,29 @@
 import type { ConditionOperator, Project, StoryBlock } from '../types';
-import type { AudioChannelState, EngineSnapshot, EngineState, EngineTraceEntry, SaveGame, StageState } from './types';
+import type { AudioChannelState, EngineSnapshot, EngineState, EngineTraceEntry, SaveGame, SaveGameCompatibility, SaveGameLoadErrorCode, SaveGameLoadResult, StageState } from './types';
 
 export const ENGINE_VERSION = 3;
 const MAX_SETTLE_STEPS = 1000;
 const MAX_ROLLBACKS = 100;
 const MAX_BACKLOG = 500;
 const MAX_TRACE_ENTRIES = 2000;
+const SEEK_CHECKPOINT_INTERVAL = 8;
 const clone = <T,>(value: T): T => structuredClone(value);
+
+interface ExecutionOptions {
+  cloneSnapshots: boolean;
+  captureRollback: boolean;
+  visitedControlStates?: Set<string>;
+}
+
+const RUNTIME_EXECUTION: ExecutionOptions = { cloneSnapshots: true, captureRollback: true };
+const SEEK_EXECUTION: ExecutionOptions = { cloneSnapshots: false, captureRollback: false };
+
+export class SaveGameLoadError extends Error {
+  constructor(public readonly code: SaveGameLoadErrorCode, message: string) {
+    super(message);
+    this.name = 'SaveGameLoadError';
+  }
+}
 
 const emptyAudioChannel = (): AudioChannelState => ({ playing: false, volume: 1, loop: false, fadeDuration: 0 });
 const initialStage = (): StageState => ({
@@ -16,7 +33,7 @@ const initialStage = (): StageState => ({
   camera: { x: 0, y: 0, zoom: 1, rotation: 0, shake: 0, filter: 'none', duration: 0 },
 });
 
-function snapshot(state: EngineState): EngineSnapshot {
+function snapshot(state: EngineState, cloneSnapshot = true): EngineSnapshot {
   const {
     rollbackStack: _rollbackStack,
     stepsExecuted: _stepsExecuted,
@@ -24,21 +41,21 @@ function snapshot(state: EngineState): EngineSnapshot {
     traceCursor: _traceCursor,
     ...rest
   } = state;
-  return clone(rest);
+  return cloneSnapshot ? clone(rest) : rest;
 }
 
 type TraceLocation = Pick<EngineTraceEntry, 'fragmentId' | 'instructionPointer' | 'blockId' | 'blockType' | 'step'>;
 
-function appendTrace(state: EngineState, locations: TraceLocation[]): EngineState {
+function appendTrace(state: EngineState, locations: TraceLocation[], cloneSnapshots = true): EngineState {
   if (!locations.length) return state;
   const currentTrace = state.traceCursor < state.executionTrace.length - 1
     ? state.executionTrace.slice(0, state.traceCursor + 1)
     : state.executionTrace;
-  const finalSnapshot = snapshot(state);
+  const finalSnapshot = snapshot(state, cloneSnapshots);
   const appended = locations.map((location, index): EngineTraceEntry => ({
     ...location,
     id: `${location.fragmentId}:${location.instructionPointer}:${currentTrace.length + index}`,
-    snapshot: clone(finalSnapshot),
+    snapshot: cloneSnapshots ? clone(finalSnapshot) : finalSnapshot,
   }));
   const executionTrace = [...currentTrace, ...appended].slice(-MAX_TRACE_ENTRIES);
   return { ...state, executionTrace, traceCursor: executionTrace.length - 1 };
@@ -54,8 +71,8 @@ function traceLocation(state: EngineState, block: StoryBlock): TraceLocation {
   };
 }
 
-function withRollback(state: EngineState): EngineState {
-  return { ...state, rollbackStack: [...state.rollbackStack, snapshot(state)].slice(-MAX_ROLLBACKS) };
+function withRollback(state: EngineState, cloneSnapshot = true): EngineState {
+  return { ...state, rollbackStack: [...state.rollbackStack, snapshot(state, cloneSnapshot)].slice(-MAX_ROLLBACKS) };
 }
 
 function applySideEffect(state: EngineState, block: StoryBlock, project: Project): EngineState {
@@ -128,9 +145,36 @@ function prepareVisible(state: EngineState, block: StoryBlock, project: Project)
   return { ...next, stage: { ...next.stage, characters: { ...next.stage.characters, [character.id]: stageCharacter } } };
 }
 
-function settle(project: Project, initial: EngineState): EngineState {
+const variablesFingerprintCache = new WeakMap<Record<string, string | number | boolean>, string>();
+
+function variablesFingerprint(variables: Record<string, string | number | boolean>): string {
+  const cached = variablesFingerprintCache.get(variables);
+  if (cached !== undefined) return cached;
+  const fingerprint = Object.keys(variables)
+    .sort()
+    .map((name) => `${JSON.stringify(name)}:${JSON.stringify(variables[name])}`)
+    .join(',');
+  variablesFingerprintCache.set(variables, fingerprint);
+  return fingerprint;
+}
+
+function controlStateFingerprint(state: EngineState): string {
+  const callStack = state.callStack
+    .map((frame) => `${JSON.stringify(frame.fragmentId)}:${frame.instructionPointer}`)
+    .join(',');
+  return `${JSON.stringify(state.fragmentId)}\u001f${state.instructionPointer}\u001f${variablesFingerprint(state.variables)}\u001f${callStack}`;
+}
+
+function settle(project: Project, initial: EngineState, options: ExecutionOptions = RUNTIME_EXECUTION): EngineState {
   let state = initial;
   for (let guard = 0; guard < MAX_SETTLE_STEPS; guard += 1) {
+    if (options.visitedControlStates) {
+      const fingerprint = controlStateFingerprint(state);
+      if (options.visitedControlStates.has(fingerprint)) {
+        return { ...state, finished: true, error: `预览定位检测到确定性循环：${state.fragmentId} · Block ${state.instructionPointer + 1}` };
+      }
+      options.visitedControlStates.add(fingerprint);
+    }
     const blocks = project.scripts[state.fragmentId] ?? [];
     if (state.instructionPointer >= blocks.length) {
       const frame = state.callStack.at(-1);
@@ -141,7 +185,7 @@ function settle(project: Project, initial: EngineState): EngineState {
     const current = blocks[state.instructionPointer];
     if (current.type === 'narration' || current.type === 'dialogue' || current.type === 'branch') {
       const visibleState = prepareVisible(state, current, project);
-      return appendTrace(visibleState, [traceLocation(visibleState, current)]);
+      return appendTrace(visibleState, [traceLocation(visibleState, current)], options.cloneSnapshots);
     }
     const location = traceLocation(state, current);
     if (current.type === 'scene' || current.type === 'sound' || current.type === 'characterShow' || current.type === 'characterHide' || current.type === 'camera' || current.type === 'setVariable') {
@@ -160,18 +204,36 @@ function settle(project: Project, initial: EngineState): EngineState {
       const frame = state.callStack.at(-1);
       if (!frame) {
         state = { ...state, finished: true, error: '返回指令没有对应的调用栈帧', stepsExecuted: state.stepsExecuted + 1 };
-        return appendTrace(state, [{ ...location, step: state.stepsExecuted }]);
+        return appendTrace(state, [{ ...location, step: state.stepsExecuted }], options.cloneSnapshots);
       }
       state = { ...state, fragmentId: frame.fragmentId, instructionPointer: frame.instructionPointer, callStack: state.callStack.slice(0, -1), stepsExecuted: state.stepsExecuted + 1 };
     }
-    state = appendTrace(state, [{ ...location, step: state.stepsExecuted }]);
+    state = appendTrace(state, [{ ...location, step: state.stepsExecuted }], options.cloneSnapshots);
     if (state.error) return state;
   }
   return { ...state, finished: true, error: `流程执行超过 ${MAX_SETTLE_STEPS} 步，可能存在无限循环` };
 }
 
+function createEngineStateWithOptions(project: Project, fragmentId: string, options: ExecutionOptions): EngineState {
+  return settle(project, {
+    fragmentId,
+    instructionPointer: 0,
+    variables: options.cloneSnapshots ? clone(project.variables) : { ...project.variables },
+    stage: initialStage(),
+    audio: { bgm: emptyAudioChannel(), sfx: emptyAudioChannel(), voice: emptyAudioChannel() },
+    callStack: [],
+    readBlocks: {},
+    backlog: [],
+    rollbackStack: [],
+    stepsExecuted: 0,
+    executionTrace: [],
+    traceCursor: -1,
+    finished: false,
+  }, options);
+}
+
 export function createEngineState(project: Project, fragmentId = project.activeFragmentId): EngineState {
-  return settle(project, { fragmentId, instructionPointer: 0, variables: clone(project.variables), stage: initialStage(), audio: { bgm: emptyAudioChannel(), sfx: emptyAudioChannel(), voice: emptyAudioChannel() }, callStack: [], readBlocks: {}, backlog: [], rollbackStack: [], stepsExecuted: 0, executionTrace: [], traceCursor: -1, finished: false });
+  return createEngineStateWithOptions(project, fragmentId, RUNTIME_EXECUTION);
 }
 
 export function currentBlock(project: Project, state: EngineState): StoryBlock | undefined {
@@ -188,20 +250,24 @@ export function resolveDialogueSpeaker(project: Project, block: StoryBlock | und
   return String(resolved ?? '').trim() || character.name;
 }
 
-export function advanceEngine(project: Project, state: EngineState): EngineState {
+function advanceEngineWithOptions(project: Project, state: EngineState, options: ExecutionOptions): EngineState {
   const current = currentBlock(project, state);
   if (!current || current.type === 'branch') return state;
   if (current.type !== 'dialogue' && current.type !== 'narration') {
-    return settle(project, { ...state, finished: false, error: undefined });
+    return settle(project, { ...state, finished: false, error: undefined }, options);
   }
-  let next = withRollback(state);
+  let next = options.captureRollback ? withRollback(state, options.cloneSnapshots) : state;
   if (current.type === 'dialogue' || current.type === 'narration') {
     const voiceAsset = current.type === 'dialogue' && current.voice
       ? project.assets.find((asset) => asset.id === current.voice || asset.name === current.voice || asset.path.endsWith(current.voice ?? ''))
       : undefined;
     next = { ...next, readBlocks: { ...next.readBlocks, [current.id]: true }, backlog: [...next.backlog, { blockId: current.id, fragmentId: state.fragmentId, speaker: current.type === 'dialogue' ? resolveDialogueSpeaker(project, current, state.variables) : undefined, text: current.text ?? '', voiceAssetId: voiceAsset?.id, timestamp: Date.now() }].slice(-MAX_BACKLOG) };
   }
-  return settle(project, { ...next, instructionPointer: state.instructionPointer + 1, finished: false, error: undefined });
+  return settle(project, { ...next, instructionPointer: state.instructionPointer + 1, finished: false, error: undefined }, options);
+}
+
+export function advanceEngine(project: Project, state: EngineState): EngineState {
+  return advanceEngineWithOptions(project, state, RUNTIME_EXECUTION);
 }
 
 export function chooseBranch(project: Project, state: EngineState, target: string): EngineState {
@@ -251,28 +317,439 @@ export function restoreTraceState(state: EngineState, traceIndex: number, shared
   };
 }
 
-export function seekEngine(project: Project, fragmentId: string, targetIndex: number): EngineState {
-  let state = createEngineState(project, fragmentId);
-  const blocks = project.scripts[fragmentId] ?? [];
-  const limit = Math.max(0, Math.min(targetIndex, Math.max(0, blocks.length - 1)));
-  for (let guard = 0; !state.finished && state.fragmentId === fragmentId && state.instructionPointer < limit && guard < MAX_SETTLE_STEPS; guard += 1) {
-    const current = currentBlock(project, state);
-    state = current?.type === 'branch' ? settle(project, { ...state, instructionPointer: state.instructionPointer + 1 }) : advanceEngine(project, state);
+interface FragmentSeekCacheSource {
+  scripts: Project['scripts'];
+  characters: Project['characters'];
+  assets: Project['assets'];
+  variables: Project['variables'];
+}
+
+interface FragmentSeekCacheEntry {
+  source: FragmentSeekCacheSource;
+  initialState?: EngineState;
+  checkpoints: Map<number, EngineState>;
+  results: Map<number, EngineState | WeakRef<EngineState>>;
+}
+
+const MAX_CACHED_SEEK_FRAGMENTS = 128;
+const MAX_CACHED_SEEK_CHECKPOINT_FRAGMENTS = 8;
+const MAX_CACHED_SEEK_RESULTS = 64;
+const MAX_CACHED_SEEK_CHECKPOINTS = 128;
+
+export interface EngineSeekCacheStats {
+  exactHits: number;
+  checkpointHits: number;
+  misses: number;
+  invalidations: number;
+  evictions: number;
+  weakReclaims: number;
+  cachedFragments: number;
+  cachedResults: number;
+  cachedStrongResults: number;
+  cachedWeakResults: number;
+  cachedCheckpoints: number;
+}
+
+function seekCacheSource(project: Project): FragmentSeekCacheSource {
+  return { scripts: project.scripts, characters: project.characters, assets: project.assets, variables: project.variables };
+}
+
+function matchesSeekCacheSource(left: FragmentSeekCacheSource, right: FragmentSeekCacheSource): boolean {
+  return left.scripts === right.scripts
+    && left.characters === right.characters
+    && left.assets === right.assets
+    && left.variables === right.variables;
+}
+
+function detachSeekState(state: EngineState): EngineState {
+  return {
+    ...state,
+    variables: { ...state.variables },
+    stage: {
+      ...state.stage,
+      sceneLayers: state.stage.sceneLayers.map((layer) => ({ ...layer })),
+      camera: { ...state.stage.camera },
+      characters: Object.fromEntries(Object.entries(state.stage.characters).map(([id, character]) => [id, {
+        ...character,
+        overlays: character.overlays?.map((overlay) => ({ ...overlay })),
+      }])),
+    },
+    audio: {
+      bgm: { ...state.audio.bgm },
+      sfx: { ...state.audio.sfx },
+      voice: { ...state.audio.voice },
+    },
+    callStack: state.callStack.map((frame) => ({ ...frame })),
+    readBlocks: { ...state.readBlocks },
+    backlog: state.backlog.map((entry) => ({ ...entry })),
+    rollbackStack: [],
+    executionTrace: state.executionTrace.slice(),
+  };
+}
+
+export class EngineSeekCache {
+  private scriptCaches = new WeakMap<Project['scripts'], Map<string, FragmentSeekCacheEntry>>();
+  private checkpointFragmentLrus = new WeakMap<Project['scripts'], string[]>();
+  private activeProjectCache?: Map<string, FragmentSeekCacheEntry>;
+  private counters: EngineSeekCacheStats = {
+    exactHits: 0,
+    checkpointHits: 0,
+    misses: 0,
+    invalidations: 0,
+    evictions: 0,
+    weakReclaims: 0,
+    cachedFragments: 0,
+    cachedResults: 0,
+    cachedStrongResults: 0,
+    cachedWeakResults: 0,
+    cachedCheckpoints: 0,
+  };
+
+  clear(): void {
+    this.scriptCaches = new WeakMap();
+    this.checkpointFragmentLrus = new WeakMap();
+    this.activeProjectCache = undefined;
+    this.counters = {
+      exactHits: 0,
+      checkpointHits: 0,
+      misses: 0,
+      invalidations: 0,
+      evictions: 0,
+      weakReclaims: 0,
+      cachedFragments: 0,
+      cachedResults: 0,
+      cachedStrongResults: 0,
+      cachedWeakResults: 0,
+      cachedCheckpoints: 0,
+    };
   }
-  return { ...state, rollbackStack: [] };
+
+  stats(): EngineSeekCacheStats {
+    const entries = this.activeProjectCache ? [...this.activeProjectCache.values()] : [];
+    let cachedStrongResults = 0;
+    let cachedWeakResults = 0;
+    for (const entry of entries) {
+      for (const [index, cached] of entry.results) {
+        if (!(cached instanceof WeakRef)) {
+          cachedStrongResults += 1;
+          continue;
+        }
+        if (cached.deref()) cachedWeakResults += 1;
+        else {
+          entry.results.delete(index);
+          this.counters.weakReclaims += 1;
+        }
+      }
+    }
+    return {
+      ...this.counters,
+      cachedFragments: entries.length,
+      cachedResults: cachedStrongResults + cachedWeakResults,
+      cachedStrongResults,
+      cachedWeakResults,
+      cachedCheckpoints: entries.reduce((total, entry) => total + entry.checkpoints.size, 0),
+    };
+  }
+
+  seek(project: Project, fragmentId: string, targetIndex: number): EngineState {
+    const blocks = project.scripts[fragmentId] ?? [];
+    const requestedIndex = Number.isFinite(targetIndex) ? Math.floor(targetIndex) : 0;
+    const limit = Math.max(0, Math.min(requestedIndex, Math.max(0, blocks.length - 1)));
+    let projectCache = this.scriptCaches.get(project.scripts);
+    if (!projectCache) {
+      projectCache = new Map();
+      this.scriptCaches.set(project.scripts, projectCache);
+      this.checkpointFragmentLrus.set(project.scripts, []);
+    }
+    this.activeProjectCache = projectCache;
+
+    const source = seekCacheSource(project);
+    let entry = projectCache.get(fragmentId);
+    if (entry && !matchesSeekCacheSource(entry.source, source)) {
+      projectCache.delete(fragmentId);
+      entry = undefined;
+      this.counters.invalidations += 1;
+    }
+    if (!entry) {
+      const initialVisited = new Set<string>();
+      const initialState = createEngineStateWithOptions(project, fragmentId, { ...SEEK_EXECUTION, visitedControlStates: initialVisited });
+      entry = {
+        source,
+        initialState,
+        checkpoints: new Map([[initialState.instructionPointer, initialState]]),
+        results: new Map(),
+      };
+      projectCache.set(fragmentId, entry);
+      while (projectCache.size > MAX_CACHED_SEEK_FRAGMENTS) {
+        const oldestFragment = projectCache.keys().next().value;
+        if (oldestFragment === undefined) break;
+        projectCache.delete(oldestFragment);
+        const checkpointLru = this.checkpointFragmentLrus.get(project.scripts);
+        if (checkpointLru) {
+          const hotIndex = checkpointLru.indexOf(oldestFragment);
+          if (hotIndex >= 0) checkpointLru.splice(hotIndex, 1);
+        }
+        this.counters.evictions += 1;
+      }
+    } else {
+      projectCache.delete(fragmentId);
+      projectCache.set(fragmentId, entry);
+    }
+
+    const checkpointLru = this.checkpointFragmentLrus.get(project.scripts) ?? [];
+    const currentHotIndex = checkpointLru.indexOf(fragmentId);
+    if (currentHotIndex >= 0) checkpointLru.splice(currentHotIndex, 1);
+    checkpointLru.push(fragmentId);
+    this.checkpointFragmentLrus.set(project.scripts, checkpointLru);
+    while (checkpointLru.length > MAX_CACHED_SEEK_CHECKPOINT_FRAGMENTS) {
+      const releasedFragmentId = checkpointLru.shift();
+      if (!releasedFragmentId) break;
+      const releasedEntry = projectCache.get(releasedFragmentId);
+      if (!releasedEntry) continue;
+      releasedEntry.initialState = undefined;
+      releasedEntry.checkpoints.clear();
+      for (const [index, cached] of releasedEntry.results) {
+        if (!(cached instanceof WeakRef)) releasedEntry.results.set(index, new WeakRef(cached));
+      }
+    }
+
+    const cachedExact = entry.results.get(limit);
+    const exact = cachedExact instanceof WeakRef ? cachedExact.deref() : cachedExact;
+    if (exact) {
+      this.counters.exactHits += 1;
+      entry.results.delete(limit);
+      entry.results.set(limit, exact);
+      return detachSeekState(exact);
+    }
+    if (cachedExact) {
+      entry.results.delete(limit);
+      this.counters.weakReclaims += 1;
+    }
+    this.counters.misses += 1;
+
+    if (!entry.initialState) {
+      const initialVisited = new Set<string>();
+      entry.initialState = createEngineStateWithOptions(project, fragmentId, { ...SEEK_EXECUTION, visitedControlStates: initialVisited });
+      entry.checkpoints.set(entry.initialState.instructionPointer, entry.initialState);
+    }
+
+    let state = entry.initialState;
+    for (const checkpoint of entry.checkpoints.values()) {
+      if (checkpoint.finished || checkpoint.error || checkpoint.fragmentId !== fragmentId) continue;
+      if (checkpoint.instructionPointer <= limit && checkpoint.instructionPointer > state.instructionPointer) state = checkpoint;
+    }
+    if (state !== entry.initialState) this.counters.checkpointHits += 1;
+
+    const visitedControlStates = new Set<string>([controlStateFingerprint(state)]);
+    const options: ExecutionOptions = { ...SEEK_EXECUTION, visitedControlStates };
+    let guard = 0;
+    for (; !state.finished && state.fragmentId === fragmentId && state.instructionPointer < limit && guard < MAX_SETTLE_STEPS; guard += 1) {
+      const current = currentBlock(project, state);
+      state = current?.type === 'branch'
+        ? settle(project, { ...state, instructionPointer: state.instructionPointer + 1 }, options)
+        : advanceEngineWithOptions(project, state, options);
+      if (
+        !state.finished
+        && !state.error
+        && state.fragmentId === fragmentId
+        && state.instructionPointer % SEEK_CHECKPOINT_INTERVAL === 0
+        && !entry.checkpoints.has(state.instructionPointer)
+      ) {
+        entry.checkpoints.set(state.instructionPointer, state);
+        while (entry.checkpoints.size > MAX_CACHED_SEEK_CHECKPOINTS) {
+          const removable = [...entry.checkpoints.keys()].find((pointer) => pointer !== entry.initialState?.instructionPointer);
+          if (removable === undefined) break;
+          entry.checkpoints.delete(removable);
+          this.counters.evictions += 1;
+        }
+      }
+    }
+    if (guard >= MAX_SETTLE_STEPS && !state.finished && !state.error) {
+      state = { ...state, finished: true, error: `预览定位超过 ${MAX_SETTLE_STEPS} 步，可能存在无限循环` };
+    }
+    const result = { ...state, rollbackStack: [] };
+    if (!result.finished && !result.error && result.fragmentId === fragmentId && !entry.checkpoints.has(result.instructionPointer)) {
+      entry.checkpoints.set(result.instructionPointer, result);
+      while (entry.checkpoints.size > MAX_CACHED_SEEK_CHECKPOINTS) {
+        const removable = [...entry.checkpoints.keys()].find((pointer) => pointer !== entry.initialState?.instructionPointer);
+        if (removable === undefined) break;
+        entry.checkpoints.delete(removable);
+        this.counters.evictions += 1;
+      }
+    }
+    entry.results.set(limit, result);
+    while (entry.results.size > MAX_CACHED_SEEK_RESULTS) {
+      const oldestResult = entry.results.keys().next().value;
+      if (oldestResult === undefined) break;
+      entry.results.delete(oldestResult);
+      this.counters.evictions += 1;
+    }
+    return detachSeekState(result);
+  }
+}
+
+const MAX_CACHED_TRACE_RESTORES = 128;
+
+export interface EngineTraceRestoreCacheStats {
+  exactHits: number;
+  misses: number;
+  invalidations: number;
+  evictions: number;
+  cachedResults: number;
+}
+
+function sharedTraceRestoreState(
+  restored: EngineState,
+  currentVariables: Record<string, string | number | boolean>,
+  sharedVariableNames: readonly string[],
+): EngineState {
+  const variables = preserveSharedVariables(restored.variables, currentVariables, sharedVariableNames);
+  return variables === restored.variables ? restored : { ...restored, variables };
+}
+
+export class EngineTraceRestoreCache {
+  private traceCaches = new WeakMap<EngineState['executionTrace'], Map<number, EngineState>>();
+  private activeTrace?: EngineState['executionTrace'];
+  private activeCache?: Map<number, EngineState>;
+  private counters: EngineTraceRestoreCacheStats = { exactHits: 0, misses: 0, invalidations: 0, evictions: 0, cachedResults: 0 };
+
+  clear(): void {
+    this.traceCaches = new WeakMap();
+    this.activeTrace = undefined;
+    this.activeCache = undefined;
+    this.counters = { exactHits: 0, misses: 0, invalidations: 0, evictions: 0, cachedResults: 0 };
+  }
+
+  stats(): EngineTraceRestoreCacheStats {
+    return { ...this.counters, cachedResults: this.activeCache?.size ?? 0 };
+  }
+
+  restore(state: EngineState, traceIndex: number, sharedVariableNames: readonly string[] = []): EngineState {
+    const trace = state.executionTrace;
+    if (!trace.length) return state;
+    const traceCursor = Math.max(0, Math.min(Math.floor(traceIndex), trace.length - 1));
+    if (this.activeTrace && this.activeTrace !== trace) this.counters.invalidations += 1;
+    this.activeTrace = trace;
+    let cache = this.traceCaches.get(trace);
+    if (!cache) {
+      cache = new Map();
+      this.traceCaches.set(trace, cache);
+    }
+    this.activeCache = cache;
+
+    const exact = cache.get(traceCursor);
+    if (exact) {
+      this.counters.exactHits += 1;
+      cache.delete(traceCursor);
+      cache.set(traceCursor, exact);
+      return sharedTraceRestoreState(exact, state.variables, sharedVariableNames);
+    }
+    this.counters.misses += 1;
+
+    const entry = trace[traceCursor];
+    const rollbackStart = Math.max(0, traceCursor - MAX_ROLLBACKS);
+    const restored: EngineState = {
+      ...entry.snapshot,
+      rollbackStack: trace.slice(rollbackStart, traceCursor).map((item) => item.snapshot),
+      stepsExecuted: entry.step,
+      executionTrace: trace,
+      traceCursor,
+    };
+    cache.set(traceCursor, restored);
+    while (cache.size > MAX_CACHED_TRACE_RESTORES) {
+      const oldest = cache.keys().next().value;
+      if (oldest === undefined) break;
+      cache.delete(oldest);
+      this.counters.evictions += 1;
+    }
+    return sharedTraceRestoreState(restored, state.variables, sharedVariableNames);
+  }
+}
+
+let defaultEngineSeekCache: EngineSeekCache | undefined;
+
+export function seekEngine(project: Project, fragmentId: string, targetIndex: number, cache?: EngineSeekCache): EngineState {
+  const activeCache = cache ?? (defaultEngineSeekCache ??= new EngineSeekCache());
+  return activeCache.seek(project, fragmentId, targetIndex);
 }
 
 export function createSaveGame(project: Project, state: EngineState, slotType: SaveGame['slotType'] = 'manual', label?: string, metadata: Partial<Pick<SaveGame, 'slotId' | 'fragmentName' | 'chapterName' | 'playTimeSeconds' | 'thumbnail'>> = {}): SaveGame {
   return { projectId: project.meta.id, projectVersion: project.version, engineVersion: ENGINE_VERSION, savedAt: new Date().toISOString(), slotType, label, ...metadata, state: clone(state), historySummary: { readCount: Object.keys(state.readBlocks).length, backlogCount: state.backlog.length } };
 }
 
-export function loadSaveGame(project: Project, save: SaveGame, currentVariables: Record<string, string | number | boolean> = {}): EngineState {
-  if (save.projectId !== project.meta.id) throw new Error('存档不属于当前项目');
-  if (save.engineVersion > ENGINE_VERSION) throw new Error(`存档引擎版本 ${save.engineVersion} 高于当前版本 ${ENGINE_VERSION}`);
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function normalizeSaveState(project: Project, save: SaveGame, currentVariables: Record<string, string | number | boolean>, warnings: string[]): EngineState {
+  if (!isRecord(save.state)) throw new SaveGameLoadError('INVALID_SAVE_STATE', '存档运行状态缺失或格式无效');
   const raw = clone(save.state) as EngineState & { audio?: unknown; stage?: unknown };
-  const audio = raw.audio && 'bgm' in raw.audio ? raw.audio : { bgm: { ...(raw.audio as AudioChannelState), playing: Boolean((raw.audio as AudioChannelState)?.track) }, sfx: emptyAudioChannel(), voice: emptyAudioChannel() };
-  const stage = raw.stage && 'characters' in raw.stage ? { ...initialStage(), ...raw.stage, sceneLayers: raw.stage.sceneLayers ?? [] } : { ...initialStage(), ...(raw.stage as Partial<StageState>) };
-  const executionTrace = raw.executionTrace ?? [];
+  if (typeof raw.fragmentId !== 'string' || !project.scripts[raw.fragmentId]) {
+    throw new SaveGameLoadError('MISSING_FRAGMENT', `存档引用的剧情片段已不存在：${String(raw.fragmentId ?? '未设置')}`);
+  }
+  if (!Number.isFinite(raw.instructionPointer)) throw new SaveGameLoadError('INVALID_SAVE_STATE', '存档指令位置无效');
+  const legacyAudio = isRecord(raw.audio) ? raw.audio as unknown as AudioChannelState : undefined;
+  const audio = isRecord(raw.audio) && 'bgm' in raw.audio
+    ? raw.audio as EngineState['audio']
+    : { bgm: { ...emptyAudioChannel(), ...legacyAudio, playing: Boolean(legacyAudio?.track) }, sfx: emptyAudioChannel(), voice: emptyAudioChannel() };
+  const rawStage = isRecord(raw.stage) ? raw.stage as Partial<StageState> : {};
+  const stage = 'characters' in rawStage
+    ? { ...initialStage(), ...rawStage, sceneLayers: rawStage.sceneLayers ?? [], characters: rawStage.characters ?? {} }
+    : { ...initialStage(), ...rawStage };
+  const executionTrace = Array.isArray(raw.executionTrace) ? raw.executionTrace : [];
+  const callStack = Array.isArray(raw.callStack)
+    ? raw.callStack.filter((frame) => frame && typeof frame.fragmentId === 'string' && Boolean(project.scripts[frame.fragmentId]) && Number.isFinite(frame.instructionPointer))
+    : [];
+  if (callStack.length !== (Array.isArray(raw.callStack) ? raw.callStack.length : 0)) warnings.push('已移除指向不存在片段的调用栈记录');
   const sharedVariableNames = Object.entries(project.variableDefinitions ?? {}).filter(([, definition]) => definition.persistence === 'shared').map(([name]) => name);
-  return { ...raw, stage: stage as StageState, audio: audio as EngineState['audio'], variables: preserveSharedVariables(raw.variables ?? {}, currentVariables, sharedVariableNames), readBlocks: raw.readBlocks ?? {}, backlog: raw.backlog ?? [], rollbackStack: [], stepsExecuted: raw.stepsExecuted ?? 0, executionTrace, traceCursor: Math.min(raw.traceCursor ?? executionTrace.length - 1, executionTrace.length - 1) };
+  const fragmentLength = project.scripts[raw.fragmentId].length;
+  const instructionPointer = Math.max(0, Math.min(Math.floor(raw.instructionPointer), fragmentLength));
+  if (instructionPointer !== raw.instructionPointer) warnings.push('存档指令位置已调整到当前剧情范围');
+  return {
+    ...raw,
+    fragmentId: raw.fragmentId,
+    instructionPointer,
+    stage: stage as StageState,
+    audio: {
+      bgm: { ...emptyAudioChannel(), ...audio.bgm },
+      sfx: { ...emptyAudioChannel(), ...audio.sfx },
+      voice: { ...emptyAudioChannel(), ...audio.voice },
+    },
+    variables: preserveSharedVariables(isRecord(raw.variables) ? raw.variables as Record<string, string | number | boolean> : {}, currentVariables, sharedVariableNames),
+    callStack,
+    readBlocks: isRecord(raw.readBlocks) ? raw.readBlocks as Record<string, true> : {},
+    backlog: Array.isArray(raw.backlog) ? raw.backlog : [],
+    rollbackStack: [],
+    stepsExecuted: Number.isFinite(raw.stepsExecuted) ? raw.stepsExecuted : 0,
+    executionTrace,
+    traceCursor: Math.max(-1, Math.min(Number.isFinite(raw.traceCursor) ? raw.traceCursor : executionTrace.length - 1, executionTrace.length - 1)),
+    finished: Boolean(raw.finished),
+  };
+}
+
+export function inspectSaveGameCompatibility(project: Project, save: SaveGame): SaveGameCompatibility {
+  if (save.projectId !== project.meta.id) throw new SaveGameLoadError('PROJECT_MISMATCH', '该存档属于其他游戏，已阻止读取');
+  const fromEngineVersion = Number.isFinite(save.engineVersion) ? save.engineVersion : 1;
+  if (fromEngineVersion > ENGINE_VERSION) throw new SaveGameLoadError('FUTURE_ENGINE_VERSION', `存档引擎版本 ${fromEngineVersion} 高于当前版本 ${ENGINE_VERSION}`);
+  const warnings: string[] = [];
+  if (save.projectVersion > project.version) warnings.push(`存档来自更新的项目版本 v${save.projectVersion}，部分内容可能发生变化`);
+  else if (save.projectVersion < project.version) warnings.push(`存档来自项目 v${save.projectVersion}，将按当前项目 v${project.version} 兼容读取`);
+  return { warnings, migrated: fromEngineVersion < ENGINE_VERSION, fromEngineVersion };
+}
+
+export function loadSaveGameWithReport(project: Project, source: SaveGame, currentVariables: Record<string, string | number | boolean> = {}): SaveGameLoadResult {
+  const compatibility = inspectSaveGameCompatibility(project, source);
+  const warnings = [...compatibility.warnings];
+  const state = normalizeSaveState(project, source, currentVariables, warnings);
+  const save = clone(source);
+  if (compatibility.migrated) {
+    save.engineVersion = ENGINE_VERSION;
+    save.state = clone(state);
+    save.migration = { fromEngineVersion: compatibility.fromEngineVersion, migratedAt: new Date().toISOString(), steps: [`engine-${compatibility.fromEngineVersion}-to-${ENGINE_VERSION}`] };
+  }
+  return { save, state, warnings, migrated: compatibility.migrated, fromEngineVersion: compatibility.fromEngineVersion };
+}
+
+export function loadSaveGame(project: Project, save: SaveGame, currentVariables: Record<string, string | number | boolean> = {}): EngineState {
+  return loadSaveGameWithReport(project, save, currentVariables).state;
 }

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent } from 'react';
 import {
-  Braces, ChevronRight, CircleDot, ExternalLink, GitBranch, GitCommitHorizontal,
-  GripVertical, LayoutList, ListTree, LocateFixed, Maximize2, Minus, Pencil, Plus,
-  RotateCcw, Search, Trash2, Variable,
+  BookOpen, Braces, ChevronRight, CircleDot, CirclePlay, ExternalLink, FileText,
+  GitBranch, GitCommitHorizontal, GripVertical, LayoutList, ListTree, LocateFixed,
+  Maximize2, Minus, Pencil, Plus, Power, PowerOff, RotateCcw, Search, Trash2, Variable,
 } from 'lucide-react';
 import type { Project, StoryBlock, VariableDefinition, VariablePersistence, VariableScope, VariableType } from '../types';
 
@@ -16,6 +16,7 @@ type NarrativeNode = {
   fragmentId?: string;
   blockIndex?: number;
   chapterId?: string;
+  disabled?: boolean;
 };
 type EdgeKind = 'trunk' | 'structure' | 'branch' | 'condition' | 'jump' | 'call' | 'variable';
 type NarrativeEdge = {
@@ -31,7 +32,7 @@ type NarrativeEdge = {
   variable?: string;
   detachable?: boolean;
 };
-type Focus = { type: 'variable' | 'branch'; id: string } | null;
+type Focus = { type: 'structure' | 'variable' | 'branch'; id: string } | null;
 
 type Props = {
   project: Project;
@@ -42,6 +43,7 @@ type Props = {
 };
 
 const nodeWidth = 210;
+const makeId = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 const inferType = (value: string | number | boolean): VariableType => typeof value === 'boolean' ? 'boolean' : typeof value === 'number' ? 'number' : 'string';
 const defaultDefinition = (value: string | number | boolean): VariableDefinition => ({ type: inferType(value), scope: 'project', persistence: 'slot' });
 const blockTitle = (block: StoryBlock) => block.type === 'branch' ? block.title || '选项分支' : block.type === 'condition' ? `${block.variable || '变量'} 条件` : block.type === 'setVariable' ? `写入 ${block.variable || '变量'}` : block.type === 'call' ? '调用片段' : '跳转片段';
@@ -73,7 +75,7 @@ function buildGraph(project: Project) {
 
   project.chapters.forEach((chapter, chapterIndex) => {
     const chapterNodeId = `chapter:${chapter.id}`;
-    nodes.push({ id: chapterNodeId, kind: 'chapter', title: chapter.name, subtitle: chapter.entry ? '游戏入口' : `${chapter.fragments.length} 个 Fragment`, chapterId: chapter.id });
+    nodes.push({ id: chapterNodeId, kind: 'chapter', title: chapter.name, subtitle: chapter.entry ? '游戏入口' : chapter.disabled ? `已禁用 · ${chapter.fragments.length} 个 Fragment` : `${chapter.fragments.length} 个 Fragment`, chapterId: chapter.id, disabled: chapter.disabled });
     defaults[chapterNodeId] = { x: 90 + chapterIndex * chapterGap, y: 80 };
     const nextChapter = project.chapters[chapterIndex + 1];
     if (nextChapter) edges.push({ id: `trunk:${chapter.id}`, source: chapterNodeId, target: `chapter:${nextChapter.id}`, kind: 'trunk', label: '章节顺序' });
@@ -81,7 +83,7 @@ function buildGraph(project: Project) {
     chapter.fragments.forEach((fragment, fragmentIndex) => {
       const x = 90 + chapterIndex * chapterGap + fragmentIndex * 245;
       const fragmentNodeId = `fragment:${fragment.id}`;
-      nodes.push({ id: fragmentNodeId, kind: 'fragment', title: fragment.name, subtitle: chapter.name, fragmentId: fragment.id, chapterId: chapter.id });
+      nodes.push({ id: fragmentNodeId, kind: 'fragment', title: fragment.name, subtitle: chapter.name, fragmentId: fragment.id, chapterId: chapter.id, disabled: chapter.disabled });
       defaults[fragmentNodeId] = { x, y: 265 };
       edges.push({ id: `owns:${chapter.id}:${fragment.id}`, source: chapterNodeId, target: fragmentNodeId, kind: 'structure', label: '包含' });
 
@@ -123,9 +125,10 @@ function buildGraph(project: Project) {
 
 export function NarrativeMap({ project, activate, commit, notify, requestText }: Props) {
   const graph = useMemo(() => buildGraph(project), [project.chapters, project.scripts]);
+  const graphNodeIds = useMemo(() => graph.nodes.map((node) => node.id).join('\u001f'), [graph.nodes]);
   const [positions, setPositions] = useState<Record<string, Point>>(() => ({ ...graph.defaults, ...(project.settings.narrativeMap?.positions ?? {}) }));
   const [viewport, setViewport] = useState({ x: 0, y: 0, scale: .85 });
-  const [tab, setTab] = useState<'variables' | 'branches'>('variables');
+  const [tab, setTab] = useState<'structure' | 'variables' | 'branches'>('structure');
   const [branchView, setBranchView] = useState<'chapter' | 'flat'>('chapter');
   const [focus, setFocus] = useState<Focus>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
@@ -145,7 +148,7 @@ export function NarrativeMap({ project, activate, commit, notify, requestText }:
       positionsRef.current = next;
       return next;
     });
-  }, [graph.nodes.length, project.meta.id]);
+  }, [graphNodeIds, project.meta.id]);
 
   const variableNodeReferences = useMemo(() => Object.fromEntries(Object.keys(project.variables).map((name) => {
     const refs = graph.nodes.filter((node) => {
@@ -172,10 +175,11 @@ export function NarrativeMap({ project, activate, commit, notify, requestText }:
 
   const isHighlightedNode = (node: NarrativeNode) => {
     if (!focus) return false;
+    if (focus.type === 'structure') return focus.id === node.id;
     if (focus.type === 'branch') return focus.id === node.id || branches.find((branch) => branch.id === focus.id)?.nodeId === node.id || graph.edges.find((edge) => edge.id === focus.id)?.target === node.id;
     return variableNodeReferences[focus.id]?.some((item) => item.id === node.id) ?? false;
   };
-  const isHighlightedEdge = (edge: NarrativeEdge) => focus?.type === 'branch' ? edge.id === focus.id || edge.source === focus.id : focus?.type === 'variable' ? edge.variable === focus.id : false;
+  const isHighlightedEdge = (edge: NarrativeEdge) => focus?.type === 'structure' ? edge.source === focus.id || edge.target === focus.id : focus?.type === 'branch' ? edge.id === focus.id || edge.source === focus.id : focus?.type === 'variable' ? edge.variable === focus.id : false;
   const hasFocus = Boolean(focus);
   const definitionFor = (name: string) => project.variableDefinitions?.[name] ?? defaultDefinition(project.variables[name]);
   const persistPositions = (next: Record<string, Point>, label = '移动叙事地图节点') => commit((current) => ({ ...current, settings: { ...current.settings, narrativeMap: { positions: next } } }), label);
@@ -255,11 +259,57 @@ export function NarrativeMap({ project, activate, commit, notify, requestText }:
   const updateDefault = (name: string, value: string, type: VariableType) => { const parsed = type === 'boolean' ? value === 'true' : type === 'number' ? Number(value) || 0 : value; commit((current) => ({ ...current, variables: { ...current.variables, [name]: parsed } }), `修改变量默认值 ${name}`); };
   const removeVariable = (name: string) => { if (variableReferences[name]?.length) return notify(`${name} 仍被 ${variableReferences[name].length} 个 Block 引用`, 'error'); commit((current) => { const variables = { ...current.variables }; const variableDefinitions = { ...current.variableDefinitions }; delete variables[name]; delete variableDefinitions[name]; return { ...current, variables, variableDefinitions }; }, `删除变量 ${name}`); if (focus?.type === 'variable' && focus.id === name) setFocus(null); };
 
+  const activeChapter = project.chapters.find((chapter) => chapter.fragments.some((fragment) => fragment.id === project.activeFragmentId)) ?? project.chapters[0];
+  const focusStructure = (nodeId: string) => {
+    setFocus((current) => current?.type === 'structure' && current.id === nodeId ? null : { type: 'structure', id: nodeId });
+    const point = positions[nodeId];
+    const canvas = canvasRef.current;
+    if (point && canvas) setViewport((current) => ({ ...current, x: canvas.clientWidth / 2 - (point.x + nodeWidth / 2) * current.scale, y: canvas.clientHeight / 2 - (point.y + 48) * current.scale }));
+  };
+  const addChapter = async () => {
+    const name = await requestText({ title: '新增章节', message: '新章节会同时出现在剧本树和叙事地图，并创建一个“主线”片段。', placeholder: `新章节 ${project.chapters.length + 1}`, confirmText: '创建章节' });
+    if (!name) return;
+    const chapterId = makeId('chapter');
+    const fragmentId = makeId('fragment');
+    commit((current) => ({ ...current, activeFragmentId: fragmentId, chapters: [...current.chapters, { id: chapterId, name, fragments: [{ id: fragmentId, name: '主线' }] }], scripts: { ...current.scripts, [fragmentId]: [] } }), `从叙事地图新增章节 ${name}`);
+    setFocus({ type: 'structure', id: `fragment:${fragmentId}` });
+    notify(`章节“${name}”已同步到剧本结构`);
+  };
+  const addFragment = async (chapterId = activeChapter?.id) => {
+    const chapter = project.chapters.find((item) => item.id === chapterId);
+    if (!chapter) return;
+    const name = await requestText({ title: '新增片段', message: `片段会添加到“${chapter.name}”，并立即同步到剧本树。`, placeholder: `新片段 ${chapter.fragments.length + 1}`, confirmText: '创建片段' });
+    if (!name) return;
+    const fragmentId = makeId('fragment');
+    commit((current) => ({ ...current, activeFragmentId: fragmentId, chapters: current.chapters.map((item) => item.id === chapterId ? { ...item, fragments: [...item.fragments, { id: fragmentId, name }] } : item), scripts: { ...current.scripts, [fragmentId]: [] } }), `从叙事地图新增片段 ${name}`);
+    setFocus({ type: 'structure', id: `fragment:${fragmentId}` });
+    notify(`片段“${name}”已同步到剧本结构`);
+  };
+  const renameChapter = async (chapterId: string) => {
+    const chapter = project.chapters.find((item) => item.id === chapterId);
+    if (!chapter) return;
+    const name = await requestText({ title: '重命名章节', message: '新名称会同步到剧本树、叙事地图和所有结构引用界面。', initialValue: chapter.name, confirmText: '保存名称' });
+    if (!name || name === chapter.name) return;
+    commit((current) => ({ ...current, chapters: current.chapters.map((item) => item.id === chapterId ? { ...item, name } : item) }), `从叙事地图重命名章节 ${chapter.name} → ${name}`);
+    notify('章节名称已同步');
+  };
+  const renameFragment = async (chapterId: string, fragmentId: string) => {
+    const fragment = project.chapters.find((item) => item.id === chapterId)?.fragments.find((item) => item.id === fragmentId);
+    if (!fragment) return;
+    const name = await requestText({ title: '重命名片段', message: 'Fragment 标识和跳转引用保持不变，只同步显示名称。', initialValue: fragment.name, confirmText: '保存名称' });
+    if (!name || name === fragment.name) return;
+    commit((current) => ({ ...current, chapters: current.chapters.map((chapter) => chapter.id === chapterId ? { ...chapter, fragments: chapter.fragments.map((item) => item.id === fragmentId ? { ...item, name } : item) } : chapter) }), `从叙事地图重命名片段 ${fragment.name} → ${name}`);
+    notify('片段名称已同步');
+  };
+  const toggleChapter = (chapterId: string) => commit((current) => ({ ...current, chapters: current.chapters.map((chapter) => chapter.id === chapterId && !chapter.entry ? { ...chapter, disabled: !chapter.disabled } : chapter) }), '从叙事地图切换章节启用状态');
+  const structurePanel = <><div className="narrative-structure-summary"><span>{project.chapters.length} 章</span><span>{project.chapters.reduce((total, chapter) => total + chapter.fragments.length, 0)} 个片段</span><button className="icon-button" title="新增章节" aria-label="从叙事地图新增章节" onClick={() => void addChapter()}><Plus /></button></div><div className="narrative-structure-list">{project.chapters.map((chapter) => <section className={chapter.disabled ? 'disabled' : ''} data-chapter-id={chapter.id} key={chapter.id}><header><button className={`narrative-structure-main ${focus?.type === 'structure' && focus.id === `chapter:${chapter.id}` ? 'active' : ''}`} onClick={() => focusStructure(`chapter:${chapter.id}`)}>{chapter.entry ? <CirclePlay /> : <BookOpen />}<span><strong>{chapter.name}</strong><small>{chapter.entry ? '游戏入口' : chapter.disabled ? '调试与构建时跳过' : `${chapter.fragments.length} 个 Fragment`}</small></span></button><div className="narrative-structure-actions"><button title={`在 ${chapter.name} 新建片段`} aria-label={`在 ${chapter.name} 新建片段`} onClick={() => void addFragment(chapter.id)}><Plus /></button><button title={`重命名章节 ${chapter.name}`} aria-label={`重命名章节 ${chapter.name}`} onClick={() => void renameChapter(chapter.id)}><Pencil /></button>{!chapter.entry && <button title={chapter.disabled ? `启用章节 ${chapter.name}` : `禁用章节 ${chapter.name}`} aria-label={chapter.disabled ? `启用章节 ${chapter.name}` : `禁用章节 ${chapter.name}`} onClick={() => toggleChapter(chapter.id)}>{chapter.disabled ? <Power /> : <PowerOff />}</button>}</div></header><div className="narrative-fragment-list">{chapter.fragments.map((fragment) => <div className={fragment.id === project.activeFragmentId ? 'active' : ''} data-fragment-id={fragment.id} key={fragment.id}><button className="narrative-fragment-main" onClick={() => focusStructure(`fragment:${fragment.id}`)}><FileText /><span><strong>{fragment.name}</strong><small>{project.scripts[fragment.id]?.length ?? 0} Blocks</small></span></button><button title={`重命名片段 ${fragment.name}`} aria-label={`重命名片段 ${fragment.name}`} onClick={() => void renameFragment(chapter.id, fragment.id)}><Pencil /></button><button title={`打开片段 ${fragment.name}`} aria-label={`打开片段 ${fragment.name}`} onClick={() => activate(fragment.id)}><ExternalLink /></button></div>)}</div></section>)}</div></>;
+
   return <div className="dashboard-page narrative-map-page">
-    <div className="page-header"><div><h1>叙事地图</h1><p>查看章节主干、Fragment 引用、变量流向与因果关系</p></div><div className="page-header-actions"><button className="button danger" disabled={!selectedEdgeId} onClick={detachEdge}><Trash2 />拆除连线</button><button className="button ghost" onClick={locateActive}><LocateFixed />当前节点</button><button className="button ghost" onClick={fitView}><Maximize2 />适应视图</button></div></div>
+    <div className="page-header"><div><h1>叙事地图</h1><p>与剧本结构共享章节、Fragment、Block 和流程引用</p></div><div className="page-header-actions"><button className="button primary" onClick={() => void addFragment()}><Plus />新增片段</button><button className="button ghost" onClick={() => void addChapter()}><BookOpen />新增章节</button><button className="button danger" disabled={!selectedEdgeId} onClick={detachEdge}><Trash2 />拆除连线</button><button className="button ghost" onClick={locateActive}><LocateFixed />当前节点</button><button className="button ghost" onClick={fitView}><Maximize2 />适应视图</button></div></div>
     <div className="narrative-map-layout">
-      <aside className="narrative-data-panel">
-        <div className="narrative-tabs"><button className={tab === 'variables' ? 'active' : ''} onClick={() => setTab('variables')}><Variable />变量管理</button><button className={tab === 'branches' ? 'active' : ''} onClick={() => setTab('branches')}><GitBranch />分支选项</button></div>
+      <aside className={`narrative-data-panel tab-${tab}`}>
+        {tab === 'structure' && structurePanel}
+        <div className="narrative-tabs"><button className={tab === 'structure' ? 'active' : ''} onClick={() => setTab('structure')}><ListTree />剧本结构</button><button className={tab === 'variables' ? 'active' : ''} onClick={() => setTab('variables')}><Variable />变量</button><button className={tab === 'branches' ? 'active' : ''} onClick={() => setTab('branches')}><GitBranch />分支</button></div>
         {tab === 'variables' ? <><div className="narrative-panel-toolbar"><div className="asset-search"><Search /><input value={variableQuery} onChange={(event) => setVariableQuery(event.target.value)} placeholder="搜索变量" /></div><button className="icon-button" title="新增变量" onClick={() => void addVariable()}><Plus /></button></div><div className="variable-table">{Object.entries(project.variables).filter(([name]) => name.toLocaleLowerCase().includes(variableQuery.toLocaleLowerCase())).map(([name, value]) => { const definition = definitionFor(name); const refs = variableReferences[name] ?? []; const readOnly = definition.scope === 'system'; const expanded = focus?.type === 'variable' && focus.id === name; return <article className={`${expanded ? 'active' : ''} ${readOnly ? 'system-variable' : ''}`} key={name}><button className="variable-summary" onClick={() => setFocus(expanded ? null : { type: 'variable', id: name })}><ChevronRight /><span><strong>{definition.displayName || name}</strong><small>{name} · {refs.length} 处引用</small></span><em>{readOnly ? '系统' : definition.type === 'boolean' ? '布尔' : definition.type === 'number' ? '数值' : '文本'}</em></button>{expanded && <div className="variable-editor"><div className="variable-key-row"><label>变量名<code>{name}</code></label><button className="button ghost" disabled={readOnly} onClick={() => void renameVariable(name)}><Pencil />重命名变量名</button></div><label>显示名<input disabled={readOnly} defaultValue={definition.displayName ?? ''} onBlur={(event) => patchDefinition(name, { displayName: event.target.value.trim() })} /></label><label>用途说明<textarea disabled={readOnly} defaultValue={definition.description ?? ''} onBlur={(event) => patchDefinition(name, { description: event.target.value.trim() })} /></label><div className="variable-editor-row"><label>类型<select disabled={readOnly} value={definition.type} onChange={(event) => patchDefinition(name, { type: event.target.value as VariableType })}><option value="boolean">布尔</option><option value="number">数值</option><option value="string">文本</option></select></label><label>默认值{definition.type === 'boolean' ? <select disabled={readOnly} value={String(value)} onChange={(event) => updateDefault(name, event.target.value, definition.type)}><option value="false">false</option><option value="true">true</option></select> : <input disabled={readOnly} defaultValue={String(value)} onBlur={(event) => updateDefault(name, event.target.value, definition.type)} />}</label></div><div className="variable-editor-row"><label>作用域<select disabled={readOnly} value={definition.scope} onChange={(event) => patchDefinition(name, { scope: event.target.value as VariableScope })}><option value="project">项目变量</option><option value="system">系统变量</option></select></label><label>持久化<select disabled={readOnly} value={definition.persistence} onChange={(event) => patchDefinition(name, { persistence: event.target.value as VariablePersistence })}><option value="slot">存档绑定</option><option value="shared">全局共享</option></select></label></div><div className="variable-references"><strong>引用位置</strong>{refs.map((ref) => <button key={ref.id} disabled={!ref.fragmentId} onClick={() => ref.fragmentId && activate(ref.fragmentId, ref.blockIndex)}><span>{ref.label}</span>{ref.fragmentId && <ExternalLink />}</button>)}{!refs.length && <small>尚未被 Block 使用</small>}</div><button className="button danger" disabled={Boolean(refs.length) || readOnly} onClick={() => removeVariable(name)}><Trash2 />删除变量</button>{readOnly && <small className="system-variable-note">系统变量由引擎注入，只能查看。</small>}</div>}</article>; })}</div></> : <><div className="branch-view-switch"><button className={branchView === 'chapter' ? 'active' : ''} onClick={() => setBranchView('chapter')}><ListTree />按章节</button><button className={branchView === 'flat' ? 'active' : ''} onClick={() => setBranchView('flat')}><LayoutList />平铺</button></div><div className={`branch-list ${branchView}`}>{branchView === 'chapter' ? branchBlocks.map((group) => <details open key={group.chapterId}><summary>{group.chapterName}<small>{group.branches.length} 个分支</small></summary>{group.branches.map((branch) => <div className="branch-tree-group" key={branch.id}><button className={focus?.type === 'branch' && focus.id === branch.id ? 'active' : ''} onClick={() => setFocus(focus?.type === 'branch' && focus.id === branch.id ? null : { type: 'branch', id: branch.id })}><GitBranch /><span><strong>{branch.title}</strong><small>{branch.fragmentName} · Block {branch.blockIndex + 1}</small></span></button>{branch.options.map((option) => { const active = focus?.type === 'branch' && focus.id === option.id; const target = graph.nodes.find((node) => node.id === `fragment:${option.target}`); return <button className={`branch-tree-option ${active ? 'active' : ''}`} key={option.id} onClick={() => setFocus(active ? null : { type: 'branch', id: option.id })}><em>{String.fromCharCode(65 + option.index)}</em><span><strong>{option.text}</strong><small>前往 {target?.title ?? option.target}</small></span></button>; })}</div>)}</details>) : branchBlocks.flatMap((group) => group.branches).map((branch) => <div className="branch-flat-group" key={branch.id}><button className={focus?.type === 'branch' && focus.id === branch.id ? 'active' : ''} onClick={() => setFocus(focus?.type === 'branch' && focus.id === branch.id ? null : { type: 'branch', id: branch.id })}><GitBranch /><span><strong>{branch.title}</strong><small>{branch.fragmentName} · {branch.options.length} 个选项</small></span></button>{branch.options.map((option) => { const active = focus?.type === 'branch' && focus.id === option.id; return <button className={active ? 'active' : ''} key={option.id} onClick={() => setFocus(active ? null : { type: 'branch', id: option.id })}><em>{String.fromCharCode(65 + option.index)}</em><span>{option.text}</span></button>; })}</div>)}{!branchBlocks.length && <div className="narrative-empty">当前项目没有分支选项</div>}</div></>}
       </aside>
       <section className="narrative-flow-panel">

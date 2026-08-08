@@ -251,7 +251,10 @@ export function useCommandHistory<T>(initial: T, limit = 50) {
   }, [archivePinnedRedo, bumpRevision, publish, syncCounts, touchHistory, trimHistory]);
 
   const replace = useCallback((updater: (current: T) => T) => {
-    publish(updater(valueRef.current));
+    const current = valueRef.current;
+    const next = updater(current);
+    if (Object.is(next, current)) return;
+    publish(next);
     bumpRevision();
   }, [bumpRevision, publish]);
 

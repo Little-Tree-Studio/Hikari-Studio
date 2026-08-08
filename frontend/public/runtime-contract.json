@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "matrixVersion": "2026.08.02.1",
+  "engineVersion": 3,
+  "blockTypes": [
+    "scene",
+    "sound",
+    "characterShow",
+    "characterHide",
+    "camera",
+    "narration",
+    "dialogue",
+    "branch",
+    "setVariable",
+    "condition",
+    "jump",
+    "call",
+    "return"
+  ]
+}

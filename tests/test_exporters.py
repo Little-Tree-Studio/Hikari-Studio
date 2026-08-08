@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import json
 from pathlib import Path
 
 from backend.exporters import build_web_game, export_renpy
@@ -13,6 +14,12 @@ class ExporterTests(unittest.TestCase):
         runtime.mkdir(exist_ok=True)
         (runtime / "player.js").write_text("/* engine-core shared runtime */", encoding="utf-8")
         (runtime / "player.css").write_text("/* runtime styles */", encoding="utf-8")
+        (runtime / "runtime-contract.json").write_text(json.dumps({
+            "schemaVersion": 1,
+            "matrixVersion": "2026.08.02.1",
+            "engineVersion": 3,
+            "blockTypes": ["scene", "sound", "characterShow", "characterHide", "camera", "narration", "dialogue", "branch", "setVariable", "condition", "jump", "call", "return"],
+        }), encoding="utf-8")
         return runtime
 
     def test_renpy_export_contains_labels_and_dialogue(self) -> None:
@@ -36,6 +43,11 @@ class ExporterTests(unittest.TestCase):
             self.assertTrue((root / "build" / "player.js").exists())
             self.assertIn("engine-core shared runtime", (root / "build" / "player.js").read_text(encoding="utf-8"))
             self.assertIn("HIKARI_PROJECT", (root / "build" / "project.js").read_text(encoding="utf-8"))
+            contract = json.loads((root / "build" / "runtime-contract.json").read_text(encoding="utf-8"))
+            self.assertEqual(contract["matrixVersion"], "2026.08.02.1")
+            self.assertEqual(len(contract["blockTypes"]), 13)
+            self.assertEqual(set(contract["bundles"]), {"player.js", "player.css", "project.js"})
+            self.assertEqual(contract["bundles"]["player.js"]["bytes"], (root / "build" / "player.js").stat().st_size)
             self.assertTrue((root / "build" / "assets" / "lake.jpg").exists())
             self.assertFalse((root / "build" / "assets" / "mountain.jpg").exists())
 

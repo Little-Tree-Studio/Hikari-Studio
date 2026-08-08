@@ -20,3 +20,20 @@ export function log(level: LogLevel, scope: string, message: string, details?: u
 export function getRecentLogs(): readonly LogEvent[] {
   return events;
 }
+
+export function captureFrontendError(source: string, error: unknown, context?: Record<string, unknown>) {
+  const normalized = error instanceof Error ? error : new Error(typeof error === 'string' ? error : 'Unknown frontend error');
+  log('error', source, normalized.message, { stack: normalized.stack, ...context });
+  void reportFrontendCrash({ source, kind: normalized.name || 'FrontendError', message: normalized.message, stack: normalized.stack ?? '', context: context ?? {} })
+    .catch((reportError) => console.error('[crash-report] Failed to save frontend crash report', reportError));
+}
+
+export function installGlobalErrorCapture() {
+  window.addEventListener('error', (event) => {
+    captureFrontendError('window', event.error ?? event.message, { filename: event.filename, line: event.lineno, column: event.colno });
+  });
+  window.addEventListener('unhandledrejection', (event) => {
+    captureFrontendError('promise', event.reason, { unhandledRejection: true });
+  });
+}
+import { reportFrontendCrash } from '../api';

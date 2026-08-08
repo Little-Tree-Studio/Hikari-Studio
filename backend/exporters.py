@@ -1,10 +1,41 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 import shutil
 from pathlib import Path
 from typing import Any
+
+from .build_preflight import enforce_build_preflight
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _write_runtime_contract(runtime_dist: Path, output_dir: Path) -> Path:
+    source = runtime_dist / "runtime-contract.json"
+    if not source.is_file():
+        raise FileNotFoundError("Runtime conformance metadata is missing. Run the frontend production build first.")
+    try:
+        contract = json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError("Runtime conformance metadata is invalid") from error
+    block_types = contract.get("blockTypes")
+    if contract.get("schemaVersion") != 1 or not contract.get("matrixVersion") or not isinstance(block_types, list) or len(block_types) != 13:
+        raise ValueError("Runtime conformance metadata does not describe the 13 Block matrix")
+    contract["bundles"] = {
+        name: {"sha256": _sha256_file(output_dir / name), "bytes": (output_dir / name).stat().st_size}
+        for name in ("player.js", "player.css", "project.js")
+    }
+    destination = output_dir / "runtime-contract.json"
+    destination.write_text(json.dumps(contract, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return destination
 
 
 def safe_slug(value: str) -> str:
@@ -177,6 +208,7 @@ def build_web_game(
     builtin_assets: Path,
     custom_assets: Path | None = None,
     runtime_dist: Path | None = None,
+    target: str = "web",
 ) -> Path:
     if runtime_dist is None:
         raise ValueError("Web runtime directory is required")
@@ -184,6 +216,8 @@ def build_web_game(
     runtime_css = runtime_dist / "player.css"
     if not runtime_js.is_file() or not runtime_css.is_file():
         raise FileNotFoundError("Shared engine-core runtime is missing. Run the frontend production build first.")
+    custom_asset_dir = custom_assets or project_path.parent / f"{project_path.stem}.assets"
+    enforce_build_preflight(project, target, builtin_assets, custom_asset_dir)
     if output_dir.exists():
         shutil.rmtree(output_dir)
     assets_dir = output_dir / "assets"
@@ -208,7 +242,6 @@ def build_web_game(
         exported["activeFragmentId"] = next(iter(enabled_fragment_ids))
     referenced_ids = _referenced_asset_ids(exported)
     exported["assets"] = [asset for asset in exported.get("assets", []) if str(asset.get("id")) in referenced_ids]
-    custom_asset_dir = custom_assets or project_path.parent / f"{project_path.stem}.assets"
     for asset in exported.get("assets", []):
         source: Path | None = None
         path_value = str(asset.get("path", ""))
@@ -227,4 +260,5 @@ def build_web_game(
     shutil.copy2(runtime_css, output_dir / "player.css")
     shutil.copy2(runtime_js, output_dir / "player.js")
     (output_dir / "project.js").write_text("window.HIKARI_PROJECT=" + json.dumps(exported, ensure_ascii=False) + ";", encoding="utf-8")
+    _write_runtime_contract(runtime_dist, output_dir)
     return output_dir / "index.html"

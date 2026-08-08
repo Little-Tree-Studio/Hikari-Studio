@@ -352,6 +352,55 @@ export interface DesktopApiResult<T> {
   error?: { code: string; message: string; diagnostics?: unknown[] };
 }
 
+export type BuildTarget = 'web' | 'windows';
+export type BuildPreflightCategory = 'assets' | 'flow' | 'reachability' | 'compatibility';
+
+export interface BuildPreflightIssue {
+  severity: 'error' | 'warning' | 'info';
+  blocking: boolean;
+  category: BuildPreflightCategory;
+  code: string;
+  message: string;
+  fragmentId?: string;
+  blockId?: string;
+  blockIndex?: number;
+  relatedId?: string;
+  source?: 'engine' | 'simulation' | 'desktop';
+}
+
+export interface BuildPreflightReport {
+  version: 1;
+  target: BuildTarget;
+  projectId: string;
+  generatedAt: string;
+  blocked: boolean;
+  errors: number;
+  warnings: number;
+  issues: BuildPreflightIssue[];
+  stats: {
+    assets: number;
+    bundledAssets: number;
+    fragments: number;
+    blocks: number;
+    unreachableFragments: number;
+    simulatedPaths: number;
+  };
+  simulation: {
+    completed: boolean;
+    truncated: boolean;
+    loops: number;
+    runtimeErrors: number;
+    coveragePercent: number;
+  };
+}
+
+export interface BuildResult {
+  ok: boolean;
+  path?: string;
+  preflight?: BuildPreflightReport;
+  error?: { code: string; message: string; diagnostics?: BuildPreflightIssue[] };
+}
+
 export type EditorThemeId = 'hikari-light' | 'graphite' | 'sakura-studio' | 'high-contrast';
 export interface EditorAppearance {
   version: 1;
@@ -364,6 +413,13 @@ export interface EditorAppearance {
 export interface RecoverySnapshot {
   project: Project;
   updatedAt: string;
+  recoveredDuringLoad: boolean;
+}
+
+export interface RecoverySnapshotStatus {
+  exists: boolean;
+  updatedAt: string | null;
+  bytes: number;
   recoveredDuringLoad: boolean;
 }
 
@@ -384,6 +440,157 @@ export interface DesktopProjectSession {
   sessionToken: string;
 }
 
+export interface ProjectReloadBackendPerformance {
+  version: 1;
+  reloadId: string;
+  recordedAt: string;
+  projectLoadMs: number;
+  pythonSerializationMs: number;
+  pythonCompressionMs: number;
+  pythonTotalMs: number;
+  payloadBytes: number;
+  transportBytes: number;
+  counts: { chapters: number; fragments: number; blocks: number; assets: number; timelineClips: number };
+}
+
+export interface ProjectReloadFrontendPerformance {
+  apiWaitMs: number;
+  bridgeRoundTripMs: number;
+  webViewTransferEstimateMs: number;
+  payloadDecodeMs: number;
+  jsonParseMs: number;
+  frontendSessionLoadMs: number;
+  commandHistoryLoadMs: number;
+  recoverySnapshotLoadMs: number;
+  historyStatsLoadMs: number;
+  historyRestoreMs: number;
+  stateDispatchMs: number;
+  reactCommitMs: number;
+  stablePaintMs: number;
+  totalReloadMs: number;
+  bootToStablePaintMs: number;
+  componentRenders: Partial<Record<ComponentRenderSurface, ComponentRenderPerformance>>;
+}
+
+export type ComponentRenderSurface = 'app-shell' | 'chapter-tree' | 'script-page' | 'block-list' | 'preview' | 'inspector';
+export type DialogueStoryCardRegion = 'speaker' | 'expression' | 'body';
+
+export interface RenderCommitPerformance {
+  commits: number;
+  mounts: number;
+  updates: number;
+  actualDurationMs: number;
+  mountDurationMs: number;
+  updateDurationMs: number;
+  baseDurationMs: number;
+  lastCommitTimeMs: number;
+}
+
+export interface ComponentRenderPerformance extends RenderCommitPerformance {
+  storyCardTypes?: Partial<Record<BlockType, RenderCommitPerformance>>;
+  dialogueRegions?: Partial<Record<DialogueStoryCardRegion, RenderCommitPerformance>>;
+  firstMeasurementDurationMs?: number;
+  observerMeasurementDurationMs?: number;
+  firstMeasurements?: number;
+  remeasurements?: number;
+  observerCallbacks?: number;
+  revisionFlushes?: number;
+  peakObservedRows?: number;
+  viewportMeasurements?: number;
+  viewportUpdates?: number;
+  viewportRangeFlushes?: number;
+}
+
+export interface ProjectReloadPerformance {
+  version: 1;
+  complete: boolean;
+  recordedAt?: string;
+  surface: 'editor' | 'project-launcher' | null;
+  backend: ProjectReloadBackendPerformance;
+  frontend: ProjectReloadFrontendPerformance | null;
+}
+
+export interface ProfiledDesktopProjectSession extends Omit<DesktopProjectSession, 'project'> {
+  encoding?: 'plain-json' | 'gzip-base64';
+  projectPayload?: string;
+  projectJson?: string;
+  backend: ProjectReloadBackendPerformance;
+}
+
+export interface ProjectLoadPerformance {
+  reloadId: string;
+  startedAt: number;
+  backend: ProjectReloadBackendPerformance;
+  apiWaitMs: number;
+  bridgeRoundTripMs: number;
+  webViewTransferEstimateMs: number;
+  payloadDecodeMs: number;
+  jsonParseMs: number;
+  frontendSessionLoadMs: number;
+}
+
+export interface AppInfo {
+  name: string;
+  version: string;
+  channel: 'stable' | 'beta';
+  platform: string;
+  projectPath: string;
+  dataPath: string;
+  buildPath: string;
+  startupProjectRequested: boolean;
+}
+
+export interface UpdateManifest {
+  schemaVersion: 1;
+  version: string;
+  channel: 'stable' | 'beta';
+  publishedAt: string;
+  notes: string;
+  releaseUrl: string;
+  minimumVersion?: string;
+  installer: { url: string; sha256: string; size: number };
+}
+
+export interface DownloadedInstaller {
+  version: string;
+  size: number;
+  downloadedAt: string;
+}
+
+export interface UpdateStatus {
+  status: 'idle' | 'available' | 'up-to-date' | 'downloaded' | 'error';
+  channel: 'stable' | 'beta';
+  currentVersion: string;
+  lastCheckedAt?: string;
+  nextCheckAt?: string;
+  manifest?: UpdateManifest;
+  download?: DownloadedInstaller;
+  rollbackInstallers: DownloadedInstaller[];
+  error?: { code: string; message: string };
+}
+
+export interface CrashReportSummary {
+  id: string;
+  createdAt: string;
+  source: string;
+  kind: string;
+  message: string;
+  fingerprint: string;
+}
+
+export interface CrashReport extends CrashReportSummary {
+  schemaVersion: 1;
+  app: { name: string; version: string };
+  system: { platform: string; release: string; architecture: string };
+  stack: string;
+  context: Record<string, unknown>;
+}
+
+export interface CrashReportCenter {
+  uploadConfigured: boolean;
+  reports: CrashReportSummary[];
+}
+
 export interface ProjectCreationOptions {
   template: 'blank' | 'sample';
   name: string;
@@ -398,15 +605,30 @@ export interface ProjectCreationOptions {
 export interface DesktopApi {
   get_editor_appearance(): Promise<EditorAppearance>;
   save_editor_appearance(appearance: EditorAppearance): Promise<EditorAppearance>;
-  get_app_info(): Promise<{ name: string; version: string; platform: string; projectPath: string }>;
+  get_app_info(): Promise<AppInfo>;
+  get_update_status(): Promise<UpdateStatus>;
+  check_for_updates(force?: boolean, channel?: 'stable' | 'beta'): Promise<UpdateStatus>;
+  download_update(): Promise<UpdateStatus>;
+  install_downloaded_update(confirmed?: boolean, version?: string): Promise<{ ok: boolean; version?: string; path?: string; error?: { code: string; message: string } }>;
+  get_crash_reports(): Promise<CrashReportCenter>;
+  get_crash_report(reportId: string): Promise<CrashReport>;
+  report_frontend_crash(payload: Record<string, unknown>): Promise<CrashReportSummary>;
+  submit_crash_report(reportId: string, confirmed?: boolean): Promise<{ ok: boolean; reportId?: string; remoteId?: string; error?: { code: string; message: string } }>;
+  delete_crash_report(reportId: string): Promise<boolean>;
   load_project(): Promise<Project>;
   load_project_json(): Promise<string>;
   load_project_session(): Promise<DesktopProjectSession>;
+  load_project_session_profiled(reloadId: string, supportsCompression?: boolean): Promise<ProfiledDesktopProjectSession>;
+  report_project_reload_performance(reloadId: string, surface: 'editor' | 'project-launcher', frontend: ProjectReloadFrontendPerformance): Promise<ProjectReloadPerformance>;
+  get_project_reload_performance(): Promise<ProjectReloadPerformance | null>;
+  report_preview_seek_performance(report: import('./performance/previewSeekProfiler').PreviewSeekPerformanceReport): Promise<import('./performance/previewSeekProfiler').PreviewSeekPerformanceReport>;
+  get_preview_seek_performance(): Promise<import('./performance/previewSeekProfiler').PreviewSeekPerformanceReport | null>;
   save_project(project: Project, expectedProjectId?: string, expectedProjectPath?: string, sessionToken?: string): Promise<{ ok: boolean; path: string; bytes: number }>;
   load_command_history(): Promise<import('./hooks/useCommandHistory').PersistedCommandHistory<Project> | null>;
   load_command_history_stats(): Promise<CommandHistoryStorageStats>;
   save_command_history(history: import('./hooks/useCommandHistory').PersistedCommandHistory<Project>): Promise<{ ok: boolean; path: string } & CommandHistoryStorageStats>;
   load_recovery_snapshot(): Promise<RecoverySnapshot | null>;
+  get_recovery_snapshot_status(): Promise<RecoverySnapshotStatus>;
   read_runtime_value(key: string): Promise<string | null>;
   write_runtime_value(key: string, value: string): Promise<boolean>;
   delete_runtime_value(key: string): Promise<boolean>;
@@ -416,6 +638,7 @@ export interface DesktopApi {
   new_project_session(name: string): Promise<DesktopProjectSession>;
   create_project_session(options: ProjectCreationOptions): Promise<DesktopProjectSession>;
   select_project_location(): Promise<string | null>;
+  select_export_location(): Promise<string | null>;
   open_project_dialog(): Promise<Project | null>;
   open_project_dialog_session(): Promise<DesktopProjectSession | null>;
   list_recent_projects(): Promise<RecentProject[]>;
@@ -432,10 +655,17 @@ export interface DesktopApi {
   get_asr_status(): Promise<AsrServiceStatus>;
   load_asr_model(): Promise<DesktopApiResult<AsrServiceStatus>>;
   transcribe_audio(assets: Asset[], concurrency: number, force: boolean): Promise<DesktopApiResult<AsrTranscription[]>>;
-  preview_script_import(path?: string): Promise<ScriptImportPreview | null>;
-  export_renpy(project: Project): Promise<{ ok: boolean; path: string }>;
-  build_web(project: Project): Promise<{ ok: boolean; path: string }>;
-  build_windows(project: Project): Promise<{ ok: boolean; path: string }>;
+  preview_script_import(path?: string | null, characters?: Character[], rules?: ScriptImportRules): Promise<ScriptImportPreview | null>;
+  read_clipboard_text(): Promise<string>;
+  write_clipboard_text(text: string): Promise<boolean>;
+  preview_clipboard_script(fallbackText?: string, characters?: Character[], rules?: ScriptImportRules): Promise<ScriptImportPreview>;
+  export_renpy(project: Project, outputRoot?: string): Promise<{ ok: boolean; path: string }>;
+  preflight_build(project: Project, target: BuildTarget, frontendReport: BuildPreflightReport): Promise<BuildPreflightReport>;
+  build_web(project: Project, preflight?: BuildPreflightReport, outputRoot?: string): Promise<BuildResult>;
+  build_windows(project: Project, preflight?: BuildPreflightReport, outputRoot?: string): Promise<BuildResult>;
+  open_build_output(path: string): Promise<{ ok: boolean; path: string }>;
+  launch_build_output(path: string): Promise<{ ok: boolean; path: string }>;
+  move_window(x: number, y: number): Promise<boolean>;
   minimize_window(): Promise<boolean>;
   set_project_creation_mode(enabled: boolean): Promise<boolean>;
   toggle_maximize(): Promise<boolean>;
@@ -503,6 +733,30 @@ export interface ScriptImportPreview {
   format: 'TXT' | 'Markdown' | 'Hikari JSON';
   blocks: StoryBlock[];
   warnings: string[];
+  matches?: ScriptImportMatch[];
+  rules?: ScriptImportRules;
+}
+
+export interface ScriptImportRules {
+  dialogueSeparator: 'auto' | 'colon' | 'tab';
+  expressionSyntax: 'auto' | 'brackets' | 'parentheses' | 'pipe' | 'none';
+  characterMatching: 'smart' | 'exact';
+  unknownCharacter: 'keep' | 'narration';
+  defaultExpression: string;
+  mergeNarrationLines: boolean;
+}
+
+export interface ScriptImportMatch {
+  blockId: string;
+  line: number;
+  rawSpeaker: string;
+  rawExpression?: string;
+  characterId?: string;
+  characterName?: string;
+  characterStatus: 'exact' | 'alias' | 'smart' | 'manual' | 'unmatched';
+  expression: string;
+  expressionStatus: 'exact' | 'smart' | 'manual' | 'default' | 'fallback' | 'unverified';
+  expressionSyntax: 'brackets' | 'parentheses' | 'pipe' | 'none';
 }
 
 export interface AiSettings {
@@ -678,6 +932,9 @@ export interface AgentResultComparison {
 declare global {
   interface Window {
     __HIKARI_DESKTOP__?: boolean;
+    __HIKARI_BOOT_STARTED_AT__?: number;
+    __HIKARI_LAST_PROJECT_RELOAD__?: ProjectReloadPerformance;
+    __HIKARI_PREVIEW_SEEK_PERFORMANCE__?: import('./performance/previewSeekProfiler').PreviewSeekPerformanceReport;
     pywebview?: { api: DesktopApi };
     __HIKARI_RUNTIME_SELF_TEST__?: () => { ok: boolean; engineVersion: number; current?: string; readCount: number; backlogCount: number; characterCount: number; diagnosticErrors: number; diagnosticWarnings: number };
   }

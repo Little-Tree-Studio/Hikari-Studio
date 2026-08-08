@@ -12,6 +12,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 
 PROJECT_VERSION = 3
@@ -57,8 +58,8 @@ def default_blocks() -> list[dict[str, Any]]:
         {"id": "b1", "type": "scene", "sceneId": "scene-lake", "title": "晨雾湖畔", "assetId": "lake", "transition": "dissolve", "duration": 1.2},
         {"id": "b2", "type": "sound", "title": "summer_memory.mp3", "volume": 0.68, "loop": True},
         {"id": "b3", "type": "narration", "text": "薄雾沿着湖面缓慢散开，夏日的第一束阳光落在旧码头上。"},
-        {"id": "b4", "type": "dialogue", "speaker": "林澄", "text": "你果然还是来了。", "expression": "浅笑", "voice": "lc_001.ogg"},
-        {"id": "b5", "type": "dialogue", "speaker": "苏芮", "text": "因为有人在信里说，错过今天就再也见不到这片星海了。", "expression": "平静", "voice": "sr_014.ogg"},
+        {"id": "b4", "type": "dialogue", "speaker": "林澄", "text": "你果然还是来了。", "expression": "浅笑"},
+        {"id": "b5", "type": "dialogue", "speaker": "苏芮", "text": "因为有人在信里说，错过今天就再也见不到这片星海了。", "expression": "平静"},
         {"id": "b6", "type": "branch", "title": "如何回应？", "options": [{"text": "相信她", "target": "opening"}, {"text": "转移话题", "target": "old-school"}]},
     ]
 
@@ -234,6 +235,20 @@ class ProjectStore:
                 return None
             modified = datetime.fromtimestamp(self.recovery_path.stat().st_mtime, timezone.utc).isoformat()
             return {"project": project, "updatedAt": modified, "recoveredDuringLoad": self._last_recovery_used}
+
+    def get_recovery_snapshot_status(self) -> dict[str, Any]:
+        """Return recovery metadata without parsing the potentially large snapshot."""
+        with self._lock:
+            path = self.recovery_path
+            if not path.exists():
+                return {"exists": False, "updatedAt": None, "bytes": 0, "recoveredDuringLoad": self._last_recovery_used}
+            stat = path.stat()
+            return {
+                "exists": True,
+                "updatedAt": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+                "bytes": stat.st_size,
+                "recoveredDuringLoad": self._last_recovery_used,
+            }
 
     def save_command_history(self, history: dict[str, Any]) -> dict[str, Any]:
         value = self._validate_command_history(history)
@@ -683,12 +698,15 @@ class ProjectStore:
             if (root / "timelines" / f"{_component_id(fragment_id)}.json").is_file()
         }
         assets = self._read_json(root / "assets" / "index.json")
+        asset_directory_uri: str | None = None
         for asset in assets:
             path_value = str(asset.get("path", ""))
             if path_value.startswith("builtin/"):
                 asset["uri"] = f"./assets/{Path(path_value).name}"
             elif path_value:
-                asset["uri"] = (self.asset_dir / Path(path_value).name).as_uri()
+                if asset_directory_uri is None:
+                    asset_directory_uri = self.asset_dir.as_uri().rstrip("/")
+                asset["uri"] = f"{asset_directory_uri}/{quote(Path(path_value).name, safe='')}"
         project = {
             "version": PROJECT_VERSION,
             "meta": manifest["meta"],
@@ -708,7 +726,7 @@ class ProjectStore:
             "ui": self._read_json(root / "ui" / "theme.json", default={"theme": "hikari-light", "dialogueStyle": "glass"}),
             "productionMemory": self._read_json(root / ".hikari" / "agent" / "memory.json", default=default_production_memory()),
         }
-        return self._migrate(project)
+        return self._migrate(project, copy_project=False)
 
     def _load_legacy_and_upgrade(self) -> dict[str, Any]:
         legacy_path = self.project_path
@@ -777,8 +795,8 @@ class ProjectStore:
                 path.unlink()
 
     @staticmethod
-    def _migrate(project: dict[str, Any]) -> dict[str, Any]:
-        result = deepcopy(project)
+    def _migrate(project: dict[str, Any], *, copy_project: bool = True) -> dict[str, Any]:
+        result = deepcopy(project) if copy_project else project
         if int(result.get("version", 1)) < 2 or "scripts" not in result:
             active = result.get("activeFragmentId", "opening")
             result["scripts"] = {active: result.pop("blocks", [])}
@@ -868,6 +886,17 @@ class ProjectStore:
                 asset["uri"] = f"./assets/{filename}"
         asset_ids_by_name = {asset.get("name"): asset.get("id") for asset in result.get("assets", [])}
         fragment_ids_by_name = {fragment.get("name"): fragment.get("id") for chapter in result.get("chapters", []) for fragment in chapter.get("fragments", [])}
+        scenes_by_name: dict[str, tuple[int, dict[str, Any]]] = {}
+        scenes_by_asset: dict[str, tuple[int, dict[str, Any]]] = {}
+        for scene_index, scene in enumerate(result.get("scenes", [])):
+            scene_name = scene.get("name")
+            if isinstance(scene_name, str):
+                scenes_by_name.setdefault(scene_name, (scene_index, scene))
+            layers = scene.get("layers")
+            last_layer = layers[-1] if isinstance(layers, list) and layers and isinstance(layers[-1], dict) else None
+            asset_id = last_layer.get("assetId") if last_layer else None
+            if isinstance(asset_id, str):
+                scenes_by_asset.setdefault(asset_id, (scene_index, scene))
         for blocks in result.get("scripts", {}).values():
             for block in blocks:
                 block.setdefault("version", 1)
@@ -876,9 +905,13 @@ class ProjectStore:
                 if block.get("type") == "scene":
                     block.setdefault("layers", [])
                     if not block.get("sceneId"):
-                        matching_scene = next((scene for scene in result["scenes"] if scene.get("name") == block.get("title") or scene.get("layers", [{}])[-1].get("assetId") == block.get("assetId")), None)
-                        if matching_scene:
-                            block["sceneId"] = matching_scene["id"]
+                        candidates = []
+                        if isinstance(block.get("title"), str) and block["title"] in scenes_by_name:
+                            candidates.append(scenes_by_name[block["title"]])
+                        if isinstance(block.get("assetId"), str) and block["assetId"] in scenes_by_asset:
+                            candidates.append(scenes_by_asset[block["assetId"]])
+                        if candidates:
+                            block["sceneId"] = min(candidates, key=lambda candidate: candidate[0])[1]["id"]
                 if block.get("type") == "sound":
                     block.setdefault("channel", "bgm")
                     block.setdefault("action", "play")

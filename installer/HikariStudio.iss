@@ -1,5 +1,11 @@
 #ifndef MyAppVersion
-  #define MyAppVersion "0.3.0"
+  #define MyAppVersion "0.4.0-beta.1"
+#endif
+#ifndef MyAppNumericVersion
+  #define MyAppNumericVersion "0.4.0.1"
+#endif
+#ifndef MyAppSourceDir
+  #define MyAppSourceDir "..\dist\HikariStudio"
 #endif
 
 #define MyAppName "Hikari Studio"
@@ -30,17 +36,17 @@ RestartApplications=no
 ChangesAssociations=yes
 UninstallDisplayIcon={app}\{#MyAppExeName}
 SetupIconFile=HikariStudio.ico
-VersionInfoVersion={#MyAppVersion}
+VersionInfoVersion={#MyAppNumericVersion}
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppName} Windows Installer
 VersionInfoProductName={#MyAppName}
-VersionInfoProductVersion={#MyAppVersion}
+VersionInfoProductVersion={#MyAppNumericVersion}
 
 [Languages]
 Name: "chinesesimp"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 
 [Files]
-Source: "..\dist\HikariStudio\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#MyAppSourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\build\prerequisites\{#WebView2Bootstrapper}"; Flags: dontcopy
 
 [Icons]

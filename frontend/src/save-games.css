@@ -54,7 +54,9 @@
 
 .save-slot-card:hover { border-color: #8eb6ae; background: #fbfdfc; }
 .save-slot-card.selected { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(24, 124, 107, 0.12); }
-.save-slot-card.corrupt { border-color: #dfaaa5; background: #fff9f8; }
+.save-slot-card.corrupt,
+.save-slot-card.mismatch,
+.save-slot-card.incompatible { border-color: #dfaaa5; background: #fff9f8; }
 .save-slot-thumbnail { position: relative; height: 92px; display: grid; place-items: center; overflow: hidden; border-right: 1px solid var(--line); background: #dce4e5; color: #7a888d; }
 .save-slot-thumbnail > img { width: 100%; height: 100%; object-fit: cover; }
 .save-slot-thumbnail > svg { width: 25px; }
@@ -70,7 +72,12 @@
 .save-slot-copy small svg { width: 10px; margin-right: 4px; vertical-align: -2px; }
 .save-slot-card.empty .save-slot-copy > span { color: #718087; font-weight: 400; }
 .save-slot-card.corrupt .save-slot-copy > span,
-.save-slot-card.corrupt .save-slot-thumbnail { color: var(--danger); }
+.save-slot-card.corrupt .save-slot-thumbnail,
+.save-slot-card.mismatch .save-slot-copy > span,
+.save-slot-card.mismatch .save-slot-thumbnail,
+.save-slot-card.incompatible .save-slot-copy > span,
+.save-slot-card.incompatible .save-slot-thumbnail { color: var(--danger); }
+.save-slot-copy .save-slot-warning { color: #8a6814; }
 .save-game-loading { height: 100%; min-height: 240px; display: grid; place-items: center; align-content: center; gap: 8px; color: var(--muted); font-size: 10px; }
 .save-game-loading svg { width: 23px; color: var(--accent); }
 .save-game-error,

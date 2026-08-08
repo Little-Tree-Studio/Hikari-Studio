@@ -106,7 +106,7 @@ def build_windows_game(
         build_launcher_distribution(workspace_root, launcher_project, launcher_dist, dotnet_path)
 
     game_dir = output_dir / "game"
-    build_web_game(project, game_dir, project_path, builtin_assets, custom_assets, runtime_dist)
+    build_web_game(project, game_dir, project_path, builtin_assets, custom_assets, runtime_dist, target="windows")
 
     for source in launcher_dist.iterdir():
         destination = output_dir / source.name

@@ -144,3 +144,24 @@ test('stage timeline edits clips, keyframes, and participates in command undo', 
   const overflow = await page.evaluate(() => ({ width: document.documentElement.scrollWidth, viewport: document.documentElement.clientWidth }));
   expect(overflow.width).toBeLessThanOrEqual(overflow.viewport + 1);
 });
+
+test('camera shake stops when the timeline clip ends', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto('/?editor=1');
+  await page.getByRole('button', { name: '演出' }).click();
+
+  const workspace = page.getByTestId('stage-timeline-workspace');
+  await page.getByRole('button', { name: '添加片段' }).click();
+  await page.getByRole('button', { name: '镜头片段' }).click();
+  await page.getByRole('button', { name: '在播放头添加' }).click();
+
+  const keyframeInspector = workspace.locator('.timeline-keyframe-inspector');
+  await keyframeInspector.getByLabel('关键帧属性').selectOption('shake');
+  await keyframeInspector.getByLabel('关键帧值').fill('12');
+  const stage = workspace.locator('.stage-timeline-preview .stage');
+  await expect(stage).toHaveClass(/camera-shake/);
+
+  const ruler = workspace.locator('.timeline-ruler');
+  await ruler.click({ position: { x: 108, y: 16 } });
+  await expect(stage).not.toHaveClass(/camera-shake/);
+});

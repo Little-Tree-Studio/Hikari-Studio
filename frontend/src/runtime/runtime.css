@@ -176,6 +176,16 @@
 .game-runtime .save-slot-card.selected { border-color: var(--runtime-accent, #4cc5ae); box-shadow: 0 0 0 2px color-mix(in srgb, var(--runtime-accent, #4cc5ae) 20%, transparent); }
 .game-runtime .save-slot-thumbnail { border-color: rgba(255, 255, 255, .1); background: #263538; color: #7d908b; }
 .game-runtime .save-slot-card.empty .save-slot-copy > span { color: #96a5a1; }
+.game-runtime .save-slot-card.corrupt,
+.game-runtime .save-slot-card.mismatch,
+.game-runtime .save-slot-card.incompatible { border-color: #693f3a; background: #281817; }
+.game-runtime .save-slot-card.corrupt .save-slot-copy > span,
+.game-runtime .save-slot-card.corrupt .save-slot-thumbnail,
+.game-runtime .save-slot-card.mismatch .save-slot-copy > span,
+.game-runtime .save-slot-card.mismatch .save-slot-thumbnail,
+.game-runtime .save-slot-card.incompatible .save-slot-copy > span,
+.game-runtime .save-slot-card.incompatible .save-slot-thumbnail { color: #efaaa2; }
+.game-runtime .save-slot-copy .save-slot-warning { color: #e7d799; }
 .game-runtime .save-game-footer .button { border-color: rgba(255, 255, 255, .14); background: transparent; color: #dce7e4; }
 .game-runtime .save-game-footer .button:hover { border-color: #4bb7a3; background: rgba(27, 117, 101, .35); }
 .game-runtime .save-game-footer .button.primary { border-color: var(--runtime-accent, #32a991); background: color-mix(in srgb, var(--runtime-accent, #197f6d) 68%, #07110f); color: var(--runtime-button-text, #fff); }

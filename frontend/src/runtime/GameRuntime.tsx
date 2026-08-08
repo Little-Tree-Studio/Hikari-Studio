@@ -2,14 +2,15 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperti
 import { ArchiveRestore, ChevronDown, DoorOpen, Eye, EyeOff, History, Pause, Play, RotateCcw, Save, Settings2, Volume2, X, Zap } from 'lucide-react';
 import { SaveGameDialog } from '../components/SaveGameDialog';
 import { gameUiThemeCssVariables, normalizeGameUiTheme } from '../core/gameUiTheme';
-import { captureSaveThumbnail, listSaveSlots, readSaveSlot, readSharedVariables, writeSaveSlot, writeSharedVariables } from '../core/saveGames';
+import { acknowledgeSaveSlotNotice, captureSaveThumbnail, listSaveSlots, readSaveSlotWithRecovery, readSharedVariables, writeSaveSlot, writeSharedVariables, type SaveSlotRecord } from '../core/saveGames';
 import { readLargeValue, writeLargeValue } from '../core/storage';
+import { characterWidthCss, dimensionCss } from '../core/stageLayout';
 import { evaluateTimelineAtTime, timelineForProject } from '../core/timeline';
-import { advanceEngine, chooseBranch, createEngineState, currentBlock, loadSaveGame, resolveDialogueSpeaker, rollbackEngine } from '../engine-core/runtime';
+import { advanceEngine, chooseBranch, createEngineState, currentBlock, loadSaveGameWithReport, resolveDialogueSpeaker, rollbackEngine } from '../engine-core/runtime';
+import { BLOCK_CONFORMANCE_MATRIX_VERSION, observeEngineState } from '../engine-core/blockConformance';
 import type { EngineState } from '../engine-core/types';
-import type { Project } from '../types';
+import type { BlockType, Project } from '../types';
 
-const dimensionCss = (dimension?: { value?: number; unit: 'px' | '%' }) => dimension?.value === undefined ? undefined : `${dimension.value}${dimension.unit}`;
 const clamp = (value: number, min = 0, max = 1) => Math.max(min, Math.min(max, value));
 
 interface RuntimePreferences {
@@ -22,14 +23,14 @@ interface RuntimePreferences {
   skipReadOnly: boolean;
 }
 
-export function GameRuntime({ project }: { project: Project }) {
+export function GameRuntime({ project, conformanceCaseId }: { project: Project; conformanceCaseId?: BlockType }) {
   const entry = project.chapters.find((chapter) => chapter.entry)?.fragments[0]?.id ?? project.chapters[0]?.fragments[0]?.id ?? project.activeFragmentId;
   const [state, setState] = useState<EngineState>(() => createEngineState(project, entry));
-  const [screen, setScreen] = useState<'title' | 'playing'>('title');
-  const [hasStarted, setHasStarted] = useState(false);
+  const [screen, setScreen] = useState<'title' | 'playing'>(conformanceCaseId ? 'playing' : 'title');
+  const [hasStarted, setHasStarted] = useState(Boolean(conformanceCaseId));
   const [systemMenuOpen, setSystemMenuOpen] = useState(false);
   const [confirmation, setConfirmation] = useState<'new-game' | 'return-title' | 'exit' | null>(null);
-  const [continueSlotId, setContinueSlotId] = useState<string | null>(null);
+  const [continueSlot, setContinueSlot] = useState<SaveSlotRecord | null>(null);
   const [continueLoading, setContinueLoading] = useState(true);
   const [autoPlay, setAutoPlay] = useState(project.settings.autoPlay ?? false);
   const [skipMode, setSkipMode] = useState(false);
@@ -84,6 +85,23 @@ export function GameRuntime({ project }: { project: Project }) {
   const fastForwardActive = skipMode || controlFastForward;
   const runtimeTheme = normalizeGameUiTheme(project.ui?.runtimeTheme);
   const runtimeFontUri = assetUri(runtimeTheme.fontAssetId);
+
+  useEffect(() => {
+    if (!conformanceCaseId) return;
+    const harness = {
+      surface: 'web-runtime' as const,
+      caseId: conformanceCaseId,
+      matrixVersion: BLOCK_CONFORMANCE_MATRIX_VERSION,
+      getObservation: () => observeEngineState(project, state),
+      advance: () => setState((value) => advanceEngine(project, value)),
+      choose: (target: string) => setState((value) => chooseBranch(project, value, target)),
+      reset: () => setState(createEngineState(project)),
+    };
+    window.__HIKARI_BLOCK_CONFORMANCE__ = harness;
+    return () => {
+      if (window.__HIKARI_BLOCK_CONFORMANCE__ === harness) delete window.__HIKARI_BLOCK_CONFORMANCE__;
+    };
+  }, [conformanceCaseId, project, state]);
 
   useEffect(() => {
     if (screen !== 'playing') return;
@@ -181,8 +199,8 @@ export function GameRuntime({ project }: { project: Project }) {
       const latest = slots
         .filter((slot) => slot.status === 'valid' && slot.save)
         .sort((left, right) => new Date(right.save?.savedAt ?? 0).getTime() - new Date(left.save?.savedAt ?? 0).getTime())[0];
-      setContinueSlotId(latest?.slotId ?? null);
-    } catch { setContinueSlotId(null); }
+      setContinueSlot(latest ?? null);
+    } catch { setContinueSlot(null); }
     finally { setContinueLoading(false); }
   };
 
@@ -205,16 +223,25 @@ export function GameRuntime({ project }: { project: Project }) {
   };
 
   const continueGame = async () => {
-    if (!continueSlotId) return;
+    if (!continueSlot) return;
     setContinueLoading(true);
     try {
-      const saveGame = await readSaveSlot(project, continueSlotId);
-      const loaded = loadSaveGame(project, saveGame, state.variables);
-      setState({ ...loaded, readBlocks: { ...globalReadBlocks.current, ...loaded.readBlocks } });
-      sessionStartedAt.current = Date.now() - (saveGame.playTimeSeconds ?? 0) * 1000;
+      const stored = await readSaveSlotWithRecovery(project, continueSlot.slotId);
+      const loaded = loadSaveGameWithReport(project, stored.save, state.variables);
+      setState({ ...loaded.state, readBlocks: { ...globalReadBlocks.current, ...loaded.state.readBlocks } });
+      sessionStartedAt.current = Date.now() - (stored.save.playTimeSeconds ?? 0) * 1000;
       setScreen('playing');
       setHasStarted(true);
       setSystemMenuOpen(false);
+      const details = [...new Set([
+        ...(continueSlot.recovered || stored.recovered ? ['已从备份恢复'] : []),
+        ...(continueSlot.migrated || stored.migrated ? ['已迁移旧版存档'] : []),
+        ...(continueSlot.warnings ?? []),
+        ...stored.warnings,
+        ...loaded.warnings,
+      ])];
+      acknowledgeSaveSlotNotice(project.meta.id, continueSlot.slotId);
+      if (details.length) setNotice(details.join('；'));
     } catch (error) { setNotice(error instanceof Error ? error.message : String(error)); void refreshContinueSlot(); }
     finally { setContinueLoading(false); }
   };
@@ -407,12 +434,14 @@ export function GameRuntime({ project }: { project: Project }) {
 
   const quickLoad = async () => {
     try {
-      const saveGame = await readSaveSlot(project, 'quick');
-      const loaded = loadSaveGame(project, saveGame, state.variables);
-      setState({ ...loaded, readBlocks: { ...globalReadBlocks.current, ...loaded.readBlocks } });
-      sessionStartedAt.current = Date.now() - (saveGame.playTimeSeconds ?? 0) * 1000;
+      const stored = await readSaveSlotWithRecovery(project, 'quick');
+      const loaded = loadSaveGameWithReport(project, stored.save, state.variables);
+      setState({ ...loaded.state, readBlocks: { ...globalReadBlocks.current, ...loaded.state.readBlocks } });
+      sessionStartedAt.current = Date.now() - (stored.save.playTimeSeconds ?? 0) * 1000;
       setSystemMenuOpen(false);
-      setNotice('已读取快速存档');
+      const details = [...(stored.recovered ? ['已从备份恢复'] : []), ...(stored.migrated ? ['已迁移旧版存档'] : []), ...loaded.warnings];
+      acknowledgeSaveSlotNotice(project.meta.id, 'quick');
+      setNotice(`已读取快速存档${details.length ? ` · ${details.join('；')}` : ''}`);
     } catch (error) { setNotice(error instanceof Error ? error.message : String(error)); }
   };
 
@@ -468,7 +497,7 @@ export function GameRuntime({ project }: { project: Project }) {
           const actor = { ...stageActor, ...(timelinePreview.characters[stageActor.characterId] ?? {}) };
           const character = project.characters.find((item) => item.id === actor.characterId);
           const uri = assetUri(actor.assetId);
-          return <div className={`game-character enter-${actor.animation}`} key={actor.characterId} style={{ left: `${actor.x}%`, bottom: `${100 - actor.y}%`, width: dimensionCss(actor.width), height: dimensionCss(actor.height), transform: `translateX(-50%) scale(${actor.scale})`, opacity: actor.opacity, zIndex: actor.layer + 20 }}>
+          return <div className={`game-character enter-${actor.animation}`} key={actor.characterId} style={{ left: `${actor.x}%`, bottom: `${100 - actor.y}%`, width: characterWidthCss(actor.width), height: dimensionCss(actor.height), transform: `translateX(-50%) scale(${actor.scale})`, opacity: actor.opacity, zIndex: actor.layer + 20 }}>
             {uri ? <img src={uri} alt={`${character?.name ?? actor.characterId} · ${actor.expression}`} /> : <div className="game-character-placeholder" style={{ '--character-color': character?.color ?? '#42636a' } as CSSProperties}>{character?.name?.slice(0, 1) ?? '?'}</div>}
             {actor.overlays?.map((overlay) => { const overlayUri = assetUri(overlay.assetId); return overlayUri ? <img className="game-character-overlay" key={overlay.id} src={overlayUri} alt="" style={{ opacity: overlay.opacity, zIndex: overlay.layer, width: overlay.overrideSize ? dimensionCss(overlay.width) : '100%', height: overlay.overrideSize ? dimensionCss(overlay.height) : '100%' }} /> : null; })}
           </div>;
@@ -486,7 +515,7 @@ export function GameRuntime({ project }: { project: Project }) {
         <p>{project.ui?.title?.subtitle || project.meta.author || 'Hikari Studio'}</p>
         <nav className="game-title-actions" aria-label="标题菜单">
           <button className="primary" onClick={requestNewGame}><Play />开始游戏</button>
-          <button disabled={!continueSlotId || continueLoading} onClick={() => void continueGame()}><RotateCcw />{continueLoading ? '检查存档…' : '继续游戏'}</button>
+          <button disabled={!continueSlot || continueLoading} onClick={() => void continueGame()}><RotateCcw />{continueLoading ? '检查存档…' : '继续游戏'}</button>
           <button onClick={() => openPanel('load')}><ArchiveRestore />读取存档</button>
           <button onClick={() => openPanel('settings')}><Settings2 />游戏设置</button>
           <button onClick={() => setConfirmation('exit')}><DoorOpen />退出游戏</button>

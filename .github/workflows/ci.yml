@@ -5,6 +5,24 @@ on:
   pull_request:
 
 jobs:
+  crash-collector:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -r requirements-test.txt
+        working-directory: services/crash-collector
+      - run: python -m unittest discover -s tests -v
+        working-directory: services/crash-collector
+        env:
+          DATABASE_URL: postgresql://unused
+          S3_ENDPOINT: http://unused
+          S3_ACCESS_KEY: unused
+          S3_SECRET_KEY: unused
+          ADMIN_TOKEN: test-admin-token
+          IP_HASH_SALT: test-ip-hash-salt
   verify:
     runs-on: windows-latest
     steps:
@@ -24,11 +42,14 @@ jobs:
         with:
           dotnet-version: '8.0.x'
       - run: python -m unittest discover -s tests -v
+      - run: python -m benchmarks.large_project_backend
       - run: pnpm install --frozen-lockfile
         working-directory: frontend
       - run: pnpm run typecheck
         working-directory: frontend
       - run: pnpm test
+        working-directory: frontend
+      - run: pnpm run benchmark:large-project
         working-directory: frontend
       - run: pnpm run test:e2e
         working-directory: frontend

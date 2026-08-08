@@ -187,7 +187,10 @@ export interface TimelinePreviewValues {
 
 export function evaluateTimelineAtTime(timeline: StageTimeline, time: number): TimelinePreviewValues {
   const result: TimelinePreviewValues = { camera: {}, characters: {}, audio: {} };
-  const active = timeline.tracks.flatMap((track) => track.muted ? [] : track.clips.map((clip) => ({ track, clip }))).filter(({ clip }) => clip.start <= time).sort((left, right) => left.clip.start - right.clip.start);
+  const enabledTracks = timeline.tracks.filter((track) => !track.muted);
+  const hasShakeAutomation = enabledTracks.some((track) => track.kind === 'camera' && track.clips.some((clip) => clip.keyframes.some((keyframe) => keyframe.property === 'shake')));
+  if (hasShakeAutomation) result.camera.shake = 0;
+  const active = enabledTracks.flatMap((track) => track.clips.map((clip) => ({ track, clip }))).filter(({ clip }) => clip.start <= time).sort((left, right) => left.clip.start - right.clip.start);
   for (const { track, clip } of active) {
     const localTime = Math.max(0, Math.min(clip.duration, time - clip.start));
     const properties = new Map<string, TimelineKeyframe[]>();
@@ -198,6 +201,7 @@ export function evaluateTimelineAtTime(timeline: StageTimeline, time: number): T
       if (track.kind === 'scene' && property === 'opacity') result.sceneOpacity = value;
       else if (track.kind === 'camera') {
         const cameraProperty = property === 'cameraX' ? 'x' : property === 'cameraY' ? 'y' : property;
+        if (cameraProperty === 'shake' && time >= clip.start + clip.duration) continue;
         if (['x', 'y', 'zoom', 'rotation', 'shake'].includes(cameraProperty)) result.camera[cameraProperty as keyof TimelinePreviewValues['camera']] = value;
       } else if (track.kind === 'character' && clip.characterId && ['x', 'y', 'scale', 'opacity'].includes(property)) {
         result.characters[clip.characterId] = { ...(result.characters[clip.characterId] ?? {}), [property]: value };

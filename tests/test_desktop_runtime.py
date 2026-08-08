@@ -17,6 +17,32 @@ from backend.window_state import WindowPlacement, WindowStateStore
 
 
 class DesktopRuntimeTests(unittest.TestCase):
+    def test_window_drag_moves_to_a_valid_pointer_derived_position(self) -> None:
+        class FakeWindow:
+            def __init__(self) -> None:
+                self.calls: list[tuple[object, ...]] = []
+
+            def restore(self) -> None:
+                self.calls.append(("restore",))
+
+            def move(self, x: int, y: int) -> None:
+                self.calls.append((x, y))
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            window = FakeWindow()
+            api = DesktopApi(ProjectStore(root / "projects"), root)
+            api._bind_window(window)
+
+            self.assertTrue(api.move_window(321.4, -18.6))
+            self.assertEqual(window.calls, [(321, -19)])
+            self.assertFalse(api.move_window(float("inf"), 0))
+            self.assertEqual(window.calls, [(321, -19)])
+            api._window_maximized = True
+            self.assertTrue(api.move_window(640, 360))
+            self.assertEqual(window.calls[-2:], [("restore",), (640, 360)])
+            self.assertFalse(api._window_maximized)
+
     def test_project_creation_mode_uses_a_centered_compact_window_and_restores_editor_placement(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

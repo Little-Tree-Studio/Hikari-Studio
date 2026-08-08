@@ -1,4 +1,6 @@
 import json
+import base64
+import gzip
 import shutil
 import tempfile
 import time
@@ -7,10 +9,42 @@ from pathlib import Path
 from unittest.mock import patch
 
 from backend.api import DesktopApi
-from backend.project_store import ProjectStore
+from backend.project_store import ProjectStore, blank_project
 
 
 class DesktopApiTests(unittest.TestCase):
+    def test_clipboard_script_preview_is_read_and_parsed_by_python(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            api = DesktopApi(ProjectStore(root / "data"), root)
+            characters = [{"id": "su", "name": "苏", "expressions": ["默认", "微笑"]}]
+            with patch("backend.api.read_system_clipboard_text", return_value="苏[微笑]：早上好。"):
+                preview = api.preview_clipboard_script(characters=characters, rules={"expressionSyntax": "brackets"})
+            self.assertEqual(preview["format"], "TXT")
+            self.assertEqual(preview["blocks"][0]["type"], "dialogue")
+            self.assertEqual(preview["blocks"][0]["speaker"], "苏")
+            self.assertEqual(preview["blocks"][0]["expression"], "微笑")
+            self.assertEqual(preview["matches"][0]["characterId"], "su")
+            self.assertEqual(preview["rules"]["expressionSyntax"], "brackets")
+
+    def test_clipboard_preview_uses_editor_fallback_when_windows_is_busy(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            api = DesktopApi(ProjectStore(root / "data"), root)
+            with patch("backend.api.read_system_clipboard_text", side_effect=OSError("busy")):
+                preview = api.preview_clipboard_script("旁白文本")
+            self.assertEqual(preview["blocks"][0]["text"], "旁白文本")
+
+    def test_startup_project_request_is_exposed_to_the_frontend(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            api = DesktopApi(ProjectStore(root / "data"), root)
+            self.assertFalse(api.get_app_info()["startupProjectRequested"])
+            api.mark_startup_project_requested()
+            info = api.get_app_info()
+            self.assertTrue(info["startupProjectRequested"])
+            self.assertEqual(info["version"], "0.4.0-beta.1")
+
     def test_command_history_bridge_persists_serializable_history(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -43,6 +77,17 @@ class DesktopApiTests(unittest.TestCase):
             self.assertFalse(snapshot["recoveredDuringLoad"])
             json.loads(json.dumps(snapshot, ensure_ascii=False))
 
+    def test_recovery_snapshot_status_does_not_load_project_body(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            api = DesktopApi(ProjectStore(root / "data"), root)
+            api.load_project()
+            with patch.object(api._store, "_load_recovery", side_effect=AssertionError("snapshot body was parsed")):
+                status = api.get_recovery_snapshot_status()
+            self.assertTrue(status["exists"])
+            self.assertGreater(status["bytes"], 0)
+            self.assertTrue(status["updatedAt"])
+
     def test_project_json_bridge_returns_serializable_v3_project(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -50,6 +95,112 @@ class DesktopApiTests(unittest.TestCase):
             project = json.loads(api.load_project_json())
             self.assertEqual(project["version"], 3)
             self.assertGreater(len(project["chapters"]), 0)
+
+    def test_profiled_project_session_separates_backend_bridge_and_frontend_timings(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            api = DesktopApi(ProjectStore(root / "data"), root)
+            envelope = api.load_project_session_profiled("reload-test-1")
+            self.assertEqual(envelope["encoding"], "gzip-base64")
+            project = json.loads(gzip.decompress(base64.b64decode(envelope["projectPayload"])))
+            backend = envelope["backend"]
+
+            self.assertEqual(project["version"], 3)
+            self.assertEqual(backend["reloadId"], "reload-test-1")
+            self.assertGreater(backend["payloadBytes"], 100)
+            self.assertGreater(backend["transportBytes"], 0)
+            self.assertLess(backend["transportBytes"], backend["payloadBytes"])
+            self.assertGreaterEqual(backend["pythonCompressionMs"], 0)
+            self.assertGreaterEqual(backend["projectLoadMs"], 0)
+            self.assertGreaterEqual(backend["pythonSerializationMs"], 0)
+            self.assertEqual(backend["counts"]["blocks"], sum(len(blocks) for blocks in project["scripts"].values()))
+            self.assertFalse(api.get_project_reload_performance()["complete"])
+
+            completed = api.report_project_reload_performance("reload-test-1", "editor", {
+                "bridgeRoundTripMs": 18.25,
+                "webViewTransferEstimateMs": 7.5,
+                "jsonParseMs": 2.75,
+                "totalReloadMs": 45.5,
+                "projectText": "must-not-enter-logs",
+                "componentRenders": {
+                    "block-list": {
+                        "commits": 2, "mounts": 1, "updates": 1,
+                        "actualDurationMs": 12.25, "mountDurationMs": 8.5, "updateDurationMs": 3.75,
+                        "baseDurationMs": 18.5, "lastCommitTimeMs": 32.0,
+                        "firstMeasurementDurationMs": 1.25, "observerMeasurementDurationMs": 0.5,
+                        "firstMeasurements": 17, "remeasurements": 34, "observerCallbacks": 2,
+                        "revisionFlushes": 1, "peakObservedRows": 18,
+                        "viewportMeasurements": 2, "viewportUpdates": 1, "viewportRangeFlushes": 1,
+                        "storyCardTypes": {
+                            "dialogue": {"commits": 3, "mounts": 2, "updates": 1, "actualDurationMs": 2.5, "mountDurationMs": 2.0, "updateDurationMs": 0.5, "baseDurationMs": 3.0, "lastCommitTimeMs": 31.0, "text": "secret"},
+                            "unknown": {"mountDurationMs": 999},
+                        },
+                        "dialogueRegions": {
+                            "speaker": {"commits": 1, "mounts": 1, "updates": 0, "actualDurationMs": 0.9, "mountDurationMs": 0.9, "updateDurationMs": 0, "baseDurationMs": 1.2, "lastCommitTimeMs": 31.0, "speaker": "secret"},
+                            "unknown": {"mountDurationMs": 999},
+                        },
+                        "blockText": "secret",
+                    },
+                    "unknown-surface": {"actualDurationMs": 999},
+                },
+            })
+            self.assertTrue(completed["complete"])
+            self.assertEqual(completed["frontend"]["bridgeRoundTripMs"], 18.25)
+            self.assertEqual(completed["frontend"]["totalReloadMs"], 45.5)
+            self.assertNotIn("projectText", completed["frontend"])
+            self.assertEqual(completed["frontend"]["componentRenders"]["block-list"]["actualDurationMs"], 12.25)
+            self.assertEqual(completed["frontend"]["componentRenders"]["block-list"]["mountDurationMs"], 8.5)
+            self.assertEqual(completed["frontend"]["componentRenders"]["block-list"]["firstMeasurements"], 17)
+            self.assertEqual(completed["frontend"]["componentRenders"]["block-list"]["peakObservedRows"], 18)
+            self.assertEqual(completed["frontend"]["componentRenders"]["block-list"]["storyCardTypes"]["dialogue"]["mountDurationMs"], 2.0)
+            self.assertNotIn("text", completed["frontend"]["componentRenders"]["block-list"]["storyCardTypes"]["dialogue"])
+            self.assertNotIn("unknown", completed["frontend"]["componentRenders"]["block-list"]["storyCardTypes"])
+            self.assertEqual(completed["frontend"]["componentRenders"]["block-list"]["dialogueRegions"]["speaker"]["mountDurationMs"], 0.9)
+            self.assertNotIn("speaker", completed["frontend"]["componentRenders"]["block-list"]["dialogueRegions"]["speaker"])
+            self.assertNotIn("unknown", completed["frontend"]["componentRenders"]["block-list"]["dialogueRegions"])
+            self.assertNotIn("blockText", completed["frontend"]["componentRenders"]["block-list"])
+            self.assertNotIn("unknown-surface", completed["frontend"]["componentRenders"])
+            self.assertEqual(api.get_project_reload_performance(), completed)
+
+            with self.assertRaises(ValueError):
+                api.report_project_reload_performance("another-reload", "editor", {})
+
+    def test_preview_seek_performance_bridge_is_bounded_and_redacted(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            api = DesktopApi(ProjectStore(root / "data"), root)
+            reported = api.report_preview_seek_performance({
+                "version": 1,
+                "sampleCount": 900,
+                "sampledDurations": 700,
+                "inputCount": 1200,
+                "coalescedInputs": 300,
+                "restoreDurationMs": {"total": 18.5, "average": 0.02, "p95": 0.04, "max": 0.2, "dialogue": "secret"},
+                "heap": {"startBytes": 1000, "peakBytes": 1800, "stableBytes": 1400, "peakDeltaBytes": 800, "stableDeltaBytes": 400, "projectPath": "secret"},
+                "engineSeekCache": {"exactHits": 400, "checkpointHits": 20, "misses": 80, "invalidations": 1, "evictions": 10, "cachedFragments": 5, "cachedResults": 64, "cachedCheckpoints": 70, "evictionRate": 0.02, "text": "secret"},
+                "traceRestoreCache": {"exactHits": 600, "misses": 300, "invalidations": 2, "evictions": 72, "cachedResults": 128, "evictionRate": 0.08, "assetPath": "secret"},
+                "projectText": "must-not-enter-logs",
+            })
+            self.assertEqual(reported["sampleCount"], 900)
+            self.assertEqual(reported["sampledDurations"], 512)
+            self.assertEqual(reported["inputCount"], 1200)
+            self.assertEqual(reported["coalescedInputs"], 300)
+            self.assertEqual(reported["heap"]["stableDeltaBytes"], 400)
+            self.assertEqual(reported["traceRestoreCache"]["cachedResults"], 128)
+            self.assertNotIn("projectText", reported)
+            self.assertNotIn("dialogue", reported["restoreDurationMs"])
+            self.assertNotIn("projectPath", reported["heap"])
+            self.assertNotIn("text", reported["engineSeekCache"])
+            self.assertNotIn("assetPath", reported["traceRestoreCache"])
+            self.assertEqual(api.get_preview_seek_performance(), reported)
+
+    def test_profiled_project_session_has_plain_json_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            api = DesktopApi(ProjectStore(root / "data"), root)
+            envelope = api.load_project_session_profiled("reload-plain", False)
+            self.assertEqual(envelope["encoding"], "plain-json")
+            self.assertEqual(json.loads(envelope["projectPayload"])["version"], 3)
 
     def test_project_session_rejects_stale_path_and_token_for_same_project_id(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -273,6 +424,58 @@ class DesktopApiTests(unittest.TestCase):
             result = api.transcribe_audio([{"id": "bad", "kind": "scene", "path": "../outside.wav"}])
             self.assertFalse(result["ok"])
             self.assertEqual(result["error"]["code"], "ASR_NO_AUDIO")
+
+    def test_builds_use_a_safe_subdirectory_inside_the_selected_export_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = ProjectStore(root / "data")
+            api = DesktopApi(store, root)
+            project = blank_project("Custom Output")
+            selected = root / "selected builds"
+
+            renpy = api.export_renpy(project, str(selected))
+            self.assertEqual(Path(renpy["path"]), selected / "Custom-Output" / "renpy" / "script.rpy")
+
+            web_entry = selected / "Custom-Output" / "web" / "index.html"
+            web_entry.parent.mkdir(parents=True)
+            web_entry.write_text("<html></html>", encoding="utf-8")
+            with patch("backend.api.build_web_game", return_value=web_entry) as build_web:
+                web_result = api.build_web(project, None, str(selected))
+            self.assertTrue(web_result["ok"])
+            self.assertEqual(build_web.call_args.args[1], selected / "Custom-Output" / "web")
+
+            windows_entry = selected / "Custom-Output" / "windows" / "Custom-Output.exe"
+            windows_entry.parent.mkdir(parents=True)
+            windows_entry.write_bytes(b"executable")
+            with patch("backend.api.build_windows_game", return_value=windows_entry) as build_windows:
+                windows_result = api.build_windows(project, None, str(selected))
+            self.assertTrue(windows_result["ok"])
+            self.assertEqual(build_windows.call_args.args[1], selected / "Custom-Output" / "windows")
+
+            with patch("backend.api.os.startfile") as startfile:
+                opened = api.open_build_output(web_result["path"])
+                launched = api.launch_build_output(web_result["path"])
+            self.assertEqual(Path(opened["path"]), web_entry.parent)
+            self.assertEqual(Path(launched["path"]), web_entry)
+            self.assertEqual([Path(call.args[0]) for call in startfile.call_args_list], [web_entry.parent, web_entry])
+
+            with patch("backend.api.subprocess.Popen") as popen:
+                launched = api.launch_build_output(windows_result["path"])
+            self.assertEqual(Path(launched["path"]), windows_entry)
+            popen.assert_called_once_with([str(windows_entry)], cwd=str(windows_entry.parent), close_fds=True)
+
+            with self.assertRaisesRegex(ValueError, "Ren'Py"):
+                api.launch_build_output(renpy["path"])
+            with self.assertRaisesRegex(ValueError, "本次会话"):
+                api.open_build_output(str(root / "untrusted.exe"))
+
+            with self.assertRaisesRegex(ValueError, "绝对路径"):
+                api.export_renpy(project, "relative-folder")
+            file_path = root / "not-a-folder"
+            file_path.write_text("file", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "文件夹"):
+                api.export_renpy(project, str(file_path))
+            api.stop_background_services()
 
     def test_asset_inspection_reports_existing_and_missing_project_files(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -1,32 +1,37 @@
 import { useMemo, useState } from 'react';
 import { AudioLines, FileImage, FolderInput, Image, MessageSquareText, Music2, UserPlus, X } from 'lucide-react';
+import { isImportedImage, type EditorImportAction, type ImageImportPurpose } from '../core/assetImport';
 import type { Asset, AudioCategory, Character } from '../types';
 
-export type EditorImportAction =
-  | { kind: 'assetsOnly'; audioCategory?: AudioCategory }
-  | { kind: 'scenes' }
-  | { kind: 'characters' }
-  | { kind: 'expressions'; characterId: string };
+export type { EditorImportAction } from '../core/assetImport';
 
 interface EditorAssetImportDialogProps {
   assets: Asset[];
   characters: Character[];
+  sourceLabel?: string;
   close: () => void;
   apply: (action: EditorImportAction) => void;
 }
 
-export function EditorAssetImportDialog({ assets, characters, close, apply }: EditorAssetImportDialogProps) {
-  const images = useMemo(() => assets.filter((asset) => ['image', 'scene', 'character'].includes(asset.kind)), [assets]);
+export function EditorAssetImportDialog({ assets, characters, sourceLabel = '项目', close, apply }: EditorAssetImportDialogProps) {
+  const images = useMemo(() => assets.filter(isImportedImage), [assets]);
   const audio = useMemo(() => assets.filter((asset) => asset.kind === 'audio'), [assets]);
   const other = assets.length - images.length - audio.length;
-  const [action, setAction] = useState<'assetsOnly' | 'scenes' | 'characters' | 'expressions'>(images.length ? 'assetsOnly' : 'assetsOnly');
+  const [imagePurpose, setImagePurpose] = useState<ImageImportPurpose | ''>('');
   const [characterId, setCharacterId] = useState(characters[0]?.id ?? '');
-  const [audioCategory, setAudioCategory] = useState<AudioCategory>('bgm');
+  const [audioCategory, setAudioCategory] = useState<AudioCategory | ''>('');
+  const [voiceCharacterId, setVoiceCharacterId] = useState('');
+  const valid = (!images.length || Boolean(imagePurpose))
+    && (!audio.length || Boolean(audioCategory))
+    && (imagePurpose !== 'expressions' || Boolean(characterId));
   const submit = () => {
-    if (action === 'expressions') { if (!characterId) return; apply({ kind: 'expressions', characterId }); }
-    else if (action === 'scenes') apply({ kind: 'scenes' });
-    else if (action === 'characters') apply({ kind: 'characters' });
-    else apply({ kind: 'assetsOnly', audioCategory: audio.length ? audioCategory : undefined });
+    if (!valid) return;
+    apply({
+      imagePurpose: imagePurpose || undefined,
+      characterId: imagePurpose === 'expressions' ? characterId : undefined,
+      audioCategory: audioCategory || undefined,
+      voiceCharacterId: audioCategory === 'voice' ? voiceCharacterId || undefined : undefined,
+    });
   };
-  return <div className="modal-backdrop editor-asset-import-backdrop" onClick={close}><div className="modal editor-asset-import-dialog" role="dialog" aria-modal="true" aria-labelledby="editor-import-title" onClick={(event) => event.stopPropagation()}><div className="modal-header"><div><strong id="editor-import-title">导入到剧本项目</strong><small>{assets.length} 个文件已复制到项目资源目录</small></div><button className="icon-button" title="关闭" onClick={close}><X /></button></div><div className="modal-body"><div className="editor-import-summary">{images.length > 0 && <span><FileImage />{images.length} 张图片</span>}{audio.length > 0 && <span><AudioLines />{audio.length} 个音频</span>}{other > 0 && <span><FolderInput />{other} 个其它文件</span>}</div><p>选择是否同时创建可复用实体。此操作不会向当前 Fragment 插入剧情 Block。</p><div className="editor-import-actions"><label className={action === 'assetsOnly' ? 'active' : ''}><input type="radio" name="asset-action" checked={action === 'assetsOnly'} onChange={() => setAction('assetsOnly')} /><FolderInput /><span><strong>仅导入素材</strong><small>登记文件，稍后从属性检查器选择</small></span></label>{images.length > 0 && <><label className={action === 'scenes' ? 'active' : ''}><input type="radio" name="asset-action" checked={action === 'scenes'} onChange={() => setAction('scenes')} /><Image /><span><strong>为每张图片创建场景</strong><small>生成单层场景配置</small></span></label><label className={action === 'characters' ? 'active' : ''}><input type="radio" name="asset-action" checked={action === 'characters'} onChange={() => setAction('characters')} /><UserPlus /><span><strong>为每张图片创建角色</strong><small>图片作为默认立绘</small></span></label><label className={action === 'expressions' ? 'active' : ''}><input type="radio" name="asset-action" checked={action === 'expressions'} onChange={() => setAction('expressions')} /><MessageSquareText /><span><strong>添加为角色表情</strong><small>文件名作为表情名称</small></span></label></>}</div>{action === 'expressions' && <label className="editor-import-select">目标角色<select value={characterId} onChange={(event) => setCharacterId(event.target.value)}>{characters.map((character) => <option key={character.id} value={character.id}>{character.name}</option>)}</select></label>}{action === 'assetsOnly' && audio.length > 0 && <div className="editor-audio-category"><strong>音频分类</strong>{([['bgm', 'BGM', Music2], ['sfx', '音效', AudioLines], ['voice', '语音', MessageSquareText]] as const).map(([id, label, Icon]) => <button className={audioCategory === id ? 'active' : ''} key={id} onClick={() => setAudioCategory(id)}><Icon />{label}</button>)}</div>}</div><div className="modal-footer"><button className="button ghost" onClick={close}>取消</button><button className="button primary" disabled={action === 'expressions' && !characterId} onClick={submit}>确认导入</button></div></div></div>;
+  return <div className="modal-backdrop editor-asset-import-backdrop" onClick={close}><div className="modal editor-asset-import-dialog" role="dialog" aria-modal="true" aria-labelledby="editor-import-title" onClick={(event) => event.stopPropagation()}><div className="modal-header"><div><strong id="editor-import-title">选择文件用途</strong><small>{sourceLabel} · {assets.length} 个文件等待绑定</small></div><button className="icon-button" title="关闭" onClick={close}><X /></button></div><div className="modal-body"><div className="editor-import-summary">{images.length > 0 && <span><FileImage />{images.length} 张图片</span>}{audio.length > 0 && <span><AudioLines />{audio.length} 个音频</span>}{other > 0 && <span><FolderInput />{other} 个自动分类文件</span>}</div><p>确认后才会登记素材并创建对应项目内容。混合导入可以分别设置图片和音频用途。</p>{images.length > 0 && <section className="editor-import-group"><header><FileImage /><span><strong>图片用途</strong><small>必须选择，导入后将自动绑定素材类型</small></span></header><div className="editor-import-actions"><label className={imagePurpose === 'characters' ? 'active' : ''}><input type="radio" name="image-purpose" checked={imagePurpose === 'characters'} onChange={() => setImagePurpose('characters')} /><UserPlus /><span><strong>角色立绘</strong><small>每张图片创建一个角色并设为默认表情</small></span></label><label className={imagePurpose === 'expressions' ? 'active' : ''} aria-disabled={!characters.length}><input type="radio" name="image-purpose" disabled={!characters.length} checked={imagePurpose === 'expressions'} onChange={() => setImagePurpose('expressions')} /><MessageSquareText /><span><strong>角色表情</strong><small>{characters.length ? '添加到指定角色，文件名作为表情名' : '需要先创建至少一个角色'}</small></span></label><label className={imagePurpose === 'scenes' ? 'active' : ''}><input type="radio" name="image-purpose" checked={imagePurpose === 'scenes'} onChange={() => setImagePurpose('scenes')} /><Image /><span><strong>场景背景</strong><small>每张图片创建一个单层场景</small></span></label><label className={imagePurpose === 'library' ? 'active' : ''}><input type="radio" name="image-purpose" checked={imagePurpose === 'library'} onChange={() => setImagePurpose('library')} /><FolderInput /><span><strong>普通图片 / CG / UI</strong><small>作为通用图片登记，不创建角色或场景</small></span></label></div>{imagePurpose === 'expressions' && <label className="editor-import-select">目标角色<select aria-label="目标角色" value={characterId} onChange={(event) => setCharacterId(event.target.value)}>{characters.map((character) => <option key={character.id} value={character.id}>{character.name}</option>)}</select></label>}</section>}{audio.length > 0 && <section className="editor-import-group"><header><AudioLines /><span><strong>音频用途</strong><small>必须选择，声音 Block 将按此分类筛选</small></span></header><div className="editor-audio-category">{([['bgm', 'BGM', Music2], ['sfx', '音效', AudioLines], ['voice', '语音', MessageSquareText]] as const).map(([id, label, Icon]) => <button type="button" className={audioCategory === id ? 'active' : ''} key={id} onClick={() => setAudioCategory(id)}><Icon />{label}</button>)}</div>{audioCategory === 'voice' && <label className="editor-import-select">所属角色（可选）<select aria-label="语音所属角色" value={voiceCharacterId} onChange={(event) => setVoiceCharacterId(event.target.value)}><option value="">暂不分配</option>{characters.map((character) => <option key={character.id} value={character.id}>{character.name}</option>)}</select></label>}</section>}{other > 0 && <div className="editor-import-auto"><FolderInput /><span><strong>其它文件将按扩展名自动分类</strong><small>视频、字体和普通文件不会创建额外实体</small></span></div>}</div><div className="modal-footer"><span className="editor-import-required">{valid ? '用途配置完整' : '请完成所有必选用途'}</span><button className="button ghost" onClick={close}>取消</button><button className="button primary" disabled={!valid} onClick={submit}>确认导入</button></div></div></div>;
 }

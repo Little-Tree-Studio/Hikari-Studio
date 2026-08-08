@@ -60,6 +60,16 @@ export function analyzeAssetReferences(project: Project): AssetReferenceReport {
     add(layer.assetId, { sourceType: 'scene', sourceId: scene.id, sourceName: scene.name, detail: `场景图层：${layer.name}` });
   }
 
+  for (const [fragmentId, timeline] of Object.entries(project.timelines ?? {})) for (const track of timeline.tracks) for (const clip of track.clips) {
+    add(clip.assetId, {
+      sourceType: 'script',
+      sourceId: clip.id,
+      sourceName: fragmentNames.get(fragmentId) ?? fragmentId,
+      fragmentId,
+      detail: `时间轴：${track.name} / ${clip.name}`,
+    });
+  }
+
   add(project.ui?.title?.backgroundAssetId, { sourceType: 'ui', sourceId: 'ui-title', sourceName: '游戏 UI', detail: '标题背景' });
   add(project.ui?.title?.logoAssetId, { sourceType: 'ui', sourceId: 'ui-title', sourceName: '游戏 UI', detail: '标题 Logo' });
   add(project.ui?.runtimeTheme?.fontAssetId, { sourceType: 'ui', sourceId: 'ui-theme', sourceName: '游戏 UI', detail: '对白字体' });

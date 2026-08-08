@@ -134,6 +134,19 @@ describe('stage timeline', () => {
     expect(preview.audio[audio.audioChannel ?? 'bgm']?.volume).toBe(.65);
   });
 
+  it('stops camera shake at the end of its clip without resetting persistent camera values', () => {
+    const timeline = deriveTimeline(sampleProject(), 'opening');
+    const camera = timeline.tracks.find((track) => track.kind === 'camera')!.clips[0];
+    camera.keyframes = [
+      { id: 'zoom', time: 0, property: 'zoom', value: 1.4, easing: 'linear' },
+      { id: 'shake', time: 0, property: 'shake', value: 12, easing: 'linear' },
+    ];
+
+    expect(evaluateTimelineAtTime(timeline, camera.start + camera.duration / 2).camera).toMatchObject({ zoom: 1.4, shake: 12 });
+    expect(evaluateTimelineAtTime(timeline, camera.start + camera.duration).camera).toMatchObject({ zoom: 1.4, shake: 0 });
+    expect(evaluateTimelineAtTime(timeline, camera.start + camera.duration + 5).camera).toMatchObject({ zoom: 1.4, shake: 0 });
+  });
+
   it('ripples following clips after moves and right-edge trims', () => {
     const timeline = deriveTimeline(sampleProject(), 'opening');
     const first = timeline.tracks[0].clips[0];

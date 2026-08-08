@@ -1,5 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
-import { log } from '../core/logger';
+import { captureFrontendError } from '../core/logger';
 
 interface Props { children: ReactNode }
 interface State { error?: Error }
@@ -12,7 +12,7 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    log('error', 'react', error.message, { stack: error.stack, componentStack: info.componentStack });
+    captureFrontendError('react', error, { componentStack: info.componentStack });
   }
 
   render() {

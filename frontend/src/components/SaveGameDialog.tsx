@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Clock3, Gamepad2, LoaderCircle, RotateCcw, Save, Trash2, X } from 'lucide-react';
-import { captureSaveThumbnail, deleteSaveSlot, listSaveSlots, readSaveSlot, writeSaveSlot, type SaveSlotRecord } from '../core/saveGames';
-import { loadSaveGame } from '../engine-core/runtime';
+import { acknowledgeSaveSlotNotice, captureSaveThumbnail, deleteSaveSlot, listSaveSlots, readSaveSlotWithRecovery, writeSaveSlot, type SaveSlotRecord } from '../core/saveGames';
+import { loadSaveGameWithReport } from '../engine-core/runtime';
 import type { EngineState } from '../engine-core/types';
 import type { Project } from '../types';
 
@@ -60,7 +60,7 @@ export function SaveGameDialog({ project, state, mode, playTimeSeconds, close, l
 
   const save = async () => {
     if (!selected) return;
-    if (selected.status === 'valid' && confirmation !== 'overwrite') {
+    if (selected.status !== 'empty' && confirmation !== 'overwrite') {
       setConfirmation('overwrite');
       return;
     }
@@ -82,9 +82,18 @@ export function SaveGameDialog({ project, state, mode, playTimeSeconds, close, l
     setBusy(true);
     setError('');
     try {
-      const saveGame = await readSaveSlot(project, selected.slotId);
-      loadState(loadSaveGame(project, saveGame, state.variables));
-      notify(`已读取${selected.label}`);
+      const stored = await readSaveSlotWithRecovery(project, selected.slotId);
+      const loaded = loadSaveGameWithReport(project, stored.save, state.variables);
+      loadState(loaded.state);
+      const details = [...new Set([
+        ...(selected.recovered || stored.recovered ? ['已从备份恢复'] : []),
+        ...(selected.migrated || stored.migrated ? ['已迁移旧版存档'] : []),
+        ...(selected.warnings ?? []),
+        ...stored.warnings,
+        ...loaded.warnings,
+      ])];
+      acknowledgeSaveSlotNotice(project.meta.id, selected.slotId);
+      notify(`已读取${selected.label}${details.length ? ` · ${details.join('；')}` : ''}`);
       requestClose();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
@@ -118,15 +127,19 @@ export function SaveGameDialog({ project, state, mode, playTimeSeconds, close, l
       onClick={() => setSelectedId(slot.slotId)}
     >
       <span className="save-slot-thumbnail">
-        {slot.save?.thumbnail ? <img src={slot.save.thumbnail} alt={slot.label} /> : slot.status === 'corrupt' ? <AlertTriangle /> : <Gamepad2 />}
-        {slot.recovered && <em><RotateCcw />已恢复备份</em>}
+        {slot.save?.thumbnail ? <img src={slot.save.thumbnail} alt={slot.label} /> : ['corrupt', 'mismatch', 'incompatible'].includes(slot.status) ? <AlertTriangle /> : <Gamepad2 />}
+        {(slot.recovered || slot.migrated) && <em><RotateCcw />{slot.recovered ? '已恢复备份' : '已迁移'}</em>}
       </span>
       <span className="save-slot-copy">
         <strong>{slot.label}</strong>
         {slot.status === 'valid' && slot.save ? <>
           <span>{slot.save.chapterName ?? '未命名章节'} · {slot.save.fragmentName ?? slot.save.state.fragmentId}</span>
           <small><Clock3 />{formatDate(slot.save.savedAt)} · {formatDuration(slot.save.playTimeSeconds)}</small>
-        </> : slot.status === 'corrupt' ? <><span>存档无法读取</span><small>{slot.error}</small></> : <><span>空槽位</span><small>选择后创建新存档</small></>}
+          {slot.warnings?.[0] && <small className="save-slot-warning"><AlertTriangle />{slot.warnings[0]}</small>}
+        </> : slot.status === 'mismatch' ? <><span>其他项目的存档</span><small>{slot.error}</small></>
+          : slot.status === 'incompatible' ? <><span>需要更新 Hikari Studio</span><small>{slot.error}</small></>
+          : slot.status === 'corrupt' ? <><span>存档无法读取</span><small>{slot.error}</small></>
+          : <><span>空槽位</span><small>选择后创建新存档</small></>}
       </span>
     </button>
   );
@@ -134,7 +147,7 @@ export function SaveGameDialog({ project, state, mode, playTimeSeconds, close, l
   const actionLabel = useMemo(() => {
     if (mode === 'load') return '读取存档';
     if (confirmation === 'overwrite') return '确认覆盖';
-    return selected?.status === 'valid' ? '覆盖存档' : '保存到此槽位';
+    return selected?.status !== 'empty' ? '覆盖此槽位' : '保存到此槽位';
   }, [confirmation, mode, selected?.status]);
 
   return <div className={`modal-backdrop save-game-backdrop ${closing ? 'closing' : ''}`} role="presentation" onClick={requestClose}>
@@ -152,7 +165,7 @@ export function SaveGameDialog({ project, state, mode, playTimeSeconds, close, l
       {error && <div className="save-game-error"><AlertTriangle />{error}</div>}
       {confirmation && <div className={`save-game-confirm ${confirmation}`}>
         <AlertTriangle />
-        <span>{confirmation === 'overwrite' ? `再次点击“确认覆盖”，${selected?.label}的旧内容会保留为恢复备份。` : `再次点击“确认删除”，将删除${selected?.label}及其恢复备份。`}</span>
+        <span>{confirmation === 'overwrite' ? `再次点击“确认覆盖”，${selected?.label}将写入当前游戏状态；只有通过校验的旧内容才会保留为恢复备份。` : `再次点击“确认删除”，将删除${selected?.label}及其恢复备份。`}</span>
         <button onClick={() => setConfirmation(null)}>取消</button>
       </div>}
       <footer className="modal-footer save-game-footer">

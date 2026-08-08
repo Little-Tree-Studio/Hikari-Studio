@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import {
   ArchiveRestore,
   ChevronDown,
@@ -20,15 +20,20 @@ import {
   chooseBranch,
   createEngineState,
   currentBlock,
+  EngineSeekCache,
+  EngineTraceRestoreCache,
   resolveDialogueSpeaker,
-  restoreTraceState,
   rollbackEngine,
   seekEngine,
 } from "../engine-core/runtime";
 import type { EngineState } from "../engine-core/types";
+import { BLOCK_CONFORMANCE_MATRIX_VERSION, observeEngineState } from "../engine-core/blockConformance";
 import type { TimelinePreviewValues } from "../core/timeline";
-import type { Project } from "../types";
+import { characterWidthCss, dimensionCss } from "../core/stageLayout";
+import type { BlockType, Project } from "../types";
 import { writeLargeValue } from "../core/storage";
+import { reportPreviewSeekPerformance } from "../api";
+import { PreviewSeekProfiler } from "../performance/previewSeekProfiler";
 import {
   captureSaveThumbnail,
   readSharedVariables,
@@ -46,6 +51,7 @@ interface PreviewProps {
   onEditorLocationChange?: (fragmentId: string, blockIndex: number) => void;
   onStageCharacterMove?: (characterId: string, x: number, y: number) => void;
   timelinePreview?: TimelinePreviewValues;
+  conformanceCaseId?: BlockType;
 }
 
 type StageGuide = {
@@ -77,9 +83,19 @@ export function Preview({
   onEditorLocationChange,
   onStageCharacterMove,
   timelinePreview,
+  conformanceCaseId,
 }: PreviewProps) {
+  const previewSeekCacheRef = useRef<EngineSeekCache | null>(null);
+  const traceRestoreCacheRef = useRef<EngineTraceRestoreCache | null>(null);
+  const previewSeekProfilerRef = useRef<PreviewSeekProfiler | null>(null);
+  const previewSeekReportTimerRef = useRef<number | undefined>(undefined);
+  const opSeekFrameRef = useRef<number | undefined>(undefined);
+  const pendingOpIndexRef = useRef<number | undefined>(undefined);
+  previewSeekCacheRef.current ??= new EngineSeekCache();
+  traceRestoreCacheRef.current ??= new EngineTraceRestoreCache();
+  previewSeekProfilerRef.current ??= new PreviewSeekProfiler();
   const [state, setState] = useState<EngineState>(() =>
-    seekEngine(project, project.activeFragmentId, editorIndex),
+    seekEngine(project, project.activeFragmentId, editorIndex, previewSeekCacheRef.current!),
   );
   const [playing, setPlaying] = useState(false);
   const [resolution, setResolution] = useState(
@@ -109,26 +125,36 @@ export function Preview({
     fragmentId: string;
     blockIndex: number;
   } | null>(null);
-  const externalSyncRef = useRef<{
-    fragmentId: string;
-    blockIndex: number;
-  } | null>(null);
-  const fragmentMetadata = new Map(
+  const externalSyncStateRef = useRef<EngineState | null>(null);
+  const pendingEditorSyncRef = useRef(false);
+  const editorLocationRef = useRef({ fragmentId: project.activeFragmentId, blockIndex: editorIndex });
+  const onEditorLocationChangeRef = useRef(onEditorLocationChange);
+  editorLocationRef.current = { fragmentId: project.activeFragmentId, blockIndex: editorIndex };
+  onEditorLocationChangeRef.current = onEditorLocationChange;
+  const fragmentMetadata = useMemo(() => new Map(
     project.chapters.flatMap((chapter) =>
       chapter.fragments.map((fragment) => [fragment.id, { chapterName: chapter.name, fragmentName: fragment.name }] as const),
     ),
-  );
-  const opEntries = state.executionTrace.map((entry) => ({
+  ), [project.chapters]);
+  const opEntries = useMemo(() => state.executionTrace.map((entry) => ({
     ...entry,
     blockIndex: entry.instructionPointer,
     block: project.scripts[entry.fragmentId]?.[entry.instructionPointer],
     chapterName: fragmentMetadata.get(entry.fragmentId)?.chapterName ?? entry.fragmentId,
     fragmentName: fragmentMetadata.get(entry.fragmentId)?.fragmentName ?? entry.fragmentId,
-  }));
+  })), [fragmentMetadata, project.scripts, state.executionTrace]);
   const currentOpIndex = Math.max(0, state.traceCursor);
-  const sharedVariableNames = Object.entries(project.variableDefinitions ?? {})
+  const sharedVariableNames = useMemo(() => Object.entries(project.variableDefinitions ?? {})
     .filter(([, definition]) => definition.persistence === "shared")
-    .map(([name]) => name);
+    .map(([name]) => name), [project.variableDefinitions]);
+  const assetIndexes = useMemo(() => ({
+    byId: new Map(project.assets.map((asset) => [asset.id, asset] as const)),
+    byName: new Map(project.assets.map((asset) => [asset.name, asset] as const)),
+  }), [project.assets]);
+  const charactersById = useMemo(
+    () => new Map(project.characters.map((character) => [character.id, character] as const)),
+    [project.characters],
+  );
   const current = currentBlock(project, state);
   const orderedStageCharacters = Object.values(state.stage.characters).map((character) => ({ ...character, ...(timelinePreview?.characters[character.characterId] ?? {}) })).sort(
     (left, right) => left.layer - right.layer,
@@ -136,9 +162,24 @@ export function Preview({
   const stageCharacterIds = orderedStageCharacters
     .map((character) => character.characterId)
     .join("|");
-  const background =
-    project.assets.find((asset) => asset.id === state.stage.backgroundAssetId)
-      ?.uri ?? "./assets/lake.jpg";
+  const background = assetIndexes.byId.get(state.stage.backgroundAssetId ?? '')?.uri ?? "./assets/lake.jpg";
+
+  useEffect(() => {
+    if (!conformanceCaseId) return;
+    const harness = {
+      surface: 'editor-preview' as const,
+      caseId: conformanceCaseId,
+      matrixVersion: BLOCK_CONFORMANCE_MATRIX_VERSION,
+      getObservation: () => observeEngineState(project, state),
+      advance: () => setState((value) => advanceEngine(project, value)),
+      choose: (target: string) => setState((value) => chooseBranch(project, value, target)),
+      reset: () => setState(createEngineState(project)),
+    };
+    window.__HIKARI_BLOCK_CONFORMANCE__ = harness;
+    return () => {
+      if (window.__HIKARI_BLOCK_CONFORMANCE__ === harness) delete window.__HIKARI_BLOCK_CONFORMANCE__;
+    };
+  }, [conformanceCaseId, project, state]);
 
   useEffect(() => {
     setFailedStageAssetIds(new Set());
@@ -156,17 +197,20 @@ export function Preview({
 
   useEffect(() => {
     const runtimeLocation = runtimeLocationRef.current;
-    if (runtimeLocation?.fragmentId === project.activeFragmentId) {
-      if (runtimeLocation.blockIndex === editorIndex) runtimeLocationRef.current = null;
+    if (
+      runtimeLocation?.fragmentId === project.activeFragmentId &&
+      runtimeLocation.blockIndex === editorIndex
+    ) {
+      runtimeLocationRef.current = null;
       return;
     }
+    if (runtimeLocation) runtimeLocationRef.current = null;
+    pendingEditorSyncRef.current = true;
     setState((currentState) => {
-      const nextState = seekEngine(project, project.activeFragmentId, editorIndex);
+      const nextState = seekEngine(project, project.activeFragmentId, editorIndex, previewSeekCacheRef.current!);
       for (const name of sharedVariableNames) if (name in currentState.variables) nextState.variables[name] = currentState.variables[name];
-      externalSyncRef.current = {
-        fragmentId: nextState.fragmentId,
-        blockIndex: nextState.instructionPointer,
-      };
+      externalSyncStateRef.current = nextState;
+      pendingEditorSyncRef.current = false;
       return nextState;
     });
     setPlaying(false);
@@ -209,27 +253,25 @@ export function Preview({
   }, [debugMode, project.meta.id, project.settings.autoSave, standalone, state.traceCursor]);
 
   useEffect(() => {
-    if (!onEditorLocationChange) return;
-    const externalSync = externalSyncRef.current;
-    if (externalSync) {
-      if (
-        externalSync.fragmentId === state.fragmentId &&
-        externalSync.blockIndex === state.instructionPointer
-      ) {
-        externalSyncRef.current = null;
-      }
+    const notifyEditor = onEditorLocationChangeRef.current;
+    if (!notifyEditor) return;
+    if (pendingEditorSyncRef.current) return;
+    const externalSyncState = externalSyncStateRef.current;
+    if (externalSyncState) {
+      if (externalSyncState === state) externalSyncStateRef.current = null;
       return;
     }
     const traceLocation = state.executionTrace[state.traceCursor];
     const fragmentId = traceLocation?.fragmentId ?? state.fragmentId;
     const blockIndex = traceLocation?.instructionPointer ?? state.instructionPointer;
-    if (fragmentId === project.activeFragmentId && blockIndex === editorIndex) return;
+    const editorLocation = editorLocationRef.current;
+    if (fragmentId === editorLocation.fragmentId && blockIndex === editorLocation.blockIndex) return;
     runtimeLocationRef.current = {
       fragmentId,
       blockIndex,
     };
-    onEditorLocationChange(fragmentId, blockIndex);
-  }, [editorIndex, onEditorLocationChange, project.activeFragmentId, state.executionTrace, state.fragmentId, state.instructionPointer, state.traceCursor]);
+    notifyEditor(fragmentId, blockIndex);
+  }, [state.executionTrace, state.fragmentId, state.instructionPointer, state.traceCursor]);
 
   useEffect(() => {
     if (!debugMode) return;
@@ -297,13 +339,10 @@ export function Preview({
         }
         continue;
       }
-      const asset = project.assets.find(
-        (item) =>
-          item.id === channelState.assetId ||
-          item.id === channelState.track ||
-          item.name === channelState.track ||
-          item.path.endsWith(channelState.track ?? ""),
-      );
+      const asset = assetIndexes.byId.get(channelState.assetId ?? '')
+        ?? assetIndexes.byId.get(channelState.track)
+        ?? assetIndexes.byName.get(channelState.track)
+        ?? project.assets.find((item) => item.path.endsWith(channelState.track ?? ""));
       if (!asset?.uri || previous?.dataset.track === channelState.track) {
         if (previous) previous.volume = channelState.volume;
         continue;
@@ -321,7 +360,7 @@ export function Preview({
         );
     }
     return () => undefined;
-  }, [project.assets, state.audio]);
+  }, [assetIndexes, project.assets, state.audio]);
 
   useEffect(() => {
     for (const channel of ["bgm", "sfx", "voice"] as const) {
@@ -334,6 +373,8 @@ export function Preview({
   useEffect(
     () => () => {
       for (const audio of Object.values(audioRefs.current)) audio.pause();
+      window.clearTimeout(previewSeekReportTimerRef.current);
+      if (opSeekFrameRef.current !== undefined) window.cancelAnimationFrame(opSeekFrameRef.current);
     },
     [],
   );
@@ -354,8 +395,33 @@ export function Preview({
   const seekOp = (opIndex: number) => {
     const entry = opEntries[opIndex];
     if (!entry) return;
-    setState((currentState) => restoreTraceState(currentState, opIndex, sharedVariableNames));
-    setRuntimeNotice(`已定位 op ${opIndex + 1}`);
+    previewSeekProfilerRef.current!.recordInput(opSeekFrameRef.current !== undefined);
+    pendingOpIndexRef.current = opIndex;
+    if (opSeekFrameRef.current !== undefined) return;
+    opSeekFrameRef.current = window.requestAnimationFrame(() => {
+      opSeekFrameRef.current = undefined;
+      const targetIndex = pendingOpIndexRef.current;
+      pendingOpIndexRef.current = undefined;
+      if (targetIndex === undefined) return;
+      setState((currentState) => {
+        const startedAt = performance.now();
+        const restored = traceRestoreCacheRef.current!.restore(currentState, targetIndex, sharedVariableNames);
+        previewSeekProfilerRef.current!.record(performance.now() - startedAt);
+        return restored;
+      });
+      window.clearTimeout(previewSeekReportTimerRef.current);
+      previewSeekReportTimerRef.current = window.setTimeout(() => {
+        const report = previewSeekProfilerRef.current!.snapshot(
+          previewSeekCacheRef.current!.stats(),
+          traceRestoreCacheRef.current!.stats(),
+        );
+        window.__HIKARI_PREVIEW_SEEK_PERFORMANCE__ = report;
+        void reportPreviewSeekPerformance(report).catch((error) => {
+          console.warn('Preview seek performance report failed', error);
+        });
+      }, 2_000);
+      setRuntimeNotice(`已定位 op ${targetIndex + 1}`);
+    });
   };
   const updateRuntimeVariable = (name: string, raw: string) =>
     setState((currentState) => {
@@ -408,12 +474,6 @@ export function Preview({
     current,
     state.variables,
   );
-  const dimensionCss = (
-    dimension: { value?: number; unit: "px" | "%" } | undefined,
-  ) =>
-    dimension?.value === undefined
-      ? undefined
-      : `${dimension.value}${dimension.unit}`;
   const cameraFilter =
     camera.filter === "monochrome"
       ? "grayscale(1)"
@@ -517,7 +577,7 @@ export function Preview({
           className="icon-button small"
           title="回到当前 Block"
           onClick={() =>
-            setState(seekEngine(project, project.activeFragmentId, editorIndex))
+            setState(seekEngine(project, project.activeFragmentId, editorIndex, previewSeekCacheRef.current!))
           }
         >
           <LocateFixed />
@@ -603,9 +663,7 @@ export function Preview({
           >
             <img className="stage-bg" src={background} alt="游戏场景" style={{ opacity: timelinePreview?.sceneOpacity ?? 1 }} />
             {state.stage.sceneLayers.map((layer) => {
-              const asset = project.assets.find(
-                (item) => item.id === layer.assetId,
-              );
+              const asset = assetIndexes.byId.get(layer.assetId ?? '');
               const distance = layer.distance ?? 1;
               const relativeScale = Math.max(
                 0.1,
@@ -629,12 +687,8 @@ export function Preview({
               ) : null;
             })}
             {orderedStageCharacters.map((stageCharacter) => {
-                const character = project.characters.find(
-                  (item) => item.id === stageCharacter.characterId,
-                );
-                const asset = project.assets.find(
-                  (item) => item.id === stageCharacter.assetId,
-                );
+                const character = charactersById.get(stageCharacter.characterId);
+                const asset = assetIndexes.byId.get(stageCharacter.assetId ?? '');
                 return (
                   <div
                     className={`stage-character enter-${stageCharacter.animation} ${onStageCharacterMove ? "draggable" : ""} ${selectedStageCharacterId === stageCharacter.characterId ? "selected" : ""} ${draggingCharacterId === stageCharacter.characterId ? "dragging" : ""}`}
@@ -648,7 +702,7 @@ export function Preview({
                     style={{
                       left: `${stageCharacter.x}%`,
                       bottom: `${100 - stageCharacter.y}%`,
-                      width: dimensionCss(stageCharacter.width),
+                      width: characterWidthCss(stageCharacter.width),
                       height: dimensionCss(stageCharacter.height),
                       transform: `translateX(-50%) scale(${stageCharacter.scale})`,
                       opacity: stageCharacter.opacity,
@@ -680,9 +734,7 @@ export function Preview({
                       </div>
                     )}
                     {stageCharacter.overlays?.map((overlay) => {
-                      const overlayAsset = project.assets.find(
-                        (item) => item.id === overlay.assetId,
-                      );
+                      const overlayAsset = assetIndexes.byId.get(overlay.assetId ?? '');
                       return overlayAsset?.uri ? (
                         <img
                           className="character-overlay"
@@ -728,9 +780,7 @@ export function Preview({
                 .slice()
                 .reverse()
                 .map((stageCharacter) => {
-                  const character = project.characters.find(
-                    (item) => item.id === stageCharacter.characterId,
-                  );
+                  const character = charactersById.get(stageCharacter.characterId);
                   return (
                     <button
                       type="button"
@@ -882,7 +932,7 @@ export function Preview({
           updateVariable={updateRuntimeVariable}
           clearConsole={() => setConsoleEntries([])}
           locate={(fragmentId, blockIndex) => {
-            setState(seekEngine(project, fragmentId, blockIndex));
+            setState(seekEngine(project, fragmentId, blockIndex, previewSeekCacheRef.current!));
             setRuntimeNotice(`已定位 ${fragmentId} · Block ${blockIndex + 1}`);
           }}
         />

@@ -32,7 +32,7 @@
   <a href="https://github.com/kylemarvin884/Hikari-Studio/releases"><img src="https://img.shields.io/badge/查看-全部版本-176b5b?style=for-the-badge&logo=github" alt="查看全部版本" /></a>
 </p>
 
-当前 `v0.3.0` 工程已经能够生成完整 Windows 安装程序，并完成“创建项目、重启恢复最近项目、双击 `.hikari` 文件接管与 v2/v3 迁移”的真实安装版验收。Release 页面用于发布签名后的预览安装包；每次提交仍会提供可复现的源码与 CI 构建记录。
+最新公开预览版为 `v0.4.0-beta.1`。该版本带来完整演出时间轴、大型项目优化、统一构建前检查、SaveGame 恢复、更新与崩溃报告闭环，以及更完整的桌面导入与构建体验。Release 页面提供安装包、Portable ZIP、`latest.json` 与 SHA-256 清单。
 
 ## 编辑器预览
 
@@ -57,6 +57,7 @@
 | **游戏运行时** | 打字机文本、自动播放、快进、历史、存读档、音量与文本速度设置 |
 | **双主题系统** | 四套编辑器主题、强调色、减少动效，以及独立的游戏对白、菜单和存档界面主题编辑器 |
 | **构建发布** | Web 游戏、Windows WebView2 游戏、Ren'Py 导出，以及基于 Nuitka 与 Inno Setup 的编辑器安装程序 |
+| **桌面维护** | Stable/Beta 更新通道、24 小时检查缓存、SHA-256 校验、显式安装确认、安装包回退和本地崩溃报告预览 |
 | **AI Agent** | 模型发现与故障转移、流式任务、检查点分支、结构化 Patch、导演模式、制作记忆和全分支模拟 |
 
 <details>
@@ -113,6 +114,29 @@ flowchart LR
 - 导演模式可以编排场景、角色、镜头、音频与转场，结果统一进入逐项确认、冲突检测、原子应用和语义撤销流程。
 - 全分支模拟由共享 `engine-core` 在 Web Worker 中执行，提供进度、取消、缓存、覆盖率、死路与循环诊断。
 
+## v0.4 Beta 稳定化
+
+编辑器维护中心将软件更新和崩溃恢复放在同一套本地桌面流程中，但保持两个明确边界：安装更新必须由用户确认，崩溃报告必须先在本机预览并再次确认才会上传。
+
+```mermaid
+flowchart LR
+    Release["GitHub Release + latest.json"] --> Check["24 小时更新检查"]
+    Check --> Download["下载到本机"]
+    Download --> Verify["大小与 SHA-256 校验"]
+    Verify --> Confirm["用户确认安装或回退"]
+    Crash["Python / React / Promise 异常"] --> Redact["写盘前脱敏"]
+    Redact --> Preview["本地报告预览"]
+    Preview --> Consent["用户确认上传"]
+    Consent --> Collector["FastAPI 自建收集服务"]
+```
+
+- `latest.json` 描述版本、通道、安装包地址、大小、SHA-256 和发行说明。
+- 已校验安装包最多保留两个版本；安装或回退前会再次校验，不进行静默升级。
+- Python 主线程、后台线程、React Error Boundary 和未处理 Promise 会进入同一份本地报告队列。
+- API Key、Authorization、用户目录、项目正文、素材内容和 Agent 原始提示会在写入磁盘前移除。
+- 自建收集端位于 `services/crash-collector/`，使用 FastAPI、PostgreSQL 与 S3 兼容对象存储，限制单份报告 1 MB、每 IP 每小时 5 次。
+- `v*` tag 会触发测试、Nuitka、Inno Setup、Portable ZIP、校验清单和 GitHub Release 自动发布；包含连字符的版本会标记为 Pre-release。
+
 | 目录 | 职责 |
 | --- | --- |
 | `backend/` | Python 桌面宿主、项目存储、桌面 API、导入与构建能力 |
@@ -166,6 +190,10 @@ powershell -ExecutionPolicy Bypass -File scripts/build-editor.ps1
 
 编辑器使用 Nuitka 编译为 Windows 本机 standalone 程序，产物位于 `dist/HikariStudio/HikariStudio.exe`，运行时不需要用户安装 Python、Node.js 或 pnpm。Windows 游戏构建所需的 WebView2 启动器也会预编译进编辑器目录。
 
+Nuitka 2.x 的 Windows DLL 扫描器要求 **Python 基础安装目录使用纯 ASCII 路径**。当仓库或 Python 位于含中文字符的目录时，请在 `C:\HikariBuild` 等路径创建 Python 3.12/3.13 构建环境，并通过 `-Python C:\HikariBuild\venv\Scripts\python.exe` 指定解释器。脚本会在耗时构建开始前检查此条件；Nuitka 暂存与缓存目录也可分别通过 `HIKARI_NUITKA_STAGING` 和 `HIKARI_NUITKA_CACHE` 指向纯 ASCII 路径。
+
+旧版编辑器仍在运行时，可以使用 `-OutputDirectory dist/HikariStudio-next` 生成侧边构建；随后将同一目录传给 `build-installer.ps1 -SkipEditor -EditorDirectory dist/HikariStudio-next`，无需覆盖被占用的运行目录。
+
 ### 构建 Windows 安装程序
 
 安装 [Inno Setup 6 或更高版本](https://jrsoftware.org/isinfo.php) 后运行：
@@ -175,6 +203,17 @@ powershell -ExecutionPolicy Bypass -File scripts/build-installer.ps1
 ```
 
 安装程序输出到 `dist/installer/`，采用当前用户安装，不要求管理员权限。它会检查并按需安装 Microsoft Edge WebView2 Runtime，创建开始菜单快捷方式、标准卸载入口，并将 `.hikari` 项目文件关联到 Hikari Studio。CI 也会生成可下载的安装程序 Artifact。
+
+### 部署崩溃报告服务
+
+```powershell
+cd services/crash-collector
+Copy-Item .env.example .env
+docker compose up --build -d
+Invoke-RestMethod http://127.0.0.1:8080/health
+```
+
+部署前必须替换 `.env` 中的数据库、MinIO、管理令牌和 IP 哈希盐，并在反向代理上终止 TLS。编辑器通过 `HIKARI_CRASH_REPORT_URL=https://your-host/v1/crash-reports` 指向服务；未配置时报告只保留在本机。
 
 ### 前端开发模式
 
@@ -216,15 +255,15 @@ ui/theme.json
 舞台与演出时间轴         █████████░  正式编辑能力可用
 生产级资源管线           ███████░░░  开发中
 全局 AI 制作 Agent       ████████░░  智能制作闭环可用
-Windows / Web 发布       ████████░░  已通过安装版主流程验收
+Windows / Web 发布       █████████░  更新与崩溃闭环已接入
 ```
 
 接下来的重点：
 
-1. 完成安装版“编辑剧本、预览调试、保存恢复、Web/Windows 构建”的全链路回归。
-2. 补齐剩余 Block 的运行时边界行为、诊断和 SaveGame 迁移测试。
-3. 优化大型项目的时间轴、资源索引、全分支模拟和 Agent 上下文性能。
-4. 加入代码签名、自动升级、崩溃报告脱敏与 Beta 发布流程。
+1. 用完整示例项目持续扩展安装版内容级回归，覆盖长剧情、复杂分支和多角色演出。
+2. 完成更新下载中断、安装回退、崩溃服务故障与用户授权上传的真实环境验收。
+3. 继续降低大型项目的 WebView2 传输、React 首次渲染和时间轴冷定位开销。
+4. 收集 Beta 反馈、处理高 DPI 与 Windows 10/11 兼容问题，并为后续代码签名接入 PFX。
 
 完整阶段规划见 [`docs/phase-2-roadmap.md`](docs/phase-2-roadmap.md)。
 
@@ -240,7 +279,7 @@ pnpm run build
 pnpm exec playwright test
 ```
 
-最近一次 Windows 验证结果：Python `136` 项、Vitest `54` 项、Playwright `9` 项全部通过；TypeScript 严格检查、前端生产构建、Nuitka standalone 和 Inno Setup 安装程序构建通过。
+最近一次 Windows 验证结果：Python `174` 项、崩溃收集服务 `4` 项、Vitest `118` 项、Playwright `33` 项全部通过；TypeScript 严格检查、编辑器与游戏运行时生产构建、Nuitka standalone 和 Inno Setup `v0.4.0-beta.1` 安装包构建均通过。
 
 安装版还通过了以下真实桌面流程：
 
@@ -248,8 +287,10 @@ pnpm exec playwright test
 - 关闭并重启编辑器后，从最近项目继续打开。
 - 在编辑器运行时双击 `.hikari`，由现有单实例接管并切换项目。
 - 自动备份 v2 单文件项目，再迁移为 v3 目录项目。
+- `v0.4.0-beta.1` standalone 通过项目路径冷启动并直接进入编辑器，运行设置与应用维护保持独立入口。
+- 维护中心在真实 WebView2 窗口中完成更新通道、安装包回退与本地崩溃报告空状态检查。
 
-每次推送和 Pull Request 都会在 Windows runner 上执行 Python 测试、TypeScript 检查、两套前端构建和 .NET 启动器发布验证。
+每次推送和 Pull Request 都会在 Windows runner 上执行 Python 测试、TypeScript 检查、Playwright、两套前端构建、.NET 启动器、Nuitka 与 Inno Setup 验证，并在 Linux runner 上验证崩溃报告服务。
 
 ## 安全约定
 

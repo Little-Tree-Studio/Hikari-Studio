@@ -3,6 +3,11 @@
 @keyframes ds-toast-in { from { opacity: 0; transform: translateY(18px) scale(.97); } }
 @keyframes ds-panel-in { from { opacity: 0; transform: translateX(18px); } }
 @keyframes ds-item-in { from { opacity: 0; transform: translateY(7px); } }
+@keyframes ds-block-insert-highlight {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent); }
+  32% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 24%, transparent), var(--shadow-sm); }
+  100% { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 0%, transparent); }
+}
 
 html[data-motion="full"] .top-dropdown,
 html[data-motion="full"] .context-menu { animation: ds-popover-in var(--motion-base) var(--motion-ease) both; transform-origin: top center; }
@@ -12,6 +17,8 @@ html[data-motion="full"] .notification-panel,
 html[data-motion="full"] .agent-sidebar { animation: ds-panel-in var(--motion-panel) var(--motion-ease) both; }
 html[data-motion="full"] .story-block,
 html[data-motion="full"] .asset-card { animation: ds-item-in var(--motion-base) var(--motion-ease) both; }
+html[data-motion="full"] .virtual-block-row.block-just-inserted .block-card { animation: ds-block-insert-highlight 900ms var(--motion-ease); }
+html[data-motion="reduced"] .virtual-block-row.block-just-inserted .block-card { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 html[data-motion="reduced"] *,
 html[data-motion="reduced"] *::before,

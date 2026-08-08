@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from backend.project_store import default_project
+from backend.exporters import build_web_game
 from backend.windows_builder import WindowsBuildPrerequisiteError, build_windows_game, find_dotnet_sdk
 
 
@@ -21,6 +22,12 @@ class WindowsBuilderTests(unittest.TestCase):
             (builtin / "mountain.jpg").write_bytes(b"mountain")
             (runtime / "player.js").write_text("engine-core runtime", encoding="utf-8")
             (runtime / "player.css").write_text("runtime css", encoding="utf-8")
+            (runtime / "runtime-contract.json").write_text(json.dumps({
+                "schemaVersion": 1,
+                "matrixVersion": "2026.08.02.1",
+                "engineVersion": 3,
+                "blockTypes": ["scene", "sound", "characterShow", "characterHide", "camera", "narration", "dialogue", "branch", "setVariable", "condition", "jump", "call", "return"],
+            }), encoding="utf-8")
             (launcher_dist / "Hikari.GameLauncher.exe").write_bytes(b"launcher")
             (launcher_dist / "Microsoft.Web.WebView2.Core.dll").write_bytes(b"webview")
             project = default_project("测试游戏")
@@ -40,10 +47,19 @@ class WindowsBuilderTests(unittest.TestCase):
             self.assertEqual(executable.name, "测试游戏.exe")
             self.assertTrue(executable.is_file())
             self.assertTrue((root / "output" / "game" / "player.js").is_file())
+            self.assertTrue((root / "output" / "game" / "runtime-contract.json").is_file())
             self.assertTrue((root / "output" / "Microsoft.Web.WebView2.Core.dll").is_file())
             config = json.loads((root / "output" / "launcher.json").read_text(encoding="utf-8"))
             self.assertEqual(config["projectId"], project["meta"]["id"])
             self.assertEqual(config["width"], 1280)
+
+            build_web_game(project, root / "web-output", root / "project.hikari.json", builtin, custom, runtime)
+            for name in ("player.js", "player.css", "project.js", "runtime-contract.json"):
+                self.assertEqual(
+                    (root / "output" / "game" / name).read_bytes(),
+                    (root / "web-output" / name).read_bytes(),
+                    f"Windows and Web runtime artifact diverged: {name}",
+                )
 
     def test_missing_sdk_returns_actionable_error(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

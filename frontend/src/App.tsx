@@ -1,17 +1,17 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { Profiler, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
-  AlignLeft, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, AudioLines, Bell, BookOpen, Box, Braces, BugPlay,
+  AlignLeft, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, AudioLines, Bell, BookOpen, Braces, BugPlay,
   CheckCircle2, ChevronDown, ChevronsUpDown, CirclePlay, Clapperboard, Code2, Copy, CornerDownRight,
-  ExternalLink, FileCode2, FilePlus2, FileText, FileUp, Flag, FolderOpen, FolderPlus,
+  FilePlus2, FileText, FileUp, Flag, FolderOpen, FolderPlus,
   GitBranch, GitFork, GripVertical, HardDrive, History, Image, LocateFixed, Maximize2,
   LogOut, Menu, MessageSquareText, Minus, Music2, NotebookPen, PackageCheck, Palette, Plus,
-  Pin, Redo2, Rocket, Save, Search, Settings2, Square,
-  Sparkles, Trash2, Undo2, UserPlus, UserRound, Users, X, PanelBottom, PanelRight, PictureInPicture2,
+  Pin, Redo2, Rocket, Save, Search, Settings2, ShieldCheck, Square,
+  Sparkles, Trash2, Undo2, UserPlus, UserRound, Users, X, PanelBottom, PanelRight, PictureInPicture2, LoaderCircle,
 } from 'lucide-react';
 import {
-  buildWeb, buildWindows, callWindow, createProject, exportRenpy, importAssets, loadProject,
-  applyAiPatch, loadCommandHistory, loadCommandHistoryStats, loadRecoverySnapshot, openProject, openProjectPath, openRecentProject, previewScriptImport, replaceAssetFile, saveCommandHistory, saveProject, saveProjectAs,
+  buildWeb, buildWindows, callWindow, createProject, exportRenpy, getAppInfo, getRecoverySnapshotStatus, importAssets, loadProjectWithPerformance, preflightBuild, reportProjectReloadPerformance,
+  applyAiPatch, loadCommandHistory, loadCommandHistoryStats, loadRecoverySnapshot, openProject, openProjectPath, openRecentProject, previewClipboardScript, previewScriptImport, readClipboardText, replaceAssetFile, saveCommandHistory, saveProject, saveProjectAs, writeClipboardText,
 } from './api';
 import { Preview } from './components/Preview';
 import { AiAgentPanel } from './components/AiAgentPanel';
@@ -21,7 +21,7 @@ import { GameUiThemeDialog } from './components/GameUiThemeDialog';
 import { EditorAppearanceDialog } from './components/EditorAppearanceDialog';
 import { ChapterSchedulingDialog } from './components/ChapterSchedulingDialog';
 import { SearchPalette, type SearchLocation } from './components/SearchPalette';
-import { ScriptImportDialog } from './components/ScriptImportDialog';
+import { ScriptImportDialog, loadScriptImportRules } from './components/ScriptImportDialog';
 import { NarrativeMap } from './components/NarrativeMap';
 import { CharacterManager } from './components/CharacterManager';
 import { SceneManager } from './components/SceneManager';
@@ -30,7 +30,12 @@ import { AssetManager } from './components/AssetManager';
 import { EditorAssetImportDialog, type EditorImportAction } from './components/EditorAssetImportDialog';
 import { StageTimelineWorkspace } from './components/StageTimelineWorkspace';
 import { ProjectLaunchScreen } from './components/ProjectLaunchScreen';
+import { DesktopMaintenanceDialog } from './components/DesktopMaintenanceDialog';
+import { BuildPublishDialog } from './components/BuildPublishDialog';
+import { BuildProgressDialog } from './components/BuildProgressDialog';
+import { DialogueStoryCard } from './components/story/DialogueStoryCard';
 import { analyzeAssetReferences } from './core/assetReferences';
+import { applyAssetImport, describeAssetImport } from './core/assetImport';
 import { audioCategoryOf, matchingVoice } from './core/audio';
 import { log } from './core/logger';
 import { buildAgentPatchSemanticRecord, restoreAgentPatchCategory, type AgentPatchSemanticRecord } from './core/agentPatchHistory';
@@ -39,10 +44,13 @@ import { readSmallValue, removeSmallValue, writeSmallValue } from './core/storag
 import { projectScenes, sceneBlockSnapshot } from './core/scenes';
 import { useEditorAppearance } from './core/editorAppearance';
 import { remapTimeline } from './core/timeline';
+import { buildKindLabel, completeBuildProgress, createBuildProgressTask, failBuildProgress, updateBuildProgress, type BuildProgressTask } from './core/buildProgress';
 import { createBlock } from './engine-core/blocks';
 import { diagnosticSummary } from './engine-core/diagnostics';
 import { useCommandHistory, type CommandRestoreStrategies, type CommandSnapshotEntry, type PersistedCommandHistory } from './hooks/useCommandHistory';
-import type { AgentOperation, AppNotification, Asset, AudioCategory, BlockType, CommandHistoryStorageStats, ConditionOperator, InspectorDock, Project, ProjectCreationOptions, RecoverySnapshot, ScriptImportPreview, StoryBlock, StoryBlockPatch } from './types';
+import { useFixedVirtualList, useMeasuredVirtualList } from './hooks/useVirtualList';
+import { beginComponentRenderProfile, cancelComponentRenderProfile, finishComponentRenderProfile, recordComponentRender } from './performance/renderProfiler';
+import type { AgentOperation, AppNotification, Asset, AudioCategory, BlockType, BuildPreflightReport, BuildTarget, CommandHistoryStorageStats, ConditionOperator, InspectorDock, Project, ProjectCreationOptions, ProjectLoadPerformance, ProjectReloadFrontendPerformance, ProjectReloadPerformance, RecoverySnapshot, RecoverySnapshotStatus, ScriptImportPreview, ScriptImportRules, StoryBlock, StoryBlockPatch } from './types';
 
 const SaveAs = Copy;
 
@@ -68,6 +76,10 @@ type AppDialogRequest = {
   danger?: boolean;
   resolve: (value: string | boolean | null) => void;
 };
+
+type ProjectRestorePerformance = Pick<ProjectReloadFrontendPerformance, 'commandHistoryLoadMs' | 'recoverySnapshotLoadMs' | 'historyStatsLoadMs' | 'historyRestoreMs' | 'stateDispatchMs'> & { stateDispatchStartedAt: number };
+type PendingProjectReload = { projectId: string; load: ProjectLoadPerformance; restore?: ProjectRestorePerformance; finalizing?: boolean };
+type PendingBlockReveal = { fragmentId: string; blockId: string };
 
 const makeId = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 const clone = <T,>(value: T): T => structuredClone(value);
@@ -101,8 +113,8 @@ const fallbackProject: Project = {
       { id: 'b1', type: 'scene', title: '晨雾湖畔', assetId: 'lake', transition: 'dissolve', duration: 1.2 },
       { id: 'b2', type: 'sound', title: 'summer_memory.mp3', volume: .68, loop: true },
       { id: 'b3', type: 'narration', text: '薄雾沿着湖面缓慢散开，夏日的第一束阳光落在旧码头上。' },
-      { id: 'b4', type: 'dialogue', speaker: '林澄', text: '你果然还是来了。', expression: '浅笑', voice: 'lc_001.ogg' },
-      { id: 'b5', type: 'dialogue', speaker: '苏芮', text: '因为有人在信里说，错过今天就再也见不到这片星海了。', expression: '平静', voice: 'sr_014.ogg' },
+      { id: 'b4', type: 'dialogue', speaker: '林澄', text: '你果然还是来了。', expression: '浅笑' },
+      { id: 'b5', type: 'dialogue', speaker: '苏芮', text: '因为有人在信里说，错过今天就再也见不到这片星海了。', expression: '平静' },
       { id: 'b6', type: 'branch', title: '如何回应？', options: [{ text: '相信她', target: 'opening' }, { text: '转移话题', target: 'old-school' }] },
     ],
     'old-school': [{ id: 'school1', type: 'narration', text: '尘埃在走廊的光束中缓缓飘落。' }],
@@ -165,8 +177,25 @@ interface SidebarProps {
 function Sidebar({ project, activate, addChapter, addFragment, removeFragment, openSettings, toggleChapterDisabled, collapseSidebar, structureAction }: SidebarProps) {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [chapterMenu, setChapterMenu] = useState<{ chapterId: string; fragmentId?: string; x: number; y: number } | null>(null);
+  const treeScrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => { if (!chapterMenu) return; const close = () => setChapterMenu(null); window.addEventListener('pointerdown', close); return () => window.removeEventListener('pointerdown', close); }, [chapterMenu]);
-  const wordCount = Object.values(project.scripts).flat().reduce((total, block) => total + (block.text?.length ?? 0), 0);
+  const projectScale = useMemo(() => Object.values(project.scripts).reduce((scale, blocks) => {
+    scale.blocks += blocks.length;
+    for (const block of blocks) scale.words += block.text?.length ?? 0;
+    return scale;
+  }, { words: 0, blocks: 0 }), [project.scripts]);
+  const rows = useMemo(() => project.chapters.flatMap((chapter, chapterIndex) => {
+    const chapterRow = [{ kind: 'chapter' as const, key: `chapter:${chapter.id}`, chapter, chapterIndex }];
+    if (collapsed.has(chapter.id)) return chapterRow;
+    return [...chapterRow, ...chapter.fragments.map((fragment, fragmentIndex) => ({ kind: 'fragment' as const, key: `fragment:${fragment.id}`, chapter, chapterIndex, fragment, fragmentIndex }))];
+  }), [project.chapters, collapsed]);
+  const activeRowIndex = useMemo(() => {
+    const fragmentIndex = rows.findIndex((row) => row.kind === 'fragment' && row.fragment.id === project.activeFragmentId);
+    if (fragmentIndex >= 0) return fragmentIndex;
+    return rows.findIndex((row) => row.kind === 'chapter' && row.chapter.fragments.some((fragment) => fragment.id === project.activeFragmentId));
+  }, [rows, project.activeFragmentId]);
+  const treeVirtual = useFixedVirtualList(treeScrollRef, rows.length, 35, activeRowIndex >= 0 ? [activeRowIndex] : [], 8);
+  useEffect(() => { if (activeRowIndex >= 0) treeVirtual.scrollToIndex(activeRowIndex); }, [activeRowIndex, rows.length]);
   const toggleChapter = (chapterId: string) => setCollapsed((current) => {
     const next = new Set(current);
     if (next.has(chapterId)) next.delete(chapterId); else next.add(chapterId);
@@ -180,57 +209,105 @@ function Sidebar({ project, activate, addChapter, addFragment, removeFragment, o
   return <aside className="project-sidebar">
     <div className="sidebar-title"><button className="icon-button small" title="收起章节列表" onClick={collapseSidebar}><ArrowLeft /></button><span>剧本结构</span><button className="icon-button small" title="新建章节" onClick={addChapter}><Plus /></button></div>
     <div className="tree-section"><div className="tree-heading"><span>章节</span><button className="icon-button tiny" title="运行设置" onClick={openSettings}><Settings2 /></button></div>
-      {project.chapters.map((chapter) => <div className={`chapter ${chapter.disabled ? 'disabled' : ''}`} key={chapter.id}>
-        <div className={`chapter-row ${collapsed.has(chapter.id) ? 'collapsed' : ''} ${chapter.fragments.some((f) => f.id === project.activeFragmentId) ? 'active' : ''}`} role="button" tabIndex={0} aria-expanded={!collapsed.has(chapter.id)} onContextMenu={(event) => { event.preventDefault(); setChapterMenu({ chapterId: chapter.id, x: event.clientX, y: event.clientY }); }} onClick={() => toggleChapter(chapter.id)} onKeyDown={(event) => toggleWithKeyboard(event, chapter.id)}><ChevronDown className="chapter-chevron" />{chapter.entry ? <CirclePlay /> : <BookOpen />}<span>{chapter.name}</span>{chapter.disabled && <em>已禁用</em>}<span className="count">{chapter.fragments.length}</span><button className="tree-action" title="新建片段" onClick={(event) => { event.stopPropagation(); addFragment(chapter.id); }}><Plus /></button></div>
-        <div className={`fragment-list ${collapsed.has(chapter.id) ? 'collapsed' : ''}`}>{chapter.fragments.map((fragment) => <div key={fragment.id} className={`fragment-row ${fragment.id === project.activeFragmentId ? 'active' : ''}`} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); setChapterMenu({ chapterId: chapter.id, fragmentId: fragment.id, x: event.clientX, y: event.clientY }); }} onClick={() => activate(fragment.id)}><CornerDownRight /><span>{fragment.name}</span><em>{project.scripts[fragment.id]?.length ?? 0}</em>{!chapter.entry && <button className="tree-action" title="删除片段" onClick={(event) => { event.stopPropagation(); removeFragment(chapter.id, fragment.id); }}><Trash2 /></button>}</div>)}</div>
-      </div>)}
+      <div className="tree-virtual-scroll" ref={treeScrollRef} onScroll={treeVirtual.onScroll} role="tree" aria-label="章节与片段">
+        <div className="tree-virtual-canvas" style={{ height: treeVirtual.totalSize }}>
+          {treeVirtual.indexes.map((index) => {
+            const row = rows[index];
+            if (row.kind === 'chapter') return <div className="tree-virtual-row" style={{ transform: `translateY(${index * 35}px)` }} key={row.key}><div className={`chapter-row ${row.chapter.disabled ? 'disabled' : ''} ${collapsed.has(row.chapter.id) ? 'collapsed' : ''} ${row.chapter.fragments.some((fragment) => fragment.id === project.activeFragmentId) ? 'active' : ''}`} role="treeitem" tabIndex={0} aria-expanded={!collapsed.has(row.chapter.id)} onContextMenu={(event) => { event.preventDefault(); setChapterMenu({ chapterId: row.chapter.id, x: event.clientX, y: event.clientY }); }} onClick={() => toggleChapter(row.chapter.id)} onKeyDown={(event) => toggleWithKeyboard(event, row.chapter.id)}><ChevronDown className="chapter-chevron" />{row.chapter.entry ? <CirclePlay /> : <BookOpen />}<span>{row.chapter.name}</span>{row.chapter.disabled && <em>已禁用</em>}<span className="count">{row.chapter.fragments.length}</span><button className="tree-action" title="新建片段" onClick={(event) => { event.stopPropagation(); addFragment(row.chapter.id); }}><Plus /></button></div></div>;
+            return <div className="tree-virtual-row" style={{ transform: `translateY(${index * 35}px)` }} key={row.key}><div role="treeitem" aria-level={2} className={`fragment-row virtual ${row.chapter.disabled ? 'disabled' : ''} ${row.fragment.id === project.activeFragmentId ? 'active' : ''}`} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); setChapterMenu({ chapterId: row.chapter.id, fragmentId: row.fragment.id, x: event.clientX, y: event.clientY }); }} onClick={() => activate(row.fragment.id)}><CornerDownRight /><span>{row.fragment.name}</span><em>{project.scripts[row.fragment.id]?.length ?? 0}</em>{!row.chapter.entry && <button className="tree-action" title="删除片段" onClick={(event) => { event.stopPropagation(); removeFragment(row.chapter.id, row.fragment.id); }}><Trash2 /></button>}</div></div>;
+          })}
+        </div>
+      </div>
       {chapterMenu && <div className="context-menu chapter-context-menu" style={{ left: chapterMenu.x, top: chapterMenu.y }} onPointerDown={(event) => event.stopPropagation()}>{!chapterMenu.fragmentId && !project.chapters.find((chapter) => chapter.id === chapterMenu.chapterId)?.entry && <button onClick={() => { toggleChapterDisabled(chapterMenu.chapterId); setChapterMenu(null); }}>{project.chapters.find((chapter) => chapter.id === chapterMenu.chapterId)?.disabled ? '启用此章' : '禁用此章'}</button>}<strong>{chapterMenu.fragmentId ? 'Fragment' : '章节'}</strong><button onClick={() => { structureAction('copy', chapterMenu.chapterId, chapterMenu.fragmentId); setChapterMenu(null); }}>复制</button><button disabled={project.chapters.find((chapter) => chapter.id === chapterMenu.chapterId)?.entry} onClick={() => { structureAction('cut', chapterMenu.chapterId, chapterMenu.fragmentId); setChapterMenu(null); }}>剪切</button><button onClick={() => { structureAction('duplicate', chapterMenu.chapterId, chapterMenu.fragmentId); setChapterMenu(null); }}>创建副本</button><button onClick={() => { structureAction('paste', chapterMenu.chapterId, chapterMenu.fragmentId); setChapterMenu(null); }}>粘贴</button><button onClick={() => setChapterMenu(null)}>取消</button></div>}
     </div>
-    <div className="sidebar-footer"><div><span>项目规模</span><strong>{wordCount} 字</strong></div><div className="progress"><span style={{ width: `${Math.min(100, wordCount / 50)}%` }} /></div><small>{Object.values(project.scripts).flat().length} Blocks · {project.assets.length} 素材</small></div>
+    <div className="sidebar-footer"><div><span>项目规模</span><strong>{projectScale.words} 字</strong></div><div className="progress"><span style={{ width: `${Math.min(100, projectScale.words / 50)}%` }} /></div><small>{projectScale.blocks} Blocks · {project.assets.length} 素材</small></div>
   </aside>;
 }
 
 interface StoryCardProps {
+  index: number;
   project: Project;
   block: StoryBlock;
   selected: boolean;
   asset?: Asset;
-  onSelect: (event: ReactMouseEvent) => void;
+  voiceAsset?: Asset;
+  onSelect: (index: number, event?: Pick<ReactMouseEvent, 'ctrlKey' | 'metaKey' | 'shiftKey'>) => void;
   onContextMenu: (event: ReactMouseEvent) => void;
-  onChange: (patch: StoryBlockPatch) => void;
-  onMove: (direction: -1 | 1) => void;
-  onDuplicate: () => void;
-  onDelete: () => void;
+  onChange: (index: number, patch: StoryBlockPatch) => void;
+  onMove: (index: number, direction: -1 | 1) => void;
+  onDuplicate: (index: number) => void;
+  onDelete: (index: number) => void;
   dragging: boolean;
-  onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>) => void;
-  onPointerMove: (event: ReactPointerEvent<HTMLButtonElement>) => void;
-  onPointerUp: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  listDragging: boolean;
+  onPointerDown: (index: number, event: ReactPointerEvent<HTMLElement>) => void;
+  onPointerMove: (event: ReactPointerEvent<HTMLElement>) => void;
+  onPointerUp: (event: ReactPointerEvent<HTMLElement>) => boolean;
+  onPointerCancel: (event: ReactPointerEvent<HTMLElement>) => void;
 }
 
-function StoryCard({ project, block, selected, asset, onSelect, onContextMenu, onChange, onMove, onDuplicate, onDelete, dragging, onPointerDown, onPointerMove, onPointerUp }: StoryCardProps) {
+const StoryCard = memo(function StoryCard({ index, project, block, selected, asset, voiceAsset, onSelect, onContextMenu, onChange, onMove, onDuplicate, onDelete, dragging, listDragging, onPointerDown, onPointerMove, onPointerUp, onPointerCancel }: StoryCardProps) {
   const meta = blockMeta[block.type];
   const Icon = meta.icon;
-  const dialogueCharacter = block.type === 'dialogue' ? project.characters.find((character) => character.name === block.speaker) : undefined;
-  const dialogueVoice = block.type === 'dialogue' && block.voice ? project.assets.find((item) => item.id === block.voice || item.name === block.voice || item.path.endsWith(block.voice ?? '')) : undefined;
-  return <motion.div layout={!dragging} transition={{ layout: { type: 'spring', stiffness: 520, damping: 42 } }} className={`story-block ${dragging ? 'dragging' : ''}`}>
-    <button className="block-handle" title="拖动 Block" aria-label={`拖动 ${meta.name}`} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}><GripVertical /></button>
-    <div className={`block-card ${block.type} ${selected ? 'selected' : ''}`} onClick={onSelect} onContextMenu={onContextMenu}>
-      <div className="block-meta"><Icon /><span>{meta.name}</span><span className="duration">{block.duration ? `${block.duration}s` : '--'}</span><div className="block-commands"><button title="上移" onClick={(e) => { e.stopPropagation(); onMove(-1); }}><ArrowUp /></button><button title="下移" onClick={(e) => { e.stopPropagation(); onMove(1); }}><ArrowDown /></button><button title="复制" onClick={(e) => { e.stopPropagation(); onDuplicate(); }}><Copy /></button><button title="删除" onClick={(e) => { e.stopPropagation(); onDelete(); }}><Trash2 /></button></div></div>
-      {block.type === 'scene' && <div className="scene-summary"><img className="scene-thumb" src={asset?.uri ?? './assets/lake.jpg'} alt="场景" /><div><strong>{block.title}</strong><small>{block.transition ?? 'dissolve'} · {block.duration ?? 1} 秒</small></div></div>}
+  const characters = project.characters;
+  const hasSceneBackground = block.type === 'scene' && Boolean(asset?.uri);
+  const cardDragOriginRef = useRef<{ x: number; y: number } | null>(null);
+  const suppressCardClickRef = useRef(false);
+  const selectedOnPointerDownRef = useRef(false);
+  const isCardInteractionTarget = (target: HTMLElement) => Boolean(target.closest('button,input,textarea,select,a,[contenteditable="true"],[role="button"],[role="listbox"],[role="option"]'));
+  const beginCardDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    if (event.button !== 0 || !event.isPrimary || isCardInteractionTarget(target)) return;
+    cardDragOriginRef.current = { x: event.clientX, y: event.clientY };
+    suppressCardClickRef.current = false;
+    onPointerDown(index, event);
+  };
+  const moveCardDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const origin = cardDragOriginRef.current;
+    if (origin && Math.hypot(event.clientX - origin.x, event.clientY - origin.y) >= 4) suppressCardClickRef.current = true;
+    onPointerMove(event);
+  };
+  const finishCardDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    cardDragOriginRef.current = null;
+    const dragged = onPointerUp(event);
+    suppressCardClickRef.current = dragged;
+    if (!dragged) {
+      selectedOnPointerDownRef.current = true;
+      onSelect(index, event);
+    }
+  };
+  const cancelCardDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    cardDragOriginRef.current = null;
+    suppressCardClickRef.current = false;
+    selectedOnPointerDownRef.current = false;
+    onPointerCancel(event);
+  };
+  return <div className={`story-block ${dragging ? 'dragging' : ''} ${listDragging ? 'list-dragging' : ''}`}>
+    <button className="block-handle" title="拖动 Block" aria-label={`拖动 ${meta.name}`} onPointerDown={(event) => onPointerDown(index, event)} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel}><GripVertical /></button>
+    <div className={`block-card ${block.type} ${hasSceneBackground ? 'has-scene-background' : ''} ${selected ? 'selected' : ''}`} tabIndex={-1} title="拖动卡片可调整 Block 位置" onPointerDown={beginCardDrag} onPointerMove={moveCardDrag} onPointerUp={finishCardDrag} onPointerCancel={cancelCardDrag} onClick={(event) => { const selectedOnPointerDown = selectedOnPointerDownRef.current; selectedOnPointerDownRef.current = false; if (suppressCardClickRef.current) { suppressCardClickRef.current = false; event.preventDefault(); event.stopPropagation(); return; } if (!selectedOnPointerDown) onSelect(index, event); }} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); if (!selected) onSelect(index); onContextMenu(event); }}>
+      {block.type === 'scene' && asset?.uri && <img className="scene-card-background" src={asset.uri} alt="" draggable={false} />}
+      <div className="block-meta"><Icon /><span>{meta.name}</span><span className="duration">{block.duration ? `${block.duration}s` : '--'}</span>{selected && <div className="block-commands"><button title="上移" onClick={(e) => { e.stopPropagation(); onMove(index, -1); }}><ArrowUp /></button><button title="下移" onClick={(e) => { e.stopPropagation(); onMove(index, 1); }}><ArrowDown /></button><button title="复制" onClick={(e) => { e.stopPropagation(); onDuplicate(index); }}><Copy /></button><button title="删除" onClick={(e) => { e.stopPropagation(); onDelete(index); }}><Trash2 /></button></div>}</div>
+      {block.type === 'scene' && <div className="scene-summary scene-summary-background"><div><strong>{block.title ?? asset?.name ?? '未选择场景'}</strong><small>{block.transition ?? 'dissolve'} · {block.duration ?? 1} 秒</small></div></div>}
       {block.type === 'sound' && <div className="scene-summary"><div className="scene-thumb asset-audio"><AudioLines /></div><div><strong>{block.title}</strong><small>{block.loop ? '循环播放' : '单次播放'} · 音量 {Math.round((block.volume ?? 1) * 100)}%</small></div></div>}
       {block.type === 'characterShow' && <div className="control-summary"><UserRound /><strong>{block.characterId ?? '未选择角色'}</strong><span>{block.expression ?? '默认'} · {block.position ?? 'center'}</span></div>}
       {block.type === 'characterHide' && <div className="control-summary"><UserRound /><strong>{block.characterId ?? '未选择角色'}</strong><span>{block.animation ?? 'fade'}</span></div>}
       {block.type === 'camera' && <div className="control-summary"><LocateFixed /><strong>缩放 {Math.round((block.zoom ?? 1) * 100)}%</strong><span>偏移 {block.cameraX ?? 0}, {block.cameraY ?? 0} · {block.filter ?? 'none'}</span></div>}
-      {block.type === 'narration' && <div className="block-text" contentEditable suppressContentEditableWarning onBlur={(e) => onChange({ text: e.currentTarget.textContent ?? '' })}>{block.text}</div>}
-      {block.type === 'dialogue' && <div className="dialogue-line"><div className="dialogue-identity"><select aria-label="对白角色" value={block.speaker ?? ''} onClick={(event) => event.stopPropagation()} onChange={(event) => { const character = project.characters.find((item) => item.name === event.target.value); onChange({ speaker: event.target.value, expression: character?.expressions[0] ?? '默认', displayNameSchemeId: undefined }); }}>{project.characters.map((character) => <option key={character.id} value={character.name}>{character.name}</option>)}</select><select aria-label="玩家显示名" value={block.displayNameSchemeId ?? ''} onClick={(event) => event.stopPropagation()} onChange={(event) => onChange({ displayNameSchemeId: event.target.value || undefined })}><option value="">主名称</option>{dialogueCharacter?.displayNameSchemes?.map((scheme) => <option key={scheme.id} value={scheme.id}>{scheme.name}</option>)}</select><select aria-label="对白表情" value={block.expression ?? dialogueCharacter?.expressions[0] ?? ''} onClick={(event) => event.stopPropagation()} onChange={(event) => onChange({ expression: event.target.value })}>{dialogueCharacter?.expressions.map((expression) => <option key={expression} value={expression}>{expression}</option>)}</select></div><div><div className="block-text" contentEditable suppressContentEditableWarning onBlur={(e) => onChange({ text: e.currentTarget.textContent ?? '' })}>{block.text}</div><div className="block-tags">{block.voice && <span className="tag">语音 · {dialogueVoice?.name ?? block.voice}</span>}</div></div></div>}
+      {block.type === 'narration' && (selected ? <div className="block-text" contentEditable suppressContentEditableWarning onBlur={(e) => { const text = e.currentTarget.textContent ?? ''; if (text !== (block.text ?? '')) onChange(index, { text }); }}>{block.text}</div> : <div className="block-text">{block.text}</div>)}
+      {block.type === 'dialogue' && <DialogueStoryCard index={index} block={block} characters={characters} selected={selected} voiceAsset={voiceAsset} onChange={onChange} />}
       {block.type === 'branch' && <><div className="block-text"><strong>{block.title}</strong></div><div className="branch-options">{block.options?.map((option) => <div className="branch-option" key={option.text}><span>{option.text}</span><span>{option.target} →</span></div>)}</div></>}
       {block.type === 'setVariable' && <div className="control-summary"><Braces /><strong>{block.variable}</strong><span>= {String(block.value ?? '')}</span></div>}
       {block.type === 'condition' && <div className="control-summary"><GitBranch /><strong>{block.variable}</strong><span>{block.operator ?? 'eq'} {String(block.compareValue ?? '')}</span><em>{block.trueTarget ?? '继续'} / {block.falseTarget ?? '继续'}</em></div>}
       {(block.type === 'jump' || block.type === 'call') && <div className="control-summary"><Flag /><strong>{block.target ?? '未设置目标'}</strong></div>}
       {block.type === 'return' && <div className="control-summary"><CornerDownRight /><strong>返回上一个调用位置</strong></div>}
     </div>
-  </motion.div>;
-}
+  </div>;
+}, (previous, next) => previous.index === next.index
+  && previous.project.characters === next.project.characters
+  && previous.block === next.block
+  && previous.selected === next.selected
+  && previous.asset === next.asset
+  && previous.voiceAsset === next.voiceAsset
+  && previous.dragging === next.dragging
+  && previous.listDragging === next.listDragging);
 
 function Inspector({ project, block, update, dock, setDock, notify }: { project: Project; block?: StoryBlock; update: (patch: StoryBlockPatch) => void; dock: InspectorDock; setDock: (dock: InspectorDock) => void; notify: (message: string, tone?: 'error' | 'success') => void }) {
   const header = <div className="inspector-header"><strong>属性检查器</strong>{block && <span>{blockMeta[block.type].name}</span>}<div className="inspector-dock-controls" role="group" aria-label="属性检查器停靠位置"><button className={dock === 'preview' ? 'active' : ''} title="停靠在预览下方" onClick={() => setDock('preview')}><PanelRight /></button><button className={dock === 'editor' ? 'active' : ''} title="停靠在编辑器下方" onClick={() => setDock('editor')}><PanelBottom /></button><button className={dock === 'floating' ? 'active' : ''} title="浮动面板" onClick={() => setDock('floating')}><PictureInPicture2 /></button></div></div>;
@@ -274,7 +351,7 @@ interface ScriptPageProps {
   setSelected: (index: number) => void;
   view: View;
   setView: (view: View) => void;
-  openBlocks: () => void;
+  openBlocks: (insertIndex?: number) => void;
   openImport: () => void;
   requestConfirm: RequestConfirm;
   openFragmentIds: string[];
@@ -287,13 +364,37 @@ interface ScriptPageProps {
   saveScrollTop: (value: number) => void;
   debugRunning: boolean;
   notify: (message: string, tone?: 'error' | 'success') => void;
+  pendingBlockReveal: PendingBlockReveal | null;
+  completeBlockReveal: (blockId: string) => void;
 }
 
-function ScriptPage({ project, commit, selected, setSelected, view, setView, openBlocks, openImport, requestConfirm, openFragmentIds, activateFragment, closeFragment, reorderFragmentTabs, inspectorDock, setInspectorDock, initialScrollTop, saveScrollTop, debugRunning, notify }: ScriptPageProps) {
+function estimatedCardBlockHeight(block: StoryBlock): number {
+  if (block.type === 'branch') return 132 + (block.options?.length ?? 0) * 31;
+  if (block.type === 'dialogue') return 158;
+  if (block.type === 'scene' || block.type === 'sound') return 145;
+  if (block.type === 'narration') return 132;
+  return 122;
+}
+
+function estimatedPlainBlockHeight(block: StoryBlock): number {
+  return block.type === 'branch' ? 42 + (block.options?.length ?? 0) * 20 : 42;
+}
+
+function MeasuredVirtualRow({ itemKey, index, top, measure, className, children }: { itemKey: string; index: number; top: number; measure: (key: string, element: HTMLElement | null) => () => void; className: string; children: ReactNode }) {
+  const cleanupRef = useRef<() => void>(() => undefined);
+  const setRowRef = useCallback((element: HTMLDivElement | null) => {
+    cleanupRef.current();
+    cleanupRef.current = element ? measure(itemKey, element) : () => undefined;
+  }, [itemKey, measure]);
+  return <div ref={setRowRef} data-virtual-index={index} className={className} style={{ transform: `translateY(${top}px)` }}>{children}</div>;
+}
+
+function ScriptPage({ project, commit, selected, setSelected, view, setView, openBlocks, openImport, requestConfirm, openFragmentIds, activateFragment, closeFragment, reorderFragmentTabs, inspectorDock, setInspectorDock, initialScrollTop, saveScrollTop, debugRunning, notify, pendingBlockReveal, completeBlockReveal }: ScriptPageProps) {
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const [dragOverEdge, setDragOverEdge] = useState<'before' | 'after'>('before');
   const [selectedIndexes, setSelectedIndexes] = useState<Set<number>>(() => new Set([selected]));
-  const [selectionAnchor, setSelectionAnchor] = useState(selected);
+  const selectionAnchorRef = useRef(selected);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [composerText, setComposerText] = useState('');
   const [composerMenuOpen, setComposerMenuOpen] = useState(false);
@@ -301,82 +402,288 @@ function ScriptPage({ project, commit, selected, setSelected, view, setView, ope
   const [dialogueSchemeId, setDialogueSchemeId] = useState<string>('');
   const [droppedAssets, setDroppedAssets] = useState<Asset[]>([]);
   const [assetDropActive, setAssetDropActive] = useState(false);
+  const [highlightedBlockId, setHighlightedBlockId] = useState<string | null>(null);
   const dragSourceRef = useRef<number | null>(null);
-  const dragTargetRef = useRef<number | null>(null);
+  const dragTargetSlotRef = useRef<number | null>(null);
+  const dragOriginRef = useRef<{ x: number; y: number } | null>(null);
+  const dragMovedRef = useRef(false);
+  const dragOverIndexRef = useRef<number | null>(null);
+  const dragOverEdgeRef = useRef<'before' | 'after'>('before');
+  const dragPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const dragFrameRef = useRef<number | null>(null);
+  const dragGhostRef = useRef<HTMLElement | null>(null);
+  const dragSourceCardRef = useRef<HTMLElement | null>(null);
+  const dragGhostOffsetRef = useRef({ x: 0, y: 0 });
   const blocksAreaRef = useRef<HTMLDivElement>(null);
+  const plainAreaRef = useRef<HTMLDivElement>(null);
+  const selectionScrollReadyRef = useRef(false);
+  const selectionScrollFragmentRef = useRef(project.activeFragmentId);
+  const skipSelectionScrollRef = useRef(false);
   const scrollSaveTimer = useRef(0);
   const blocks = project.scripts[project.activeFragmentId] ?? [];
   const selectedBlock = blocks[selected];
   const activeDialogueCharacter = project.characters.find((character) => character.id === dialogueCharacterId);
-  useEffect(() => { blocksAreaRef.current?.querySelector<HTMLElement>(`[data-block-index="${selected}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, [selected, blocks.length]);
-  useEffect(() => { if (blocksAreaRef.current) blocksAreaRef.current.scrollTop = initialScrollTop; }, [project.activeFragmentId]);
-  useEffect(() => { setSelectedIndexes(new Set(blocks.length ? [Math.min(selected, blocks.length - 1)] : [])); setSelectionAnchor(selected); setContextMenu(null); setDialogueCharacterId(null); setDialogueSchemeId(''); }, [project.activeFragmentId]);
-  useEffect(() => { if (blocks.length && selected >= blocks.length) { const index = blocks.length - 1; setSelected(index); setSelectedIndexes(new Set([index])); setSelectionAnchor(index); } else if (!blocks.length && selectedIndexes.size) setSelectedIndexes(new Set()); }, [blocks.length, selected]);
-  useEffect(() => { if (selected >= 0 && selected < blocks.length && !selectedIndexes.has(selected)) { setSelectedIndexes(new Set([selected])); setSelectionAnchor(selected); } }, [selected]);
+  const blockKeys = useMemo(() => blocks.map((block) => block.id), [blocks]);
+  const assetLookups = useMemo(() => {
+    const byId = new Map<string, Asset>();
+    const byReference = new Map<string, Asset>();
+    for (const asset of project.assets) {
+      byId.set(asset.id, asset);
+      byReference.set(asset.id, asset);
+      byReference.set(asset.name, asset);
+      byReference.set(asset.path.split(/[\\/]/).at(-1) ?? asset.path, asset);
+    }
+    return { byId, byReference };
+  }, [project.assets]);
+  const estimateCardSize = useCallback((index: number) => estimatedCardBlockHeight(blocks[index]), [blocks]);
+  const estimatePlainSize = useCallback((index: number) => estimatedPlainBlockHeight(blocks[index]), [blocks]);
+  const pinnedVirtualIndexes = [selected, draggedIndex ?? -1, dragOverIndex ?? -1];
+  const cardVirtual = useMeasuredVirtualList(blocksAreaRef, blockKeys, estimateCardSize, pinnedVirtualIndexes, 1, initialScrollTop);
+  const plainVirtual = useMeasuredVirtualList(plainAreaRef, blockKeys, estimatePlainSize, [selected], 2, initialScrollTop);
+  useEffect(() => {
+    if (!selectionScrollReadyRef.current || selectionScrollFragmentRef.current !== project.activeFragmentId) {
+      selectionScrollReadyRef.current = true;
+      selectionScrollFragmentRef.current = project.activeFragmentId;
+      return;
+    }
+    if (skipSelectionScrollRef.current) {
+      skipSelectionScrollRef.current = false;
+      return;
+    }
+    if (selected < 0 || selected >= blocks.length) return;
+    if (view === 'cards') cardVirtual.scrollToIndex(selected);
+    else if (view === 'plain') plainVirtual.scrollToIndex(selected);
+  }, [selected, blocks.length, view, project.activeFragmentId]);
+  useEffect(() => {
+    if (!pendingBlockReveal || pendingBlockReveal.fragmentId !== project.activeFragmentId || view !== 'cards') return;
+    const index = blocks.findIndex((block) => block.id === pendingBlockReveal.blockId);
+    if (index < 0) return;
+    const blockId = pendingBlockReveal.blockId;
+    setHighlightedBlockId(blockId);
+    cardVirtual.scrollToIndex(index, 'center');
+    let focusFrame = 0;
+    const mountFrame = window.requestAnimationFrame(() => {
+      cardVirtual.scrollToIndex(index, 'center');
+      focusFrame = window.requestAnimationFrame(() => {
+        const row = blocksAreaRef.current?.querySelector<HTMLElement>(`[data-block-index="${index}"]`);
+        const cardField = row?.querySelector<HTMLElement>('.block-card input:not([disabled]):not([readonly]), .block-card textarea:not([disabled]):not([readonly]), .block-card select:not([disabled]), .block-card [contenteditable="true"], .block-card .dialogue-picker-trigger');
+        const inspectorField = document.querySelector<HTMLElement>('.editor-layout .inspector-body input:not([disabled]):not([readonly]), .editor-layout .inspector-body textarea:not([disabled]):not([readonly]), .editor-layout .inspector-body select:not([disabled])');
+        const target = cardField ?? inspectorField ?? row?.querySelector<HTMLElement>('.block-card');
+        target?.focus({ preventScroll: true });
+        if (target instanceof HTMLTextAreaElement) target.select();
+        else if (target instanceof HTMLInputElement && ['text', 'search', 'url', 'email', 'tel', 'password'].includes(target.type)) target.select();
+        else if (target?.isContentEditable) {
+          const selection = window.getSelection();
+          const range = document.createRange();
+          range.selectNodeContents(target);
+          selection?.removeAllRanges();
+          selection?.addRange(range);
+        }
+      });
+    });
+    const highlightTimer = window.setTimeout(() => {
+      setHighlightedBlockId((current) => current === blockId ? null : current);
+      completeBlockReveal(blockId);
+    }, 1100);
+    return () => {
+      window.cancelAnimationFrame(mountFrame);
+      window.cancelAnimationFrame(focusFrame);
+      window.clearTimeout(highlightTimer);
+    };
+  }, [pendingBlockReveal, project.activeFragmentId, view, cardVirtual.scrollToIndex, completeBlockReveal]);
+  useEffect(() => {
+    cardVirtual.setScrollOffset(initialScrollTop);
+    plainVirtual.setScrollOffset(initialScrollTop);
+  }, [project.activeFragmentId]);
+  useEffect(() => {
+    const nextIndex = blocks.length ? Math.min(selected, blocks.length - 1) : -1;
+    setSelectedIndexes((current) => {
+      if (nextIndex < 0) return current.size ? new Set() : current;
+      return current.size === 1 && current.has(nextIndex) ? current : new Set([nextIndex]);
+    });
+    selectionAnchorRef.current = selected;
+    setContextMenu(null);
+    setDialogueCharacterId(null);
+    setDialogueSchemeId('');
+  }, [project.activeFragmentId]);
+  useEffect(() => { if (blocks.length && selected >= blocks.length) { const index = blocks.length - 1; setSelected(index); setSelectedIndexes(new Set([index])); selectionAnchorRef.current = index; } else if (!blocks.length && selectedIndexes.size) setSelectedIndexes(new Set()); }, [blocks.length, selected]);
+  useEffect(() => { if (selected >= 0 && selected < blocks.length && !selectedIndexes.has(selected)) { setSelectedIndexes(new Set([selected])); selectionAnchorRef.current = selected; } }, [selected]);
   useEffect(() => { const close = () => setContextMenu(null); window.addEventListener('pointerdown', close); return () => window.removeEventListener('pointerdown', close); }, []);
   const updateBlock = (index: number, patch: StoryBlockPatch) => commit((current) => ({ ...current, scripts: { ...current.scripts, [current.activeFragmentId]: current.scripts[current.activeFragmentId].map((item, i) => i === index ? { ...item, ...patch } as StoryBlock : item) } }));
   const selectBlock = (index: number, event?: Pick<ReactMouseEvent, 'ctrlKey' | 'metaKey' | 'shiftKey'>) => {
+    const rangeAnchor = selectionAnchorRef.current;
+    if (!event?.shiftKey) selectionAnchorRef.current = index;
+    if (event) skipSelectionScrollRef.current = true;
     setSelected(index);
     setSelectedIndexes((current) => {
       if (event?.shiftKey) {
         const next = new Set<number>();
-        for (let value = Math.min(selectionAnchor, index); value <= Math.max(selectionAnchor, index); value += 1) next.add(value);
+        for (let value = Math.min(rangeAnchor, index); value <= Math.max(rangeAnchor, index); value += 1) next.add(value);
         return next;
       }
       if (event?.ctrlKey || event?.metaKey) {
         const next = new Set(current);
         if (next.has(index) && next.size > 1) next.delete(index); else next.add(index);
-        setSelectionAnchor(index);
         return next;
       }
-      setSelectionAnchor(index);
       return new Set([index]);
     });
   };
+  const openBlockContextMenu = useCallback((event: ReactMouseEvent) => {
+    setContextMenu({ x: event.clientX, y: event.clientY });
+  }, []);
   const moveBlock = (index: number, direction: -1 | 1) => {
     const target = index + direction; if (target < 0 || target >= blocks.length) return;
     commit((current) => { const next = [...current.scripts[current.activeFragmentId]]; [next[index], next[target]] = [next[target], next[index]]; return { ...current, scripts: { ...current.scripts, [current.activeFragmentId]: next } }; }); setSelected(target);
   };
-  const reorderBlock = (from: number, to: number) => {
-    if (from === to || from < 0 || to < 0 || from >= blocks.length || to >= blocks.length) return;
+  const reorderBlock = (from: number, targetSlot: number) => {
+    if (from < 0 || from >= blocks.length || targetSlot < 0 || targetSlot > blocks.length) return;
+    const insertion = targetSlot > from ? targetSlot - 1 : targetSlot;
+    if (from === insertion) {
+      setSelected(from);
+      setSelectedIndexes(new Set([from]));
+      selectionAnchorRef.current = from;
+      return;
+    }
     commit((current) => {
       const next = [...current.scripts[current.activeFragmentId]];
       const [moved] = next.splice(from, 1);
-      next.splice(to, 0, moved);
+      next.splice(insertion, 0, moved);
       return { ...current, scripts: { ...current.scripts, [current.activeFragmentId]: next } };
     }, '拖动 Block 排序');
-    setSelected(to);
-    setSelectedIndexes(new Set([to]));
-    setSelectionAnchor(to);
+    setSelected(insertion);
+    setSelectedIndexes(new Set([insertion]));
+    selectionAnchorRef.current = insertion;
   };
-  const beginPointerDrag = (index: number, event: ReactPointerEvent<HTMLButtonElement>) => {
+  const beginPointerDrag = (index: number, event: ReactPointerEvent<HTMLElement>) => {
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
+    const sourceCard = event.currentTarget.closest('.story-block')?.querySelector<HTMLElement>('.block-card');
+    dragSourceCardRef.current = sourceCard ?? null;
+    if (sourceCard) {
+      const bounds = sourceCard.getBoundingClientRect();
+      dragGhostOffsetRef.current = { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
+    }
     dragSourceRef.current = index;
-    dragTargetRef.current = index;
+    dragTargetSlotRef.current = index;
+    dragOriginRef.current = { x: event.clientX, y: event.clientY };
+    dragPointerRef.current = { x: event.clientX, y: event.clientY };
+    dragMovedRef.current = false;
+    dragOverIndexRef.current = index;
+    dragOverEdgeRef.current = 'before';
+  };
+
+  const activatePointerDrag = () => {
+    const index = dragSourceRef.current;
+    const sourceCard = dragSourceCardRef.current;
+    if (index === null || !sourceCard || dragGhostRef.current) return;
+    const bounds = sourceCard.getBoundingClientRect();
+    const ghost = sourceCard.cloneNode(true) as HTMLElement;
+    ghost.classList.remove('selected');
+    ghost.classList.add('block-drag-ghost');
+    ghost.setAttribute('aria-hidden', 'true');
+    ghost.removeAttribute('title');
+    ghost.querySelectorAll('[id]').forEach((element) => element.removeAttribute('id'));
+    ghost.querySelectorAll('[contenteditable]').forEach((element) => element.removeAttribute('contenteditable'));
+    ghost.style.width = `${bounds.width}px`;
+    ghost.style.height = `${bounds.height}px`;
+    ghost.style.transform = `translate3d(${Math.round(bounds.left)}px,${Math.round(bounds.top)}px,0)`;
+    document.body.appendChild(ghost);
+    dragGhostRef.current = ghost;
+    document.documentElement.classList.add('block-drag-active');
     setDraggedIndex(index);
     setDragOverIndex(index);
-    selectBlock(index);
+    setDragOverEdge('before');
   };
-  const updatePointerDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+
+  const clearDragPresentation = () => {
+    if (dragFrameRef.current !== null) cancelAnimationFrame(dragFrameRef.current);
+    dragFrameRef.current = null;
+    dragPointerRef.current = null;
+    dragGhostRef.current?.remove();
+    dragGhostRef.current = null;
+    document.documentElement.classList.remove('block-drag-active');
+  };
+
+  const flushPointerDrag = () => {
+    dragFrameRef.current = null;
+    const pointer = dragPointerRef.current;
+    const area = blocksAreaRef.current;
+    if (!pointer || !area || dragSourceRef.current === null) return;
+    const ghost = dragGhostRef.current;
+    if (ghost) {
+      const offset = dragGhostOffsetRef.current;
+      ghost.style.transform = `translate3d(${Math.round(pointer.x - offset.x)}px,${Math.round(pointer.y - offset.y)}px,0)`;
+    }
+    const bounds = area.getBoundingClientRect();
+    const autoScrollEdge = Math.min(72, bounds.height * 0.16);
+    let scrollDelta = 0;
+    if (pointer.y < bounds.top + autoScrollEdge) scrollDelta = -Math.max(8, (bounds.top + autoScrollEdge - pointer.y) * 0.32);
+    else if (pointer.y > bounds.bottom - autoScrollEdge) scrollDelta = Math.max(8, (pointer.y - (bounds.bottom - autoScrollEdge)) * 0.32);
+    if (scrollDelta) area.scrollTop = Math.max(0, area.scrollTop + scrollDelta);
+    const index = cardVirtual.indexAtClientY(pointer.y, 18);
+    if (index >= 0 && index < blocks.length) {
+      const rowTop = bounds.top + 18 + cardVirtual.layout.offsets[index] - area.scrollTop;
+      const dropEdge = pointer.y >= rowTop + cardVirtual.layout.sizes[index] / 2 ? 'after' : 'before';
+      dragTargetSlotRef.current = index + (dropEdge === 'after' ? 1 : 0);
+      if (dragOverIndexRef.current !== index) {
+        dragOverIndexRef.current = index;
+        setDragOverIndex(index);
+      }
+      if (dragOverEdgeRef.current !== dropEdge) {
+        dragOverEdgeRef.current = dropEdge;
+        setDragOverEdge(dropEdge);
+      }
+    }
+    if (scrollDelta && dragSourceRef.current !== null) dragFrameRef.current = requestAnimationFrame(flushPointerDrag);
+  };
+
+  const updatePointerDrag = (event: ReactPointerEvent<HTMLElement>) => {
     if (dragSourceRef.current === null) return;
-    const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('[data-block-index]');
-    if (!target) return;
-    const index = Number(target.dataset.blockIndex);
-    if (!Number.isInteger(index)) return;
-    dragTargetRef.current = index;
-    setDragOverIndex(index);
+    event.preventDefault();
+    const origin = dragOriginRef.current;
+    if (!dragMovedRef.current && origin && Math.hypot(event.clientX - origin.x, event.clientY - origin.y) >= 8) {
+      dragMovedRef.current = true;
+      activatePointerDrag();
+    }
+    if (!dragMovedRef.current) return;
+    dragPointerRef.current = { x: event.clientX, y: event.clientY };
+    if (dragFrameRef.current === null) dragFrameRef.current = requestAnimationFrame(flushPointerDrag);
   };
-  const finishPointerDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    const from = dragSourceRef.current;
-    const to = dragTargetRef.current;
+
+  const resetPointerDrag = () => {
     dragSourceRef.current = null;
-    dragTargetRef.current = null;
+    dragSourceCardRef.current = null;
+    dragTargetSlotRef.current = null;
+    dragOriginRef.current = null;
+    dragMovedRef.current = false;
+    dragOverIndexRef.current = null;
     setDraggedIndex(null);
     setDragOverIndex(null);
-    if (from !== null && to !== null) reorderBlock(from, to);
+    clearDragPresentation();
   };
+
+  const finishPointerDrag = (event: ReactPointerEvent<HTMLElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    if (dragFrameRef.current !== null) {
+      cancelAnimationFrame(dragFrameRef.current);
+      dragFrameRef.current = null;
+      flushPointerDrag();
+    }
+    const from = dragSourceRef.current;
+    const targetSlot = dragTargetSlotRef.current;
+    const moved = dragMovedRef.current;
+    resetPointerDrag();
+    if (moved && from !== null && targetSlot !== null) reorderBlock(from, targetSlot);
+    return moved;
+  };
+
+  const cancelPointerDrag = (event: ReactPointerEvent<HTMLElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    resetPointerDrag();
+  };
+
+  useEffect(() => () => clearDragPresentation(), [project.activeFragmentId]);
   const orderedSelection = () => [...selectedIndexes].filter((index) => index >= 0 && index < blocks.length).sort((left, right) => left - right);
   const deleteSelected = async () => {
     const indexes = orderedSelection();
@@ -404,21 +711,19 @@ function ScriptPage({ project, commit, selected, setSelected, view, setView, ope
     const indexes = orderedSelection(); if (!indexes.length) return;
     const payload = `HIKARI_BLOCKS_V1\n${JSON.stringify(indexes.map((index) => blocks[index]))}`;
     writeSmallValue('hikari-block-clipboard', payload);
-    try { await navigator.clipboard.writeText(payload); } catch { /* local fallback remains available */ }
+    await writeClipboardText(payload);
     if (cut) await deleteSelected(); else setContextMenu(null);
   };
   const pasteBlocks = async () => {
-    let payload = readSmallValue('hikari-block-clipboard') ?? '';
-    try { payload = await navigator.clipboard.readText() || payload; } catch { /* use local fallback */ }
-    if (!payload.startsWith('HIKARI_BLOCKS_V1\n')) return;
     try {
-      const parsed = JSON.parse(payload.slice('HIKARI_BLOCKS_V1\n'.length)) as StoryBlock[];
-      if (!Array.isArray(parsed) || !parsed.length) return;
-      const copies = parsed.map((block) => ({ ...clone(block), id: makeId('block') } as StoryBlock));
+      const preview = await previewClipboardScript(readSmallValue('hikari-block-clipboard') ?? '', project.characters, loadScriptImportRules());
+      if (!preview.blocks.length) { notify(preview.warnings[0] ?? '剪贴板中没有可粘贴文本', 'error'); return; }
+      const copies = preview.blocks.map((block) => ({ ...clone(block), id: makeId('block') } as StoryBlock));
       const insertion = selectedIndexes.size ? Math.max(...selectedIndexes) + 1 : blocks.length;
-      commit((current) => { const next = [...current.scripts[current.activeFragmentId]]; next.splice(insertion, 0, ...copies); return { ...current, scripts: { ...current.scripts, [current.activeFragmentId]: next } }; }, `粘贴 ${copies.length} 个 Block`);
+      commit((current) => { const next = [...current.scripts[current.activeFragmentId]]; next.splice(insertion, 0, ...copies); return { ...current, scripts: { ...current.scripts, [current.activeFragmentId]: next } }; }, `从${preview.sourceName}粘贴 ${copies.length} 个 Block`);
       setSelectedIndexes(new Set(copies.map((_, offset) => insertion + offset))); setSelected(insertion); setContextMenu(null);
-    } catch { return; }
+      notify(`Python 已解析并粘贴 ${copies.length} 个 ${preview.format} Block`);
+    } catch (error) { notify(String(error), 'error'); }
   };
   useEffect(() => {
     const handleClipboard = (event: KeyboardEvent) => {
@@ -439,7 +744,7 @@ function ScriptPage({ project, commit, selected, setSelected, view, setView, ope
       : { id: makeId('block'), type: 'narration', text };
     const nextIndex = blocks.length;
     commit((current) => ({ ...current, scripts: { ...current.scripts, [current.activeFragmentId]: [...current.scripts[current.activeFragmentId], block] } }), activeDialogueCharacter ? `添加 ${activeDialogueCharacter.name} 对白` : '添加旁白');
-    setComposerText(''); setSelected(nextIndex); setSelectedIndexes(new Set([nextIndex])); setSelectionAnchor(nextIndex);
+    setComposerText(''); setSelected(nextIndex); setSelectedIndexes(new Set([nextIndex])); selectionAnchorRef.current = nextIndex;
   };
   const insertComposerBlock = (type: BlockType) => {
     const block = createBlock(type, project); const nextIndex = blocks.length;
@@ -454,25 +759,16 @@ function ScriptPage({ project, commit, selected, setSelected, view, setView, ope
     catch (error) { notify(String(error), 'error'); }
   };
   const applyDroppedAssets = (action: EditorImportAction) => {
-    const imported = droppedAssets.map((asset) => asset.kind === 'audio' && action.kind === 'assetsOnly' ? { ...asset, audioCategory: action.audioCategory ?? 'bgm', asrStatus: action.audioCategory === 'voice' ? 'pending' as const : asset.asrStatus } : asset);
-    commit((current) => {
-      const next = clone(current);
-      next.assets.push(...imported);
-      const images = imported.filter((asset) => ['image', 'scene', 'character'].includes(asset.kind));
-      if (action.kind === 'scenes') next.scenes = [...(next.scenes ?? []), ...images.map((asset) => ({ id: makeId('scene'), name: asset.name, layers: [{ id: makeId('layer'), name: '背景', assetId: asset.id, opacity: 1, blendMode: 'normal' as const, offsetX: 0, offsetY: 0, scale: 1, distance: 1 }] }))];
-      else if (action.kind === 'characters') next.characters.push(...images.map((asset) => ({ id: makeId('character'), name: asset.name, color: '#397d70', expressions: ['默认'], portraits: { 默认: asset.id }, defaultScale: 1, defaultPosition: 'center' as const })));
-      else if (action.kind === 'expressions') {
-        const character = next.characters.find((item) => item.id === action.characterId);
-        if (character) for (const asset of images) {
-          let name = asset.name || '表情'; let suffix = 1;
-          while (character.expressions.includes(name)) name = `${asset.name}_${suffix++}`;
-          character.expressions.push(name);
-          character.portraits = { ...(character.portraits ?? {}), [name]: asset.id };
-        }
-      }
-      return next;
-    }, action.kind === 'assetsOnly' ? `从剧本编辑器导入 ${imported.length} 个素材` : `导入素材并创建${action.kind === 'scenes' ? '场景' : action.kind === 'characters' ? '角色' : '表情'}`);
-    setDroppedAssets([]); notify(`已导入 ${imported.length} 个素材，未插入剧情 Block`);
+    let message = `已导入 ${droppedAssets.length} 个素材`;
+    try {
+      commit((current) => {
+        const result = applyAssetImport(current, droppedAssets, action, makeId);
+        message = describeAssetImport(result);
+        return result.project;
+      }, `从剧本编辑器导入并绑定 ${droppedAssets.length} 个素材`);
+      setDroppedAssets([]);
+      notify(`${message}，未插入剧情 Block`);
+    } catch (error) { notify(String(error), 'error'); }
   };
   useEffect(() => {
     const area = blocksAreaRef.current;
@@ -485,16 +781,16 @@ function ScriptPage({ project, commit, selected, setSelected, view, setView, ope
     return () => { area.removeEventListener('dragenter', enter); area.removeEventListener('dragover', over); area.removeEventListener('dragleave', leave); area.removeEventListener('drop', drop); };
   }, [view, project.activeFragmentId]);
   useEffect(() => { blocksAreaRef.current?.classList.toggle('asset-drop-active', assetDropActive); }, [assetDropActive]);
-  const activeName = project.chapters.flatMap((chapter) => chapter.fragments).find((fragment) => fragment.id === project.activeFragmentId)?.name ?? '片段';
-  const fragmentNames = new Map(project.chapters.flatMap((chapter) => chapter.fragments.map((fragment) => [fragment.id, fragment.name] as const)));
-  const code = blocks.map((block) => block.type === 'dialogue' ? `${block.speaker} ${JSON.stringify(block.text)}` : block.type === 'narration' ? JSON.stringify(block.text) : block.type === 'scene' ? `scene ${block.title} with ${block.transition}` : block.type === 'sound' ? `play music ${JSON.stringify(block.title)}` : `menu ${JSON.stringify(block.title)}:`).join('\n');
-  const references = Object.entries(project.scripts).flatMap(([fragmentId, script]) => script.flatMap((block, blockIndex) => {
+  const fragmentNames = useMemo(() => new Map(project.chapters.flatMap((chapter) => chapter.fragments.map((fragment) => [fragment.id, fragment.name] as const))), [project.chapters]);
+  const activeName = fragmentNames.get(project.activeFragmentId) ?? '片段';
+  const code = useMemo(() => blocks.map((block) => block.type === 'dialogue' ? `${block.speaker} ${JSON.stringify(block.text)}` : block.type === 'narration' ? JSON.stringify(block.text) : block.type === 'scene' ? `scene ${block.title} with ${block.transition}` : block.type === 'sound' ? `play music ${JSON.stringify(block.title)}` : `menu ${JSON.stringify(block.title)}:`).join('\n'), [blocks]);
+  const references = useMemo(() => Object.entries(project.scripts).flatMap(([fragmentId, script]) => script.flatMap((block, blockIndex) => {
     const matches: { fragmentId: string; blockIndex: number; kind: string; label: string }[] = [];
     if (block.type === 'branch' && block.options?.some((option) => option.target === project.activeFragmentId)) matches.push({ fragmentId, blockIndex, kind: '选项', label: block.title ?? '分支' });
     if (block.type === 'condition' && (block.trueTarget === project.activeFragmentId || block.falseTarget === project.activeFragmentId)) matches.push({ fragmentId, blockIndex, kind: '条件', label: block.variable ?? '条件判断' });
     if ((block.type === 'call' || block.type === 'jump') && block.target === project.activeFragmentId) matches.push({ fragmentId, blockIndex, kind: block.type === 'call' ? '调用' : '跳转', label: blockMeta[block.type].name });
     return matches;
-  }));
+  })), [project.scripts, project.activeFragmentId]);
   const moveStageCharacter = (characterId: string, x: number, y: number) => {
     let sourceIndex = -1;
     for (let index = Math.min(selected, blocks.length - 1); index >= 0; index -= 1) {
@@ -521,15 +817,15 @@ function ScriptPage({ project, commit, selected, setSelected, view, setView, ope
     setSelectedIndexes(new Set([insertion]));
     notify('已创建“显示角色”Block并保存自定义位置');
   };
-  const inspector = <><Inspector project={project} block={selectedBlock} update={(patch) => updateBlock(selected, patch)} dock={inspectorDock} setDock={setInspectorDock} notify={notify} />{droppedAssets.length > 0 && <EditorAssetImportDialog assets={droppedAssets} characters={project.characters} close={() => setDroppedAssets([])} apply={applyDroppedAssets} />}</>;
-  return <div className={`editor-layout inspector-${inspectorDock}`}><section className="editor-pane"><div className="tabs-row">{openFragmentIds.map((fragmentId) => <button className={`doc-tab ${fragmentId === project.activeFragmentId ? 'active' : ''}`} draggable key={fragmentId} onDragStart={(event) => event.dataTransfer.setData('text/hikari-fragment', fragmentId)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const fromId = event.dataTransfer.getData('text/hikari-fragment'); if (fromId) reorderFragmentTabs(fromId, fragmentId); }} onClick={() => activateFragment(fragmentId)}><FileText /><span>{fragmentNames.get(fragmentId) ?? fragmentId}</span><span className="tab-close" role="button" aria-label={`关闭 ${fragmentNames.get(fragmentId) ?? fragmentId}`} onClick={(event) => { event.stopPropagation(); closeFragment(fragmentId); }}><X /></span></button>)}</div><div className="editor-toolbar"><div className="editor-title"><strong>{activeName}</strong><small>{blocks.length} Blocks</small></div><button className="button ghost" onClick={openImport}><FileUp /> 导入剧本</button><div className="view-switch">{([['cards', '卡片'], ['plain', '纯文本'], ['code', "Ren'Py"], ['json', 'JSON']] as [View, string][]).map(([key, name]) => <button key={key} className={`view-button ${view === key ? 'active' : ''}`} onClick={() => setView(key)}>{name}</button>)}</div></div>
+  const inspector = <><Profiler id="inspector" onRender={recordComponentRender}><Inspector project={project} block={selectedBlock} update={(patch) => updateBlock(selected, patch)} dock={inspectorDock} setDock={setInspectorDock} notify={notify} /></Profiler>{droppedAssets.length > 0 && <EditorAssetImportDialog assets={droppedAssets} characters={project.characters} sourceLabel="剧本编辑器" close={() => setDroppedAssets([])} apply={applyDroppedAssets} />}</>;
+  return <div className={`editor-layout inspector-${inspectorDock}`} data-selected-block-index={selected}><section className="editor-pane"><div className="tabs-row">{openFragmentIds.map((fragmentId) => <button className={`doc-tab ${fragmentId === project.activeFragmentId ? 'active' : ''}`} draggable key={fragmentId} onDragStart={(event) => event.dataTransfer.setData('text/hikari-fragment', fragmentId)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const fromId = event.dataTransfer.getData('text/hikari-fragment'); if (fromId) reorderFragmentTabs(fromId, fragmentId); }} onClick={() => activateFragment(fragmentId)}><FileText /><span>{fragmentNames.get(fragmentId) ?? fragmentId}</span><span className="tab-close" role="button" aria-label={`关闭 ${fragmentNames.get(fragmentId) ?? fragmentId}`} onClick={(event) => { event.stopPropagation(); closeFragment(fragmentId); }}><X /></span></button>)}</div><div className="editor-toolbar"><div className="editor-title"><strong>{activeName}</strong><small>{blocks.length} Blocks</small></div><button className="button ghost" onClick={openImport}><FileUp /> 导入剧本</button><div className="view-switch">{([['cards', '卡片'], ['plain', '纯文本'], ['code', "Ren'Py"], ['json', 'JSON']] as [View, string][]).map(([key, name]) => <button key={key} className={`view-button ${view === key ? 'active' : ''}`} onClick={() => setView(key)}>{name}</button>)}</div></div>
     {references.length > 0 && <div className="fragment-references"><strong>此片段被 {references.length} 处引用</strong><div>{references.map((reference) => <button key={`${reference.fragmentId}-${reference.blockIndex}-${reference.kind}`} onClick={() => { activateFragment(reference.fragmentId); setSelected(reference.blockIndex); }}>{reference.kind} · {fragmentNames.get(reference.fragmentId) ?? reference.fragmentId}<span>前往</span></button>)}</div></div>}
-    {view === 'cards' && <div className="blocks-area" ref={blocksAreaRef} tabIndex={0} onScroll={(event) => { window.clearTimeout(scrollSaveTimer.current); const value = event.currentTarget.scrollTop; scrollSaveTimer.current = window.setTimeout(() => saveScrollTop(value), 350); }} onWheel={(event) => { event.preventDefault(); event.stopPropagation(); event.currentTarget.scrollTop += event.deltaY; }}>{blocks.map((block, index) => <div key={block.id} data-block-index={index} className={`block-drop-target ${dragOverIndex === index && draggedIndex !== index ? 'drag-over' : ''}`}><StoryCard project={project} block={block} selected={selectedIndexes.has(index)} asset={project.assets.find((asset) => asset.id === block.assetId)} onSelect={(event) => selectBlock(index, event)} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); if (!selectedIndexes.has(index)) selectBlock(index); setContextMenu({ x: event.clientX, y: event.clientY }); }} onChange={(patch) => updateBlock(index, patch)} onMove={(direction) => moveBlock(index, direction)} onDuplicate={() => duplicateBlock(index)} onDelete={() => void deleteBlock(index)} dragging={draggedIndex === index} onPointerDown={(event) => beginPointerDrag(index, event)} onPointerMove={updatePointerDrag} onPointerUp={finishPointerDrag} /><div className="insert-row"><button className="insert-button" title="插入 Block" onClick={openBlocks}><Plus /></button></div></div>)}<div className={`quick-composer ${activeDialogueCharacter ? 'dialogue-mode' : ''}`}><div className="composer-prefix">{activeDialogueCharacter ? activeDialogueCharacter.name : <AlignLeft />}</div><textarea aria-label={activeDialogueCharacter ? `${activeDialogueCharacter.name} 连续对话` : '输入旁白'} value={composerText} placeholder={activeDialogueCharacter ? `${activeDialogueCharacter.name} 的对白` : '输入旁白'} onChange={(event) => setComposerText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Tab') { event.preventDefault(); setComposerMenuOpen(true); } else if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); submitComposer(); } }} />{dialogueCharacterId && <button className="icon-button" title="退出连续对话" onClick={() => { setDialogueCharacterId(null); setDialogueSchemeId(''); }}><X /></button>}{composerMenuOpen && <div className="composer-menu"><strong>插入 Block</strong><div className="composer-menu-grid">{(['scene', 'sound', 'characterShow', 'camera', 'branch', 'condition'] as BlockType[]).map((type) => { const MetaIcon = blockMeta[type].icon; return <button key={type} onClick={() => insertComposerBlock(type)}><MetaIcon />{blockMeta[type].name}</button>; })}</div><strong>连续对话角色</strong><div className="composer-characters">{project.characters.map((character) => <button key={character.id} onClick={() => { setDialogueCharacterId(character.id); setDialogueSchemeId(''); }}>{character.name}</button>)}</div>{activeDialogueCharacter && <><strong>显示名方案</strong><div className="composer-characters"><button className={!dialogueSchemeId ? 'active' : ''} onClick={() => { setDialogueSchemeId(''); setComposerMenuOpen(false); }}>主名称</button>{activeDialogueCharacter.displayNameSchemes?.map((scheme) => <button className={dialogueSchemeId === scheme.id ? 'active' : ''} key={scheme.id} onClick={() => { setDialogueSchemeId(scheme.id); setComposerMenuOpen(false); }}>{scheme.name}</button>)}</div></>}<button className="composer-menu-close" onClick={() => setComposerMenuOpen(false)}>关闭</button></div>}</div></div>}
-    {view === 'plain' && <div className="plain-script-editor">{blocks.map((block, index) => { const previous = blocks[index - 1]; const grouped = block.type === 'dialogue' && previous?.type === 'dialogue' && previous.speaker === block.speaker; return <div className={`plain-block-row ${selectedIndexes.has(index) ? 'selected' : ''} ${grouped ? 'grouped' : ''}`} key={block.id} onClick={(event) => selectBlock(index, event)} onContextMenu={(event) => { event.preventDefault(); if (!selectedIndexes.has(index)) selectBlock(index); setContextMenu({ x: event.clientX, y: event.clientY }); }}><span className="plain-block-kind">{block.type === 'dialogue' ? grouped ? '' : block.speaker : blockMeta[block.type].name}</span><div>{(block.type === 'dialogue' || block.type === 'narration') ? <><textarea defaultValue={block.text ?? ''} onBlur={(event) => updateBlock(index, { text: event.target.value })} /><small>{block.type === 'dialogue' ? block.expression : ''}</small></> : block.type === 'branch' ? <><strong>分支 · {block.options?.length ?? 0} 个选项</strong>{block.options?.map((option) => <small className="plain-branch-option" key={option.text}>├ {option.text} → {fragmentNames.get(option.target) ?? option.target}</small>)}</> : <span className="plain-instruction">{block.title ?? block.text ?? (block.type === 'condition' ? `${block.variable} ${block.operator} ${String(block.compareValue ?? '')}` : block.type === 'setVariable' ? `${block.variable} = ${String(block.value ?? '')}` : block.target ? `→ ${fragmentNames.get(block.target) ?? block.target}` : blockMeta[block.type].description)}</span>}</div></div>; })}</div>}
+    {view === 'cards' && <Profiler id="block-list" onRender={recordComponentRender}><div className="blocks-area" ref={blocksAreaRef} tabIndex={0} onScroll={(event) => { cardVirtual.onScroll(event); window.clearTimeout(scrollSaveTimer.current); const value = event.currentTarget.scrollTop; scrollSaveTimer.current = window.setTimeout(() => saveScrollTop(value), 350); }} onWheel={(event) => { event.preventDefault(); event.stopPropagation(); event.currentTarget.scrollTop += event.deltaY; }}><div className="virtual-list-canvas" style={{ height: cardVirtual.layout.totalSize }}>{cardVirtual.indexes.map((index) => { const block = blocks[index]; const showDropMarker = dragOverIndex === index && draggedIndex !== null && (draggedIndex !== index || dragOverEdge === 'after'); return <MeasuredVirtualRow itemKey={block.id} index={index} top={cardVirtual.layout.offsets[index]} measure={cardVirtual.measure} className={`virtual-block-row block-drop-target ${highlightedBlockId === block.id ? 'block-just-inserted' : ''} ${showDropMarker ? `drag-over-${dragOverEdge}` : ''}`} key={block.id}><div data-block-index={index} data-block-id={block.id}><Profiler id={`story-card:${block.type}`} onRender={recordComponentRender}><StoryCard index={index} project={project} block={block} selected={selectedIndexes.has(index)} asset={block.assetId ? assetLookups.byId.get(block.assetId) : undefined} voiceAsset={block.voice ? assetLookups.byReference.get(block.voice) : undefined} onSelect={selectBlock} onContextMenu={openBlockContextMenu} onChange={updateBlock} onMove={moveBlock} onDuplicate={duplicateBlock} onDelete={deleteBlock} dragging={draggedIndex === index} listDragging={draggedIndex !== null} onPointerDown={beginPointerDrag} onPointerMove={updatePointerDrag} onPointerUp={finishPointerDrag} onPointerCancel={cancelPointerDrag} /></Profiler><div className="insert-row"><button className="insert-button" title="插入 Block" onClick={() => openBlocks(index + 1)}><Plus /></button></div></div></MeasuredVirtualRow>; })}</div><div className={`quick-composer ${activeDialogueCharacter ? 'dialogue-mode' : ''}`}><div className="composer-prefix">{activeDialogueCharacter ? activeDialogueCharacter.name : <AlignLeft />}</div><textarea aria-label={activeDialogueCharacter ? `${activeDialogueCharacter.name} 连续对话` : '输入旁白'} value={composerText} placeholder={activeDialogueCharacter ? `${activeDialogueCharacter.name} 的对白` : '输入旁白'} onChange={(event) => setComposerText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Tab') { event.preventDefault(); setComposerMenuOpen(true); } else if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); submitComposer(); } }} />{dialogueCharacterId && <button className="icon-button" title="退出连续对话" onClick={() => { setDialogueCharacterId(null); setDialogueSchemeId(''); }}><X /></button>}{composerMenuOpen && <div className="composer-menu"><strong>插入 Block</strong><div className="composer-menu-grid">{(['scene', 'sound', 'characterShow', 'camera', 'branch', 'condition'] as BlockType[]).map((type) => { const MetaIcon = blockMeta[type].icon; return <button key={type} onClick={() => insertComposerBlock(type)}><MetaIcon />{blockMeta[type].name}</button>; })}</div><strong>连续对话角色</strong><div className="composer-characters">{project.characters.map((character) => <button key={character.id} onClick={() => { setDialogueCharacterId(character.id); setDialogueSchemeId(''); }}>{character.name}</button>)}</div>{activeDialogueCharacter && <><strong>显示名方案</strong><div className="composer-characters"><button className={!dialogueSchemeId ? 'active' : ''} onClick={() => { setDialogueSchemeId(''); setComposerMenuOpen(false); }}>主名称</button>{activeDialogueCharacter.displayNameSchemes?.map((scheme) => <button className={dialogueSchemeId === scheme.id ? 'active' : ''} key={scheme.id} onClick={() => { setDialogueSchemeId(scheme.id); setComposerMenuOpen(false); }}>{scheme.name}</button>)}</div></>}<button className="composer-menu-close" onClick={() => setComposerMenuOpen(false)}>关闭</button></div>}</div></div></Profiler>}
+    {view === 'plain' && <Profiler id="block-list" onRender={recordComponentRender}><div className="plain-script-editor" ref={plainAreaRef} onScroll={(event) => { plainVirtual.onScroll(event); window.clearTimeout(scrollSaveTimer.current); const value = event.currentTarget.scrollTop; scrollSaveTimer.current = window.setTimeout(() => saveScrollTop(value), 350); }}><div className="virtual-list-canvas" style={{ height: plainVirtual.layout.totalSize }}>{plainVirtual.indexes.map((index) => { const block = blocks[index]; const previous = blocks[index - 1]; const grouped = block.type === 'dialogue' && previous?.type === 'dialogue' && previous.speaker === block.speaker; return <MeasuredVirtualRow itemKey={block.id} index={index} top={plainVirtual.layout.offsets[index]} measure={plainVirtual.measure} className="virtual-plain-row" key={block.id}><div data-block-index={index} className={`plain-block-row ${selectedIndexes.has(index) ? 'selected' : ''} ${grouped ? 'grouped' : ''}`} onClick={(event) => selectBlock(index, event)} onContextMenu={(event) => { event.preventDefault(); if (!selectedIndexes.has(index)) selectBlock(index); setContextMenu({ x: event.clientX, y: event.clientY }); }}><span className="plain-block-kind">{block.type === 'dialogue' ? grouped ? '' : block.speaker : blockMeta[block.type].name}</span><div>{(block.type === 'dialogue' || block.type === 'narration') ? <><textarea defaultValue={block.text ?? ''} onBlur={(event) => updateBlock(index, { text: event.target.value })} /><small>{block.type === 'dialogue' ? block.expression : ''}</small></> : block.type === 'branch' ? <><strong>分支 · {block.options?.length ?? 0} 个选项</strong>{block.options?.map((option) => <small className="plain-branch-option" key={option.text}>├ {option.text} → {fragmentNames.get(option.target) ?? option.target}</small>)}</> : <span className="plain-instruction">{block.title ?? block.text ?? (block.type === 'condition' ? `${block.variable} ${block.operator} ${String(block.compareValue ?? '')}` : block.type === 'setVariable' ? `${block.variable} = ${String(block.value ?? '')}` : block.target ? `→ ${fragmentNames.get(block.target) ?? block.target}` : blockMeta[block.type].description)}</span>}</div></div></MeasuredVirtualRow>; })}</div></div></Profiler>}
     {view === 'code' && <pre className="code-editor">{code || '# empty fragment'}</pre>}{view === 'json' && <pre className="json-editor">{JSON.stringify(blocks, null, 2)}</pre>}
     {contextMenu && <div className="context-menu block-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()}><strong>已选择 {selectedIndexes.size} 个 Block</strong><button onClick={() => void writeBlockClipboard(false)}>复制</button><button onClick={() => void writeBlockClipboard(true)}>剪切</button><button onClick={duplicateSelected}>创建副本</button><button onClick={() => void pasteBlocks()}>粘贴到下方</button><button className="danger" onClick={() => void deleteSelected()}>删除</button></div>}
     {inspectorDock === 'editor' && inspector}
-  </section><section className="preview-inspector"><Preview project={project} editorIndex={selected} debugMode={debugRunning} onEditorLocationChange={activateFragment} onStageCharacterMove={moveStageCharacter} />{inspectorDock === 'preview' && inspector}</section>{inspectorDock === 'floating' && <div className="floating-inspector">{inspector}</div>}</div>;
+  </section><section className="preview-inspector"><Profiler id="preview" onRender={recordComponentRender}><Preview project={project} editorIndex={selected} debugMode={debugRunning} onEditorLocationChange={activateFragment} onStageCharacterMove={moveStageCharacter} /></Profiler>{inspectorDock === 'preview' && inspector}</section>{inspectorDock === 'floating' && <div className="floating-inspector">{inspector}</div>}</div>;
 }
 
 function PageHeader({ title, sub, children }: { title: string; sub: string; children?: ReactNode }) {
@@ -690,6 +986,7 @@ interface HistoryPageProps {
   project: Project;
   entries: CommandSnapshotEntry<Project>[];
   recovery: RecoverySnapshot | null;
+  recoveryLoading: boolean;
   storage: CommandHistoryStorageStats | null;
   undoCount: number;
   redoCount: number;
@@ -705,11 +1002,12 @@ interface HistoryPageProps {
   clearOrdinaryHistory: () => void;
 }
 
-function HistoryPage({ project, entries, recovery, storage, undoCount, redoCount, undo, redo, undoCategory, restoreCommand, restoreRecovery, refreshRecovery, renameCommand, toggleCommandPinned, refreshStorage, clearOrdinaryHistory }: HistoryPageProps) {
+function HistoryPage({ project, entries, recovery, recoveryLoading, storage, undoCount, redoCount, undo, redo, undoCategory, restoreCommand, restoreRecovery, refreshRecovery, renameCommand, toggleCommandPinned, refreshStorage, clearOrdinaryHistory }: HistoryPageProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [recoveryExpanded, setRecoveryExpanded] = useState(false);
   const toggle = (id: string) => setExpanded((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   const recoveryDiff = recovery ? diffProjects(recovery.project, project) : null;
+  if (recoveryLoading) return <div className="dashboard-page history-page"><PageHeader title="编辑历史" sub="保留最近 50 个普通 Command；固定快照额外保护，所有恢复操作仍可撤销"><button className="button ghost" disabled={!undoCount} onClick={undo}><Undo2 />撤销</button><button className="button ghost" disabled={!redoCount} onClick={redo}><Redo2 />重做</button></PageHeader><div className="content-pad"><section className="recovery-card recovery-loading"><div className="recovery-summary"><div className="recovery-icon"><LoaderCircle className="spin" /></div><div><strong>正在读取恢复快照</strong><small>仅在打开历史面板时按需载入，不会拖慢编辑器启动。</small></div></div></section></div></div>;
   return <div className="dashboard-page history-page"><PageHeader title="编辑历史" sub="保留最近 50 个普通 Command；固定快照额外保护，所有恢复操作仍可撤销"><button className="button ghost" disabled={!undoCount} onClick={undo}><Undo2 />撤销</button><button className="button ghost" disabled={!redoCount} onClick={redo}><Redo2 />重做</button></PageHeader><div className="content-pad"><section className={`recovery-card ${recovery?.recoveredDuringLoad ? 'recovered' : ''}`}><div className="recovery-summary"><div className="recovery-icon"><HardDrive /></div><div><strong>{recovery?.recoveredDuringLoad ? '本次启动已执行崩溃恢复' : '崩溃恢复快照'}</strong><small>{recovery ? `${new Date(recovery.updatedAt).toLocaleString()} · ${recoveryDiff?.total ?? 0} 项与当前项目不同` : '当前项目还没有可用的恢复快照'}</small></div><div className="recovery-actions"><button className="button ghost" onClick={refreshRecovery}>刷新</button><button className="button ghost" disabled={!recovery} onClick={() => setRecoveryExpanded((value) => !value)}>{recoveryExpanded ? '收起比较' : '比较快照'}<ChevronDown className={recoveryExpanded ? 'expanded' : ''} /></button><button className="button primary" disabled={!recovery || !recoveryDiff?.total} onClick={restoreRecovery}><Undo2 />恢复此快照</button></div></div>{recovery && recoveryExpanded && <div className="snapshot-detail"><div className="snapshot-stats"><SnapshotStats label="恢复快照" project={recovery.project} /><ArrowRight /><SnapshotStats label="当前项目" project={project} /></div><SnapshotDiff diff={recoveryDiff!} /></div>}</section><section className="history-storage-card"><header><div><PackageCheck /><span><strong>历史存储与清理</strong><small>增量快照 v{storage?.version ?? 2} · .hikari/history/commands.json</small></span></div><div><button className="button ghost" onClick={refreshStorage}>刷新统计</button><button className="button danger" disabled={!entries.some((entry) => !entry.pinned)} onClick={clearOrdinaryHistory}><Trash2 />清理普通历史</button></div></header><div className="history-storage-stats"><div><span>磁盘占用</span><strong>{formatBytes(storage?.bytes ?? 0)}</strong></div><div><span>完整快照估算</span><strong>{formatBytes(storage?.uncompressedBytes ?? 0)}</strong></div><div><span>节省空间</span><strong>{Math.round((storage?.compressionRate ?? 0) * 100)}%</strong></div><div><span>历史记录</span><strong>{storage?.commandCount ?? entries.length}</strong><small>{storage?.pinnedCount ?? entries.filter((entry) => entry.pinned).length} 个固定</small></div></div><div className="compression-meter"><span style={{ width: `${Math.round((storage?.compressionRate ?? 0) * 100)}%` }} /><small>已压缩 {formatBytes(Math.max(0, (storage?.uncompressedBytes ?? 0) - (storage?.bytes ?? 0)))}</small></div></section><div className="history-list">{[...entries].reverse().map((entry) => {
     const isExpanded = expanded.has(entry.id);
     const diff = isExpanded ? diffProjects(entry.before, entry.after) : null;
@@ -722,13 +1020,16 @@ interface ModalLayerProps {
   project: Project;
   close: () => void;
   addBlock: (type: BlockType) => void;
-  runBuild: (kind: 'web' | 'windows' | 'renpy') => void;
+  runBuild: (kind: BuildTarget | 'renpy', report?: BuildPreflightReport, outputRoot?: string) => void;
+  locate: (fragmentId: string, blockIndex?: number) => void;
+  buildOutputRoot: string;
+  updateBuildOutputRoot: (path: string) => void;
 }
 
-function ModalLayer({ modal, project, close, addBlock, runBuild }: ModalLayerProps) {
+function ModalLayer({ modal, project, close, addBlock, runBuild, locate, buildOutputRoot, updateBuildOutputRoot }: ModalLayerProps) {
   if (!modal) return null;
   if (modal === 'search') return null;
-  if (modal === 'publish') { const diagnostics = diagnosticSummary(project); return <div className="modal-backdrop" onClick={close}><div className="modal wide" onClick={(e) => e.stopPropagation()}><div className="modal-header"><strong>构建与导出</strong><button className="icon-button" onClick={close}><X /></button></div><div className="modal-body"><div className="publish-options"><button className="publish-card selected" disabled={diagnostics.errors > 0} onClick={() => runBuild('web')}><ExternalLink /><strong>Web 游戏</strong><small>生成可独立运行的 HTML5 游戏</small></button><button className="publish-card" disabled={diagnostics.errors > 0} onClick={() => runBuild('windows')}><Box /><strong>Windows</strong><small>生成自带 .NET 8 的 WebView2 游戏包</small></button><button className="publish-card" disabled={diagnostics.errors > 0} onClick={() => runBuild('renpy')}><FileCode2 /><strong>Ren'Py</strong><small>生成可继续开发的 script.rpy</small></button></div><div className="check-list"><div className="check-row"><CheckCircle2 />{project.assets.length} 个素材已登记</div><div className="check-row"><CheckCircle2 />{Object.values(project.scripts).flat().length} 个 Block 已扫描</div><div className={`check-row ${diagnostics.errors ? 'check-error' : ''}`}>{diagnostics.errors ? <BugPlay /> : <CheckCircle2 />}{diagnostics.errors} 个错误 · {diagnostics.warnings} 个警告</div></div>{diagnostics.items.length > 0 && <div className="diagnostic-list">{diagnostics.items.slice(0, 12).map((item, index) => <article className={item.severity} key={`${item.code}-${item.blockId ?? item.fragmentId}-${index}`}><strong>{item.code}</strong><span>{item.message}</span><small>{item.fragmentId ?? '项目级'}</small></article>)}</div>}</div></div></div>; }
+  if (modal === 'publish') return <BuildPublishDialog project={project} close={close} runBuild={runBuild} locate={locate} outputRoot={buildOutputRoot} updateOutputRoot={updateBuildOutputRoot} />;
   return <div className="modal-backdrop" onClick={close}><div className="modal wide" onClick={(e) => e.stopPropagation()}><div className="modal-header"><strong>添加 Block</strong><button className="icon-button" onClick={close}><X /></button></div><div className="modal-body"><div className="block-palette">{(Object.entries(blockMeta) as [BlockType, typeof blockMeta.scene][]).map(([type, meta]) => { const Icon = meta.icon; return <button className="palette-item" key={type} onClick={() => addBlock(type)}><Icon /><strong>{meta.name}</strong><small>{meta.description}</small></button>; })}</div></div></div></div>;
 }
 
@@ -742,6 +1043,9 @@ export default function App() {
   const [view, setView] = useState<View>(() => fallbackProject.settings.editorSession?.scriptView ?? 'cards');
   const [selected, setSelected] = useState(0);
   const [modal, setModal] = useState<Modal>(null);
+  const [blockInsertIndex, setBlockInsertIndex] = useState<number | null>(null);
+  const [pendingBlockReveal, setPendingBlockReveal] = useState<PendingBlockReveal | null>(null);
+  const completeBlockReveal = useCallback((blockId: string) => setPendingBlockReveal((current) => current?.blockId === blockId ? null : current), []);
   const [appDialog, setAppDialog] = useState<AppDialogRequest | null>(null);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [assetMenuOpen, setAssetMenuOpen] = useState(false);
@@ -758,6 +1062,7 @@ export default function App() {
   const [saveState, setSaveState] = useState('正在载入');
   const [startupReady, setStartupReady] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [maintenanceOpen, setMaintenanceOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
   const [gameThemeOpen, setGameThemeOpen] = useState(false);
   const [chapterSettingsOpen, setChapterSettingsOpen] = useState(false);
@@ -767,13 +1072,19 @@ export default function App() {
   const [scriptImportBusy, setScriptImportBusy] = useState(false);
   const [scriptImportPreview, setScriptImportPreview] = useState<ScriptImportPreview | null>(null);
   const [recoverySnapshot, setRecoverySnapshot] = useState<RecoverySnapshot | null>(null);
+  const [recoverySnapshotStatus, setRecoverySnapshotStatus] = useState<RecoverySnapshotStatus | null>(null);
+  const [recoverySnapshotState, setRecoverySnapshotState] = useState<'idle' | 'loading' | 'loaded' | 'error'>('idle');
   const [historyStorage, setHistoryStorage] = useState<CommandHistoryStorageStats | null>(null);
+  const [buildProgress, setBuildProgress] = useState<BuildProgressTask | null>(null);
+  const [buildOutputRoot, setBuildOutputRoot] = useState(() => readSmallValue('hikari-build-output-root') ?? '');
   const hydrated = useRef(false);
   const autoSaveTimerRef = useRef<number | null>(null);
   const pendingSaveRef = useRef<Promise<unknown> | null>(null);
   const projectSwitchingRef = useRef(false);
   const historyReadyRef = useRef(false);
   const historySaveQueueRef = useRef<Promise<unknown>>(Promise.resolve());
+  const pendingProjectReloadRef = useRef<PendingProjectReload | null>(null);
+  const buildInProgressRef = useRef(false);
   const { toast, show: showToast } = useToast();
   const show = (text: string, tone: 'error' | 'success' = 'success') => {
     showToast(text, tone);
@@ -796,6 +1107,11 @@ export default function App() {
     setInspectorDock(next.settings.editorSession?.inspectorDock ?? 'preview');
     setView(next.settings.editorSession?.scriptView ?? 'cards');
   };
+  const updateBuildOutputRoot = (path: string) => {
+    setBuildOutputRoot(path);
+    if (path.trim()) writeSmallValue('hikari-build-output-root', path);
+    else removeSmallValue('hikari-build-output-root');
+  };
 
   const persistCommandHistory = () => {
     if (!historyReadyRef.current) return Promise.resolve();
@@ -805,19 +1121,38 @@ export default function App() {
     return request;
   };
 
-  const restoreProjectAndHistory = async (next: Project) => {
+  const restoreProjectAndHistory = async (next: Project): Promise<ProjectRestorePerformance> => {
+    const restoreStarted = performance.now();
     historyReadyRef.current = false;
     setRecoverySnapshot(null);
+    setRecoverySnapshotStatus(null);
+    setRecoverySnapshotState('idle');
     setHistoryStorage(null);
     let persistedHistory: PersistedCommandHistory<Project> | null = null;
+    let phaseStarted = performance.now();
     try { persistedHistory = await loadCommandHistory(); }
     catch (error) { log('error', 'history', 'Command 历史损坏或无法读取，项目将不带历史打开', error); }
-    try { setRecoverySnapshot(await loadRecoverySnapshot()); }
-    catch (error) { log('error', 'history', '崩溃恢复快照无法读取', error); }
+    const commandHistoryLoadMs = performance.now() - phaseStarted;
+    phaseStarted = performance.now();
+    try { setRecoverySnapshotStatus(await getRecoverySnapshotStatus()); }
+    catch (error) { log('error', 'history', '崩溃恢复快照状态无法读取', error); }
+    const recoverySnapshotLoadMs = performance.now() - phaseStarted;
+    phaseStarted = performance.now();
     try { setHistoryStorage(await loadCommandHistoryStats()); }
     catch (error) { log('error', 'history', '历史存储统计无法读取', error); }
+    const historyStatsLoadMs = performance.now() - phaseStarted;
+    const stateDispatchStartedAt = performance.now();
     resetProject(next, persistedHistory);
+    const stateDispatchMs = performance.now() - stateDispatchStartedAt;
     historyReadyRef.current = true;
+    return {
+      commandHistoryLoadMs,
+      recoverySnapshotLoadMs,
+      historyStatsLoadMs,
+      historyRestoreMs: stateDispatchStartedAt - restoreStarted,
+      stateDispatchMs,
+      stateDispatchStartedAt,
+    };
   };
 
   const flushCommandHistory = async () => {
@@ -840,20 +1175,83 @@ export default function App() {
   };
 
   useEffect(() => {
-    void loadProject(fallbackProject).then(async (loaded) => {
-      await restoreProjectAndHistory(loaded);
+    void Promise.all([loadProjectWithPerformance(fallbackProject), getAppInfo()]).then(async ([loadedResult, appInfo]) => {
+      const loaded = loadedResult.project;
+      if (loadedResult.performance) {
+        beginComponentRenderProfile(loadedResult.performance.reloadId);
+        pendingProjectReloadRef.current = { projectId: loaded.meta.id, load: loadedResult.performance };
+      }
+      const restore = await restoreProjectAndHistory(loaded);
+      if (pendingProjectReloadRef.current?.projectId === loaded.meta.id) pendingProjectReloadRef.current.restore = restore;
       hydrated.current = true;
       setStartupReady(true);
       setSaveState('已保存');
+      if (appInfo.startupProjectRequested) setProjectClosed(false);
     }).catch((error) => {
       hydrated.current = false;
       historyReadyRef.current = false;
       setStartupReady(true);
       setSaveState('加载失败');
+      cancelComponentRenderProfile();
       log('error', 'project', '项目加载失败；为保护磁盘项目，编辑与自动保存保持停用', error);
       show(`项目加载失败：${String(error)}`, 'error');
     });
   }, []);
+  useLayoutEffect(() => {
+    const pending = pendingProjectReloadRef.current;
+    if (!pending || pending.finalizing || !pending.restore || !startupReady || pending.projectId !== project.meta.id) return;
+    pending.finalizing = true;
+    const reloadId = pending.load.reloadId;
+    const commitAt = performance.now();
+    performance.mark(`hikari.reload.${reloadId}.react-committed`);
+    let firstFrame = 0;
+    let secondFrame = 0;
+    firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        const stablePaintAt = performance.now();
+        performance.mark(`hikari.reload.${reloadId}.stable-paint`);
+        try { performance.measure(`hikari.reload.${reloadId}.total`, `hikari.reload.${reloadId}.frontend-start`, `hikari.reload.${reloadId}.stable-paint`); }
+        catch { /* Marks can be unavailable after a browser performance buffer reset. */ }
+        const frontend: ProjectReloadFrontendPerformance = {
+          apiWaitMs: pending.load.apiWaitMs,
+          bridgeRoundTripMs: pending.load.bridgeRoundTripMs,
+          webViewTransferEstimateMs: pending.load.webViewTransferEstimateMs,
+          payloadDecodeMs: pending.load.payloadDecodeMs,
+          jsonParseMs: pending.load.jsonParseMs,
+          frontendSessionLoadMs: pending.load.frontendSessionLoadMs,
+          commandHistoryLoadMs: pending.restore!.commandHistoryLoadMs,
+          recoverySnapshotLoadMs: pending.restore!.recoverySnapshotLoadMs,
+          historyStatsLoadMs: pending.restore!.historyStatsLoadMs,
+          historyRestoreMs: pending.restore!.historyRestoreMs,
+          stateDispatchMs: pending.restore!.stateDispatchMs,
+          reactCommitMs: commitAt - pending.restore!.stateDispatchStartedAt,
+          stablePaintMs: stablePaintAt - commitAt,
+          totalReloadMs: stablePaintAt - pending.load.startedAt,
+          bootToStablePaintMs: stablePaintAt - (window.__HIKARI_BOOT_STARTED_AT__ ?? pending.load.startedAt),
+          componentRenders: finishComponentRenderProfile(reloadId),
+        };
+        const localReport: ProjectReloadPerformance = {
+          version: 1,
+          complete: true,
+          recordedAt: new Date().toISOString(),
+          surface: projectClosed ? 'project-launcher' : 'editor',
+          backend: pending.load.backend,
+          frontend,
+        };
+        window.__HIKARI_LAST_PROJECT_RELOAD__ = localReport;
+        pendingProjectReloadRef.current = null;
+        log('info', 'performance', '桌面项目完整重载性能', localReport);
+        void reportProjectReloadPerformance(reloadId, localReport.surface ?? 'editor', frontend)
+          .then((reported) => { if (reported) window.__HIKARI_LAST_PROJECT_RELOAD__ = reported; })
+          .catch((error) => log('warn', 'performance', '无法写入桌面重载性能日志', error));
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+      if (pendingProjectReloadRef.current === pending) pending.finalizing = false;
+    };
+  }, [project, projectClosed, startupReady]);
   useEffect(() => {
     const handler = (event: Event) => {
       const path = (event as CustomEvent<string>).detail;
@@ -898,10 +1296,26 @@ export default function App() {
       autoSaveTimerRef.current = null;
     };
   }, [dirty, markSaved, project]);
-  useEffect(() => { const handler = (event: KeyboardEvent) => { const target = event.target as HTMLElement | null; const editingText = target?.matches('input,textarea,[contenteditable="true"]'); if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); setModal('search'); } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !editingText) { event.preventDefault(); event.shiftKey ? redo() : undo(); } else if (event.key === 'Escape') setModal(null); }; window.addEventListener('keydown', handler); return () => window.removeEventListener('keydown', handler); }, [redo, undo]);
+  useEffect(() => { const handler = (event: KeyboardEvent) => { const target = event.target as HTMLElement | null; const editingText = target?.matches('input,textarea,[contenteditable="true"]'); if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); setModal('search'); } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !editingText) { event.preventDefault(); event.shiftKey ? redo() : undo(); } else if (event.key === 'Escape') { setModal(null); setBlockInsertIndex(null); } }; window.addEventListener('keydown', handler); return () => window.removeEventListener('keydown', handler); }, [redo, undo]);
   useEffect(() => { if (!appDialog) return; const handler = (event: KeyboardEvent) => { if (event.key !== 'Escape') return; event.preventDefault(); event.stopImmediatePropagation(); closeAppDialog(appDialog.kind === 'text' ? null : false); }; window.addEventListener('keydown', handler, true); return () => window.removeEventListener('keydown', handler, true); }, [appDialog]);
-  useEffect(() => { if (!hydrated.current) return; replace((current) => ({ ...current, settings: { ...current.settings, editorSession: { ...current.settings.editorSession, openFragmentIds, selectedBlockByFragment: current.settings.editorSession?.selectedBlockByFragment ?? {}, scrollTopByFragment: current.settings.editorSession?.scrollTopByFragment ?? {}, inspectorDock, scriptView: view } } })); }, [openFragmentIds, inspectorDock, view]);
-  useEffect(() => { if (!hydrated.current) return; replace((current) => ({ ...current, settings: { ...current.settings, editorSession: { ...current.settings.editorSession, openFragmentIds, selectedBlockByFragment: { ...(current.settings.editorSession?.selectedBlockByFragment ?? {}), [current.activeFragmentId]: selected }, scrollTopByFragment: current.settings.editorSession?.scrollTopByFragment ?? {}, inspectorDock, scriptView: view } } })); }, [selected, project.activeFragmentId]);
+  useEffect(() => {
+    if (!hydrated.current) return;
+    replace((current) => {
+      const session = current.settings.editorSession;
+      const sameTabs = session?.openFragmentIds.length === openFragmentIds.length
+        && session.openFragmentIds.every((id, index) => id === openFragmentIds[index]);
+      if (sameTabs && session?.inspectorDock === inspectorDock && session.scriptView === view) return current;
+      return { ...current, settings: { ...current.settings, editorSession: { ...session, openFragmentIds, selectedBlockByFragment: session?.selectedBlockByFragment ?? {}, scrollTopByFragment: session?.scrollTopByFragment ?? {}, inspectorDock, scriptView: view } } };
+    });
+  }, [openFragmentIds, inspectorDock, view]);
+  useEffect(() => {
+    if (!hydrated.current) return;
+    replace((current) => {
+      const session = current.settings.editorSession;
+      if (session?.selectedBlockByFragment?.[current.activeFragmentId] === selected) return current;
+      return { ...current, settings: { ...current.settings, editorSession: { ...session, openFragmentIds, selectedBlockByFragment: { ...(session?.selectedBlockByFragment ?? {}), [current.activeFragmentId]: selected }, scrollTopByFragment: session?.scrollTopByFragment ?? {}, inspectorDock, scriptView: view } } };
+    });
+  }, [selected, project.activeFragmentId]);
 
   const addChapter = async () => { const name = await requestText({ title: '新建章节', message: '章节会创建一个名为“主线”的初始片段。', placeholder: '章节名称', confirmText: '创建章节' }); if (!name) return; const fragmentId = makeId('fragment'); commit((current) => ({ ...current, activeFragmentId: fragmentId, chapters: [...current.chapters, { id: makeId('chapter'), name, fragments: [{ id: fragmentId, name: '主线' }] }], scripts: { ...current.scripts, [fragmentId]: [] } })); setSelected(0); };
   const addFragment = async (chapterId: string) => { const name = await requestText({ title: '新建片段', message: '新片段会添加到所选章节。', placeholder: '片段名称', confirmText: '创建片段' }); if (!name) return; const id = makeId('fragment'); commit((current) => ({ ...current, activeFragmentId: id, chapters: current.chapters.map((chapter) => chapter.id === chapterId ? { ...chapter, fragments: [...chapter.fragments, { id, name }] } : chapter), scripts: { ...current.scripts, [id]: [] } })); setSelected(0); };
@@ -919,11 +1333,10 @@ export default function App() {
     const writePayload = async (value: unknown) => {
       const encoded = `HIKARI_STRUCTURE_V1\n${JSON.stringify(value)}`;
       writeSmallValue('hikari-structure-clipboard', encoded);
-      try { await navigator.clipboard.writeText(encoded); } catch { /* local fallback remains available */ }
+      await writeClipboardText(encoded);
     };
     const readPayload = async () => {
-      let encoded = readSmallValue('hikari-structure-clipboard') ?? '';
-      try { encoded = await navigator.clipboard.readText() || encoded; } catch { /* use local fallback */ }
+      const encoded = await readClipboardText(readSmallValue('hikari-structure-clipboard') ?? '');
       if (!encoded.startsWith('HIKARI_STRUCTURE_V1\n')) return null;
       try { return JSON.parse(encoded.slice('HIKARI_STRUCTURE_V1\n'.length)) as typeof payload; } catch { return null; }
     };
@@ -971,11 +1384,31 @@ export default function App() {
     commit((current) => { const scripts = { ...current.scripts }; const timelines = { ...(current.timelines ?? {}) }; for (const fragment of chapter.fragments) { delete scripts[fragment.id]; delete timelines[fragment.id]; } const chapters = current.chapters.filter((item) => item.id !== chapterId); const activeFragmentId = chapter.fragments.some((item) => item.id === current.activeFragmentId) ? chapters[0].fragments[0].id : current.activeFragmentId; return { ...current, chapters, scripts, timelines, activeFragmentId }; }, `剪切章节 ${chapter.name}`);
   };
   const toggleChapterDisabled = (chapterId: string) => commit((current) => ({ ...current, chapters: current.chapters.map((chapter) => chapter.id === chapterId && !chapter.entry ? { ...chapter, disabled: !chapter.disabled } : chapter) }), '切换章节启用状态');
-  const addBlock = (type: BlockType) => { const block = createBlock(type, project); const nextIndex = (project.scripts[project.activeFragmentId] ?? []).length; commit((current) => ({ ...current, scripts: { ...current.scripts, [current.activeFragmentId]: [...(current.scripts[current.activeFragmentId] ?? []), block] } }), `添加${blockMeta[type].name}`); setSelected(nextIndex); setModal(null); };
-  const doImport = async () => { try { const imported = await importAssets(); if (!imported.length) return; commit((current) => ({ ...current, assets: [...current.assets, ...imported] })); show(`已导入 ${imported.length} 个素材`); } catch (error) { show(String(error), 'error'); } };
-  const selectScriptImport = async () => {
+  const addBlock = (type: BlockType) => {
+    const block = createBlock(type, project);
+    const blocks = project.scripts[project.activeFragmentId] ?? [];
+    const insertIndex = blockInsertIndex === null
+      ? blocks.length
+      : Math.max(0, Math.min(blockInsertIndex, blocks.length));
+    commit((current) => {
+      const nextBlocks = [...(current.scripts[current.activeFragmentId] ?? [])];
+      nextBlocks.splice(Math.min(insertIndex, nextBlocks.length), 0, block);
+      return { ...current, scripts: { ...current.scripts, [current.activeFragmentId]: nextBlocks } };
+    }, `${blockInsertIndex === null ? '添加' : '插入'}${blockMeta[type].name}`);
+    setSelected(insertIndex);
+    setPendingBlockReveal({ fragmentId: project.activeFragmentId, blockId: block.id });
+    setModal(null);
+    setBlockInsertIndex(null);
+  };
+  const selectScriptImport = async (rules: ScriptImportRules) => {
     setScriptImportBusy(true);
-    try { const preview = await previewScriptImport(); if (preview) setScriptImportPreview(preview); }
+    try { const preview = await previewScriptImport(project.characters, rules); if (preview) setScriptImportPreview(preview); }
+    catch (error) { show(String(error), 'error'); }
+    finally { setScriptImportBusy(false); }
+  };
+  const pasteScriptImport = async (rules: ScriptImportRules) => {
+    setScriptImportBusy(true);
+    try { setScriptImportPreview(await previewClipboardScript('', project.characters, rules)); }
     catch (error) { show(String(error), 'error'); }
     finally { setScriptImportBusy(false); }
   };
@@ -1010,7 +1443,49 @@ export default function App() {
   };
   const loginCreator = async () => { const name = await requestText({ title: creatorName ? '账号设置' : '创作者账号', message: '输入创作者显示名。', initialValue: creatorName, placeholder: '创作者名称', confirmText: creatorName ? '保存' : '登录' }); if (!name) return; writeSmallValue('hikari-creator-name', name); setCreatorName(name); setAccountMenuOpen(false); };
   const logoutCreator = () => { removeSmallValue('hikari-creator-name'); setCreatorName(''); setAccountMenuOpen(false); };
-  const runBuild = async (kind: 'web' | 'windows' | 'renpy') => { try { const diagnostics = diagnosticSummary(project); if (diagnostics.errors) { show(`构建被阻止：请先修复 ${diagnostics.errors} 个错误`, 'error'); return; } setModal(null); setSaveState('构建中'); const result = kind === 'web' ? await buildWeb(project) : kind === 'windows' ? await buildWindows(project) : await exportRenpy(project); setSaveState('已保存'); show(`${kind === 'web' ? 'Web 游戏' : kind === 'windows' ? 'Windows 游戏' : "Ren'Py 脚本"}已生成：${result.path}`); } catch (error) { setSaveState('构建失败'); show(String(error), 'error'); } };
+  const runBuild = async (kind: BuildTarget | 'renpy', _displayedReport?: BuildPreflightReport, requestedOutputRoot?: string) => {
+    if (buildInProgressRef.current) { show('已有构建任务正在运行', 'error'); return; }
+    buildInProgressRef.current = true;
+    const task = createBuildProgressTask(kind, project.meta.name);
+    const updateTask = (step: Parameters<typeof updateBuildProgress>[1], fraction = 0, detail?: string) => setBuildProgress((current) => current?.id === task.id ? updateBuildProgress(current, step, fraction, detail) : current);
+    setBuildProgress(task);
+    setModal(null);
+    try {
+      const outputRoot = requestedOutputRoot?.trim() || buildOutputRoot.trim() || undefined;
+      let checked: BuildPreflightReport | undefined;
+      if (kind === 'web' || kind === 'windows') {
+        setSaveState('构建检查中');
+        checked = await preflightBuild(project, kind, { onProgress: (progress) => updateTask('preflight', progress.percent / 100, `已遍历 ${progress.completedPaths} 条路径 · ${progress.stepsExecuted.toLocaleString()} OP`) });
+        if (checked.blocked) {
+          setSaveState('构建已阻止');
+          throw new Error(`构建被阻止：请先修复 ${checked.errors} 个错误`);
+        }
+      } else {
+        updateTask('preflight', .45, '正在检查诊断错误与 Ren\'Py 兼容范围');
+        const diagnostics = diagnosticSummary(project);
+        if (diagnostics.errors) throw new Error(`导出被阻止：请先修复 ${diagnostics.errors} 个错误`);
+      }
+      updateTask('save', .1, '正在保存项目与最新编辑内容');
+      await saveProject(project);
+      markSaved();
+      updateTask('generate', .05);
+      setSaveState('构建中');
+      const result = kind === 'web' ? await buildWeb(project, checked, outputRoot) : kind === 'windows' ? await buildWindows(project, checked, outputRoot) : await exportRenpy(project, outputRoot);
+      if (!result.path) throw new Error('构建完成，但桌面端没有返回产物路径');
+      updateTask('verify', .55, `已确认输出：${result.path}`);
+      await new Promise((resolve) => window.setTimeout(resolve, 180));
+      setBuildProgress((current) => current?.id === task.id ? completeBuildProgress(current, result.path) : current);
+      setSaveState('已保存');
+      show(`${buildKindLabel(kind)}已生成：${result.path}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setBuildProgress((current) => current?.id === task.id ? failBuildProgress(current, message) : current);
+      setSaveState('构建失败');
+      show(message, 'error');
+    } finally {
+      buildInProgressRef.current = false;
+    }
+  };
   const activate = (id: string, blockIndex?: number) => { setOpenFragmentIds((items) => items.includes(id) ? items : [...items, id]); replace((current) => ({ ...current, activeFragmentId: id })); setSelected(blockIndex ?? project.settings.editorSession?.selectedBlockByFragment?.[id] ?? 0); navigatePage('script'); };
   const closeFragment = (id: string) => {
     const index = openFragmentIds.indexOf(id);
@@ -1076,10 +1551,29 @@ export default function App() {
     return result;
   };
 
-  const refreshRecoverySnapshot = async () => {
-    try { setRecoverySnapshot(await loadRecoverySnapshot()); show('崩溃恢复快照已刷新'); }
-    catch (error) { log('error', 'history', '崩溃恢复快照刷新失败', error); show(String(error), 'error'); }
+  const refreshRecoverySnapshot = async (notify = true) => {
+    setRecoverySnapshotState('loading');
+    try {
+      const snapshot = await loadRecoverySnapshot();
+      setRecoverySnapshot(snapshot);
+      setRecoverySnapshotStatus(snapshot ? { exists: true, updatedAt: snapshot.updatedAt, bytes: recoverySnapshotStatus?.bytes ?? 0, recoveredDuringLoad: snapshot.recoveredDuringLoad } : { exists: false, updatedAt: null, bytes: 0, recoveredDuringLoad: false });
+      setRecoverySnapshotState('loaded');
+      if (notify) show('崩溃恢复快照已刷新');
+    }
+    catch (error) {
+      setRecoverySnapshotState('error');
+      log('error', 'history', '崩溃恢复快照刷新失败', error);
+      show(`崩溃恢复快照读取失败：${String(error)}`, 'error');
+    }
   };
+  useEffect(() => {
+    if (page !== 'history' || recoverySnapshotState !== 'idle' || recoverySnapshotStatus === null) return;
+    if (!recoverySnapshotStatus.exists) {
+      setRecoverySnapshotState('loaded');
+      return;
+    }
+    void refreshRecoverySnapshot(false);
+  }, [page, project.meta.id, recoverySnapshotState, recoverySnapshotStatus]);
   const restoreCommandSnapshot = async (entry: CommandSnapshotEntry<Project>, target: 'before' | 'after') => {
     const side = target === 'before' ? '修改前' : '修改后';
     if (!await requestConfirm({ title: `恢复到${side}`, message: `将整个项目恢复到“${entry.label}”的${side}状态。当前状态会先记录为新的 Command，因此仍可撤销。`, confirmText: `恢复${side}`, danger: target === 'before' })) return;
@@ -1111,33 +1605,35 @@ export default function App() {
 
   const activeName = project.chapters.flatMap((chapter) => chapter.fragments).find((fragment) => fragment.id === project.activeFragmentId)?.name ?? '片段';
   const pages: Record<Page, ReactNode> = {
-    script: <ScriptPage project={project} commit={commit} selected={selected} setSelected={setSelected} view={view} setView={setView} openBlocks={() => setModal('blocks')} openImport={() => setScriptImportOpen(true)} requestConfirm={requestConfirm} openFragmentIds={openFragmentIds} activateFragment={activate} closeFragment={closeFragment} reorderFragmentTabs={reorderFragmentTabs} inspectorDock={inspectorDock} setInspectorDock={setInspectorDock} initialScrollTop={project.settings.editorSession?.scrollTopByFragment?.[project.activeFragmentId] ?? 0} saveScrollTop={saveFragmentScrollTop} debugRunning={debugRunning} notify={show} />,
+    script: <Profiler id="script-page" onRender={recordComponentRender}><ScriptPage project={project} commit={commit} selected={selected} setSelected={setSelected} view={view} setView={setView} openBlocks={(insertIndex) => { setBlockInsertIndex(insertIndex ?? null); setModal('blocks'); }} openImport={() => setScriptImportOpen(true)} requestConfirm={requestConfirm} openFragmentIds={openFragmentIds} activateFragment={activate} closeFragment={closeFragment} reorderFragmentTabs={reorderFragmentTabs} inspectorDock={inspectorDock} setInspectorDock={setInspectorDock} initialScrollTop={project.settings.editorSession?.scrollTopByFragment?.[project.activeFragmentId] ?? 0} saveScrollTop={saveFragmentScrollTop} debugRunning={debugRunning} notify={show} pendingBlockReveal={pendingBlockReveal} completeBlockReveal={completeBlockReveal} /></Profiler>,
     stage: <StageTimelineWorkspace project={project} selectedBlock={selected} commit={commit} locateBlock={(index) => setSelected(index)} notify={show} />,
     assets: <AssetManager project={project} commit={commit} notify={show} requestConfirm={requestConfirm} activate={activate} />,
     audio: <AudioManager project={project} category={audioCategory} setCategory={setAudioCategory} commit={commit} notify={show} requestConfirm={requestConfirm} activate={activate} />,
     map: <NarrativeMap project={project} activate={activate} commit={commit} notify={show} requestText={requestText} />,
     characters: <CharacterManager project={project} commit={commit} notify={show} requestText={requestText} requestConfirm={requestConfirm} />,
     scenes: <SceneManager project={project} commit={commit} notify={show} requestText={requestText} requestConfirm={requestConfirm} activate={activate} />,
-    history: <HistoryPage project={project} entries={commandEntries} recovery={recoverySnapshot} storage={historyStorage} undoCount={undoCount} redoCount={redoCount} undo={undo} redo={redo} undoCategory={undoCategory} restoreCommand={(entry, target) => void restoreCommandSnapshot(entry, target)} restoreRecovery={() => void restoreCrashSnapshot()} refreshRecovery={() => void refreshRecoverySnapshot()} renameCommand={(entry) => void nameCommandSnapshot(entry)} toggleCommandPinned={(entry) => { if (toggleCommandPinned(entry.id)) show(entry.pinned ? '快照已取消固定' : '快照已固定保护'); }} refreshStorage={() => void refreshHistoryStorage()} clearOrdinaryHistory={() => void clearOrdinaryHistory()} />,
+    history: <HistoryPage project={project} entries={commandEntries} recovery={recoverySnapshot} recoveryLoading={recoverySnapshotState === 'loading'} storage={historyStorage} undoCount={undoCount} redoCount={redoCount} undo={undo} redo={redo} undoCategory={undoCategory} restoreCommand={(entry, target) => void restoreCommandSnapshot(entry, target)} restoreRecovery={() => void restoreCrashSnapshot()} refreshRecovery={() => void refreshRecoverySnapshot()} renameCommand={(entry) => void nameCommandSnapshot(entry)} toggleCommandPinned={(entry) => { if (toggleCommandPinned(entry.id)) show(entry.pinned ? '快照已取消固定' : '快照已固定保护'); }} refreshStorage={() => void refreshHistoryStorage()} clearOrdinaryHistory={() => void clearOrdinaryHistory()} />,
     ai: <AiAgentPanel project={project} selectedBlockIndexes={[selected]} updateProject={commit} locateEditor={activate} applyPlan={applyAgentPlan} requestBuild={(target) => void runBuild(target)} notify={show} navigateTarget={(target) => { if (target.kind === 'fragment' && target.id) activate(target.id); else if (target.kind === 'chapter' && target.id) { const fragment = project.chapters.find((chapter) => chapter.id === target.id)?.fragments[0]; if (fragment) activate(fragment.id); } else if (target.kind === 'character') navigatePage('characters'); else if (target.kind === 'asset') navigatePage('assets'); else if (target.kind === 'variable') navigatePage('map'); else if (target.kind === 'memory') navigatePage('ai'); else show('该差异项没有可打开的编辑位置'); }} />,
   };
   const openAssetSection = (section: string, target: Page = 'assets') => { setAssetSection(section); navigatePage(target); setAssetMenuOpen(false); };
   const openAudioSection = (category: AudioCategory) => { setAudioCategory(category); navigatePage('audio'); setAssetMenuOpen(false); };
 
-  if (projectClosed) return <ProjectLaunchScreen key={createWizardRequested ? 'create' : 'home'} startInWizard={createWizardRequested} ready={startupReady} onOpen={() => doOpen(true)} onOpenRecent={doOpenRecent} onCreate={doCreateProject} onCreated={() => { setCreateWizardRequested(false); setProjectClosed(false); }} onExit={() => void exitApplication()} />;
+  if (projectClosed) return <Profiler id="app-shell" onRender={recordComponentRender}><ProjectLaunchScreen key={createWizardRequested ? 'create' : 'home'} startInWizard={createWizardRequested} ready={startupReady} onOpen={() => doOpen(true)} onOpenRecent={doOpenRecent} onCreate={doCreateProject} onCreated={() => { setCreateWizardRequested(false); setProjectClosed(false); }} onExit={() => void exitApplication()} /></Profiler>;
 
-  return <div className={`app-shell desktop-app ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}><header className="topbar titlebar-drag pywebview-drag-region"><div className="brand-lockup"><div className="brand-mark">H</div><div><strong>Hikari Studio</strong><span>{projectClosed ? '未打开项目' : project.meta.name}</span></div></div><div className="navigation-controls titlebar-no-drag"><button className="icon-button" disabled={!backPages.length} title="后退" onClick={navigateBack}><ArrowLeft /></button><button className="icon-button" disabled={!forwardPages.length} title="前进" onClick={navigateForward}><ArrowRight /></button></div><div className="top-project-menu titlebar-no-drag"><button className="project-menu-trigger" aria-expanded={projectMenuOpen} onClick={() => setProjectMenuOpen((value) => !value)}><Menu /><span>{project.meta.name}</span><ChevronDown /></button>{projectMenuOpen && <div className="top-dropdown project-actions-menu"><button onClick={() => { setProjectMenuOpen(false); void doOpen(); }}><FolderOpen />打开项目</button><button onClick={() => { setProjectMenuOpen(false); void renameProject(); }}><FileText />重命名</button><button onClick={() => { setProjectMenuOpen(false); void doSaveAs(); }}><SaveAs />另存为</button><button onClick={() => { setProjectMenuOpen(false); navigatePage('history'); }}><History />项目历史</button><button onClick={() => void closeProject()}><X />关闭项目</button><button onClick={() => void exitApplication()}><LogOut />退出应用</button></div>}</div><button className="search-trigger titlebar-no-drag" onClick={() => setModal('search')}><Search /><span>搜索台词、指令和资源...</span><kbd>Ctrl K</kbd></button><div className="top-actions titlebar-no-drag"><div className="save-state"><span />{saveState}</div><button className="icon-button notification-trigger" title="通知" onClick={() => setNotificationsOpen((value) => !value)}><Bell />{notifications.some((item) => !item.read) && <span />}</button><div className="account-entry"><button className="avatar-button" title="创作者账号" onClick={() => setAccountMenuOpen((value) => !value)}>{creatorName ? creatorName.slice(0, 1).toUpperCase() : <UserRound />}</button>{accountMenuOpen && <div className="top-dropdown account-menu">{creatorName ? <><strong>{creatorName}</strong><button onClick={() => void loginCreator()}><Settings2 />账号设置</button><button onClick={logoutCreator}><LogOut />退出账号</button></> : <button onClick={() => void loginCreator()}><UserRound />登录创作者账号</button>}</div>}</div><WindowChrome onClose={() => void exitApplication()} /></div></header>
-    <nav className="module-nav"><div className="module-links"><button className={`module-link ${page === 'script' ? 'active' : ''}`} onClick={() => navigatePage('script')}><NotebookPen />{debugRunning ? '调试' : '剧本'}</button><button className={`module-link ${page === 'stage' ? 'active' : ''}`} onClick={() => navigatePage('stage')}><Clapperboard />演出</button><div className="asset-nav-menu"><button className={`module-link ${page === 'assets' || page === 'characters' || page === 'scenes' || page === 'audio' ? 'active' : ''}`} aria-expanded={assetMenuOpen} onClick={() => setAssetMenuOpen((value) => !value)}><FolderOpen />资产<ChevronDown /></button>{assetMenuOpen && <div className="top-dropdown asset-submenu"><button onClick={() => openAssetSection('全部')}><PackageCheck />资源总览</button><button onClick={() => openAssetSection('全部', 'characters')}><Users />角色</button><button onClick={() => openAssetSection('全部', 'scenes')}><Image />场景</button><button onClick={() => openAudioSection('bgm')}><Music2 />BGM</button><button onClick={() => openAudioSection('sfx')}><AudioLines />SE</button><button onClick={() => openAudioSection('voice')}><MessageSquareText />语音</button></div>}</div><button className={`module-link ${page === 'map' ? 'active' : ''}`} onClick={() => navigatePage('map')}><GitBranch />叙事地图</button><button className={`module-link ${themeOpen ? 'active' : ''}`} onClick={() => setThemeOpen(true)}><Palette />个性化</button><button className={`module-link ${page === 'ai' ? 'active' : ''}`} onClick={() => navigatePage('ai')}><Sparkles />AI Agent</button></div><div className="module-actions"><button className={`button ghost ${debugRunning ? 'active' : ''}`} onClick={() => { setDebugRunning((value) => !value); navigatePage('script'); setSelected(0); show(debugRunning ? '已退出调试运行' : '已进入调试运行'); }}><BugPlay />{debugRunning ? '停止调试' : '调试运行'}</button><button className="button primary" onClick={() => setModal('publish')}><Rocket />发布游戏</button><button className="icon-button" title="设置" onClick={() => setSettingsOpen(true)}><Settings2 /></button></div></nav>
-    <main className={`workspace ${page === 'map' || page === 'stage' || page === 'characters' || page === 'scenes' || page === 'audio' ? 'map-workspace' : ''}`}>{!projectClosed && !['map', 'stage', 'characters', 'scenes', 'audio'].includes(page) && !sidebarCollapsed && <Sidebar project={project} activate={activate} addChapter={addChapter} addFragment={addFragment} removeFragment={removeFragment} openSettings={() => setChapterSettingsOpen(true)} toggleChapterDisabled={toggleChapterDisabled} collapseSidebar={() => setSidebarCollapsed(true)} structureAction={(action, chapterId, fragmentId) => void structureAction(action, chapterId, fragmentId)} />}{!projectClosed && !['map', 'stage', 'characters', 'scenes', 'audio'].includes(page) && sidebarCollapsed && <button className="sidebar-expand" title="展开章节列表" onClick={() => setSidebarCollapsed(false)}><ArrowRight /></button>}<section className="page-content"><AnimatePresence mode="wait" initial={false}><motion.div className="page-transition" key={projectClosed ? 'closed' : page} initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 9 }} animate={{ opacity: 1, y: 0 }} exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -7 }} transition={{ duration: reducedMotion ? .08 : .22, ease: [.2, .8, .2, 1] }}>{projectClosed ? <div className="closed-project"><FolderOpen /><strong>没有打开的项目</strong><span>新建项目或打开本地 Hikari v3 项目继续创作。</span><div><button className="button primary" onClick={() => void doNew()}><FilePlus2 />新建项目</button><button className="button ghost" onClick={() => void doOpen()}><FolderOpen />打开项目</button></div></div> : pages[page]}</motion.div></AnimatePresence></section></main>
-    <ModalLayer modal={modal} project={project} close={() => setModal(null)} addBlock={addBlock} runBuild={(kind) => void runBuild(kind)} />
+  return <Profiler id="app-shell" onRender={recordComponentRender}><div className={`app-shell desktop-app ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}><header className="topbar titlebar-drag pywebview-drag-region"><div className="brand-lockup"><div className="brand-mark">H</div><div><strong>Hikari Studio</strong><span>{projectClosed ? '未打开项目' : project.meta.name}</span></div></div><div className="navigation-controls titlebar-no-drag"><button className="icon-button" disabled={!backPages.length} title="后退" onClick={navigateBack}><ArrowLeft /></button><button className="icon-button" disabled={!forwardPages.length} title="前进" onClick={navigateForward}><ArrowRight /></button></div><div className="top-project-menu titlebar-no-drag"><button className="project-menu-trigger" aria-expanded={projectMenuOpen} onClick={() => setProjectMenuOpen((value) => !value)}><Menu /><span>{project.meta.name}</span><ChevronDown /></button>{projectMenuOpen && <div className="top-dropdown project-actions-menu"><button onClick={() => { setProjectMenuOpen(false); void doOpen(); }}><FolderOpen />打开项目</button><button onClick={() => { setProjectMenuOpen(false); void renameProject(); }}><FileText />重命名</button><button onClick={() => { setProjectMenuOpen(false); void doSaveAs(); }}><SaveAs />另存为</button><button onClick={() => { setProjectMenuOpen(false); navigatePage('history'); }}><History />项目历史</button><button onClick={() => void closeProject()}><X />关闭项目</button><button onClick={() => void exitApplication()}><LogOut />退出应用</button></div>}</div><button className="search-trigger titlebar-no-drag" onClick={() => setModal('search')}><Search /><span>搜索台词、指令和资源...</span><kbd>Ctrl K</kbd></button><div className="top-actions titlebar-no-drag"><div className="save-state"><span />{saveState}</div><button className="icon-button notification-trigger" title="通知" onClick={() => setNotificationsOpen((value) => !value)}><Bell />{notifications.some((item) => !item.read) && <span />}</button><div className="account-entry"><button className="avatar-button" title="创作者账号" onClick={() => setAccountMenuOpen((value) => !value)}>{creatorName ? creatorName.slice(0, 1).toUpperCase() : <UserRound />}</button>{accountMenuOpen && <div className="top-dropdown account-menu">{creatorName ? <><strong>{creatorName}</strong><button onClick={() => void loginCreator()}><Settings2 />账号设置</button><button onClick={logoutCreator}><LogOut />退出账号</button></> : <button onClick={() => void loginCreator()}><UserRound />登录创作者账号</button>}</div>}</div><WindowChrome onClose={() => void exitApplication()} /></div></header>
+    <nav className="module-nav"><div className="module-links"><button className={`module-link ${page === 'script' ? 'active' : ''}`} onClick={() => navigatePage('script')}><NotebookPen />{debugRunning ? '调试' : '剧本'}</button><button className={`module-link ${page === 'stage' ? 'active' : ''}`} onClick={() => navigatePage('stage')}><Clapperboard />演出</button><div className="asset-nav-menu"><button className={`module-link ${page === 'assets' || page === 'characters' || page === 'scenes' || page === 'audio' ? 'active' : ''}`} aria-expanded={assetMenuOpen} onClick={() => setAssetMenuOpen((value) => !value)}><FolderOpen />资产<ChevronDown /></button>{assetMenuOpen && <div className="top-dropdown asset-submenu"><button onClick={() => openAssetSection('全部')}><PackageCheck />资源总览</button><button onClick={() => openAssetSection('全部', 'characters')}><Users />角色</button><button onClick={() => openAssetSection('全部', 'scenes')}><Image />场景</button><button onClick={() => openAudioSection('bgm')}><Music2 />BGM</button><button onClick={() => openAudioSection('sfx')}><AudioLines />SE</button><button onClick={() => openAudioSection('voice')}><MessageSquareText />语音</button></div>}</div><button className={`module-link ${page === 'map' ? 'active' : ''}`} onClick={() => navigatePage('map')}><GitBranch />叙事地图</button><button className={`module-link ${themeOpen ? 'active' : ''}`} onClick={() => setThemeOpen(true)}><Palette />个性化</button><button className={`module-link ${page === 'ai' ? 'active' : ''}`} onClick={() => navigatePage('ai')}><Sparkles />AI Agent</button></div><div className="module-actions"><button className={`button ghost ${debugRunning ? 'active' : ''}`} onClick={() => { setDebugRunning((value) => !value); navigatePage('script'); setSelected(0); show(debugRunning ? '已退出调试运行' : '已进入调试运行'); }}><BugPlay />{debugRunning ? '停止调试' : '调试运行'}</button><button className="button primary" onClick={() => setModal('publish')}><Rocket />发布游戏</button><button className="icon-button" title="运行设置" aria-label="运行设置" onClick={() => setSettingsOpen(true)}><Settings2 /></button><button className="icon-button" title="应用维护" aria-label="应用维护" onClick={() => setMaintenanceOpen(true)}><ShieldCheck /></button></div></nav>
+    <main className={`workspace ${page === 'map' || page === 'stage' || page === 'characters' || page === 'scenes' || page === 'audio' ? 'map-workspace' : ''}`}>{!projectClosed && !['map', 'stage', 'characters', 'scenes', 'audio'].includes(page) && !sidebarCollapsed && <Profiler id="chapter-tree" onRender={recordComponentRender}><Sidebar project={project} activate={activate} addChapter={addChapter} addFragment={addFragment} removeFragment={removeFragment} openSettings={() => setChapterSettingsOpen(true)} toggleChapterDisabled={toggleChapterDisabled} collapseSidebar={() => setSidebarCollapsed(true)} structureAction={(action, chapterId, fragmentId) => void structureAction(action, chapterId, fragmentId)} /></Profiler>}{!projectClosed && !['map', 'stage', 'characters', 'scenes', 'audio'].includes(page) && sidebarCollapsed && <button className="sidebar-expand" title="展开章节列表" onClick={() => setSidebarCollapsed(false)}><ArrowRight /></button>}<section className="page-content"><AnimatePresence mode="wait" initial={false}><motion.div className="page-transition" key={projectClosed ? 'closed' : page} initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 9 }} animate={{ opacity: 1, y: 0 }} exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -7 }} transition={{ duration: reducedMotion ? .08 : .22, ease: [.2, .8, .2, 1] }}>{projectClosed ? <div className="closed-project"><FolderOpen /><strong>没有打开的项目</strong><span>新建项目或打开本地 Hikari v3 项目继续创作。</span><div><button className="button primary" onClick={() => void doNew()}><FilePlus2 />新建项目</button><button className="button ghost" onClick={() => void doOpen()}><FolderOpen />打开项目</button></div></div> : pages[page]}</motion.div></AnimatePresence></section></main>
+    <ModalLayer modal={modal} project={project} close={() => { setModal(null); setBlockInsertIndex(null); }} addBlock={addBlock} runBuild={(kind, report, outputRoot) => void runBuild(kind, report, outputRoot)} locate={activate} buildOutputRoot={buildOutputRoot} updateBuildOutputRoot={updateBuildOutputRoot} />
+    {buildProgress && <BuildProgressDialog task={buildProgress} close={() => { if (buildProgress.status !== 'running') setBuildProgress(null); }} />}
     {modal === 'search' && <SearchPalette project={project} close={() => setModal(null)} locate={locateSearchResult} replaceText={replaceProjectText} />}
     <RuntimeSettingsDialog open={settingsOpen} project={project} close={() => setSettingsOpen(false)} apply={(settings, resolution) => { commit((current) => ({ ...current, settings, meta: { ...current.meta, resolution } }), '更新运行设置'); setSettingsOpen(false); show('运行设置已更新'); }} />
+    <DesktopMaintenanceDialog open={maintenanceOpen} close={() => setMaintenanceOpen(false)} notify={show} requestConfirm={requestConfirm} />
     <EditorAppearanceDialog open={themeOpen} close={() => setThemeOpen(false)} openGameTheme={() => setGameThemeOpen(true)} />
     <GameUiThemeDialog open={gameThemeOpen} project={project} close={() => setGameThemeOpen(false)} relinkAsset={async (assetId) => { const replacement = await replaceAssetFile(assetId); if (!replacement) return; commit((current) => { const existing = current.assets.find((asset) => asset.id === assetId); const next = { ...existing, ...replacement, id: assetId, forceBundle: existing?.forceBundle } as Asset; return { ...current, assets: existing ? current.assets.map((asset) => asset.id === assetId ? next : asset) : [...current.assets, next] }; }, `重新定位游戏 UI 素材 ${assetId}`); show('游戏 UI 素材已恢复'); }} apply={(ui, gameVersion) => { commit((current) => ({ ...current, ui, meta: { ...current.meta, gameVersion } }), '更新游戏 UI 主题'); setGameThemeOpen(false); show('游戏 UI 主题已应用'); }} />
     <ChapterSchedulingDialog open={chapterSettingsOpen} project={project} close={() => setChapterSettingsOpen(false)} apply={(chapterScheduling) => { commit((current) => ({ ...current, settings: { ...current.settings, chapterScheduling } }), '更新章节调度'); setChapterSettingsOpen(false); show('章节运行设置已更新'); }} />
     <NotificationCenter open={notificationsOpen} items={notifications} close={() => setNotificationsOpen(false)} markAllRead={() => setNotifications((items) => items.map((item) => ({ ...item, read: true })))} clear={() => setNotifications([])} />
-    <ScriptImportDialog open={scriptImportOpen} busy={scriptImportBusy} preview={scriptImportPreview} close={() => { setScriptImportOpen(false); setScriptImportPreview(null); }} selectFile={() => void selectScriptImport()} apply={applyScriptImport} />
+    <ScriptImportDialog open={scriptImportOpen} busy={scriptImportBusy} preview={scriptImportPreview} characters={project.characters} updatePreview={setScriptImportPreview} close={() => { setScriptImportOpen(false); setScriptImportPreview(null); }} selectFile={(rules) => void selectScriptImport(rules)} pasteText={(rules) => void pasteScriptImport(rules)} apply={applyScriptImport} />
     <FrontendDialog dialog={appDialog} updateValue={(value) => setAppDialog((current) => current ? { ...current, value } : current)} close={closeAppDialog} />
     <AnimatePresence>{toast && <motion.div className={`toast show ${toast.tone === 'error' ? 'error' : ''}`} initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 18, scale: .97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 10, scale: .98 }} transition={{ duration: reducedMotion ? .08 : .2 }}><CheckCircle2 /><span>{toast.text}</span></motion.div>}</AnimatePresence>
-  </div>;
+  </div></Profiler>;
 }

@@ -5,6 +5,11 @@ import { fileURLToPath, URL } from 'node:url';
 export default defineConfig({
   plugins: [react()],
   base: './',
+  resolve: {
+    // The editor records component-level startup timings in production. The
+    // separate game runtime config keeps using React's standard production build.
+    alias: { 'react-dom/client': 'react-dom/profiling' },
+  },
   build: {
     outDir: 'dist',
     emptyOutDir: true,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SaveGame } from '../types';
-import { advanceEngine, createEngineState, createSaveGame, currentBlock, loadSaveGame, rollbackEngine } from '../runtime';
+import { advanceEngine, createEngineState, createSaveGame, currentBlock, loadSaveGame, loadSaveGameWithReport, rollbackEngine, SaveGameLoadError } from '../runtime';
 import { testProject } from './fixtures';
 
 function dialogueProject() {
@@ -50,17 +50,89 @@ describe('save games and rollback', () => {
     delete legacyState.traceCursor;
     const legacy = { ...current, engineVersion: 2, state: legacyState as SaveGame['state'] };
 
-    const loaded = loadSaveGame(project, legacy);
-    expect(loaded.executionTrace).toEqual([]);
-    expect(loaded.traceCursor).toBe(-1);
+    const result = loadSaveGameWithReport(project, legacy);
+    expect(result.state.executionTrace).toEqual([]);
+    expect(result.state.traceCursor).toBe(-1);
+    expect(result.migrated).toBe(true);
+    expect(result.save.engineVersion).toBe(3);
+    expect(result.save.migration).toMatchObject({ fromEngineVersion: 2, steps: ['engine-2-to-3'] });
+  });
+
+  it('migrates engine v1 stage and audio state into the current schema', () => {
+    const project = dialogueProject();
+    const current = createSaveGame(project, createEngineState(project));
+    const legacyState = structuredClone(current.state) as unknown as Record<string, unknown>;
+    legacyState.audio = { track: 'legacy-theme', volume: 0.4, loop: true };
+    legacyState.stage = { backgroundAssetId: 'legacy-background' };
+    delete legacyState.callStack;
+    delete legacyState.readBlocks;
+    delete legacyState.backlog;
+    delete legacyState.rollbackStack;
+    delete legacyState.stepsExecuted;
+    delete legacyState.executionTrace;
+    delete legacyState.traceCursor;
+    const legacy = { ...current, engineVersion: 1, state: legacyState as unknown as SaveGame['state'] };
+
+    const result = loadSaveGameWithReport(project, legacy);
+
+    expect(result.migrated).toBe(true);
+    expect(result.save.engineVersion).toBe(3);
+    expect(result.save.migration).toMatchObject({ fromEngineVersion: 1, steps: ['engine-1-to-3'] });
+    expect(result.state.stage).toMatchObject({ backgroundAssetId: 'legacy-background', characters: {}, sceneLayers: [] });
+    expect(result.state.audio.bgm).toMatchObject({ track: 'legacy-theme', volume: 0.4, loop: true, playing: true });
+    expect(result.state.audio.sfx.playing).toBe(false);
+    expect(result.state.audio.voice.playing).toBe(false);
+    expect(result.state.callStack).toEqual([]);
+    expect(result.state.executionTrace).toEqual([]);
+    expect(result.state.traceCursor).toBe(-1);
   });
 
   it('rejects foreign and future saves', () => {
     const project = dialogueProject();
     const save = createSaveGame(project, createEngineState(project));
 
-    expect(() => loadSaveGame(project, { ...save, projectId: 'other-project' })).toThrow('存档不属于当前项目');
+    expect(() => loadSaveGame(project, { ...save, projectId: 'other-project' })).toThrow('属于其他游戏');
     expect(() => loadSaveGame(project, { ...save, engineVersion: 999 })).toThrow('高于当前版本');
+  });
+
+  it('provides stable error codes for project mismatch and future saves', () => {
+    const project = dialogueProject();
+    const save = createSaveGame(project, createEngineState(project));
+
+    for (const [candidate, code] of [
+      [{ ...save, projectId: 'other-project' }, 'PROJECT_MISMATCH'],
+      [{ ...save, engineVersion: 999 }, 'FUTURE_ENGINE_VERSION'],
+    ] as const) {
+      try {
+        loadSaveGame(project, candidate);
+        throw new Error('Expected save loading to fail');
+      } catch (error) {
+        expect(error).toBeInstanceOf(SaveGameLoadError);
+        expect((error as SaveGameLoadError).code).toBe(code);
+      }
+    }
+  });
+
+  it('warns when a save targets another project revision and clamps stale positions', () => {
+    const project = dialogueProject();
+    const save = createSaveGame(project, createEngineState(project));
+    save.projectVersion = 2;
+    save.state.instructionPointer = 999;
+
+    const result = loadSaveGameWithReport(project, save);
+    expect(result.state.instructionPointer).toBe(2);
+    expect(result.warnings).toEqual([
+      '存档来自项目 v2，将按当前项目 v3 兼容读取',
+      '存档指令位置已调整到当前剧情范围',
+    ]);
+  });
+
+  it('rejects saves whose active fragment no longer exists', () => {
+    const project = dialogueProject();
+    const save = createSaveGame(project, createEngineState(project));
+    save.state.fragmentId = 'removed-fragment';
+
+    expect(() => loadSaveGame(project, save)).toThrow('剧情片段已不存在');
   });
 
   it('rolls back visible progress and keeps shared values', () => {

@@ -75,7 +75,7 @@ export function ProjectLaunchScreen({ startInWizard = false, onOpen, onOpenRecen
         </div>
       </section>
       {error && <div className="launch-error">{error}</div>}
-      <footer>Hikari Studio · v0.3.0</footer>
+      <footer>Hikari Studio · v0.4.0 Beta</footer>
     </section>
   </main>;
 }

@@ -9,6 +9,59 @@ from backend.project_store import ProjectStore, default_project
 
 
 class ProjectStoreTests(unittest.TestCase):
+    def test_v3_load_resolves_custom_asset_directory_once(self) -> None:
+        class CountingProjectStore(ProjectStore):
+            asset_directory_reads = 0
+
+            @property
+            def asset_dir(self) -> Path:
+                self.asset_directory_reads += 1
+                return super().asset_dir
+
+        with tempfile.TemporaryDirectory() as directory:
+            store = CountingProjectStore(Path(directory))
+            project = store.load()
+            project["assets"] = [
+                {"id": "custom-a", "kind": "image", "name": "A", "path": "角色 头像#1.png"},
+                {"id": "custom-b", "kind": "image", "name": "B", "path": "nested/b.png"},
+            ]
+            store.save(project)
+            store.asset_directory_reads = 0
+
+            loaded = store.load()
+
+            self.assertEqual(store.asset_directory_reads, 1)
+            self.assertTrue(loaded["assets"][0]["uri"].endswith("/%E8%A7%92%E8%89%B2%20%E5%A4%B4%E5%83%8F%231.png"))
+            self.assertTrue(loaded["assets"][1]["uri"].endswith("/b.png"))
+
+    def test_scene_migration_uses_first_matching_scene_without_linear_scans(self) -> None:
+        project = default_project()
+        project["scenes"] = [
+            {"id": "scene-by-asset", "name": "其他场景", "layers": [{"assetId": "shared-background"}]},
+            {"id": "scene-empty", "name": "空图层", "layers": []},
+            {"id": "scene-by-name", "name": "目标场景", "layers": [{"assetId": "another-background"}]},
+        ]
+        project["scripts"][project["activeFragmentId"]] = [{
+            "id": "scene-block", "type": "scene", "title": "目标场景", "assetId": "shared-background",
+        }]
+
+        migrated = ProjectStore._migrate(project)
+
+        self.assertEqual(migrated["scripts"][project["activeFragmentId"]][0]["sceneId"], "scene-by-asset")
+
+    def test_default_migration_does_not_mutate_caller_project(self) -> None:
+        project = default_project()
+        project["settings"].pop("autoPlay", None)
+        project["characters"][0].pop("portraits", None)
+
+        migrated = ProjectStore._migrate(project)
+
+        self.assertIsNot(migrated, project)
+        self.assertNotIn("autoPlay", project["settings"])
+        self.assertNotIn("portraits", project["characters"][0])
+        self.assertFalse(migrated["settings"]["autoPlay"])
+        self.assertEqual(migrated["characters"][0]["portraits"], {})
+
     def test_stage_timeline_persists_per_fragment(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = ProjectStore(Path(directory))
@@ -175,6 +228,10 @@ class ProjectStoreTests(unittest.TestCase):
             self.assertEqual(snapshot["project"]["meta"]["id"], project["meta"]["id"])
             self.assertFalse(snapshot["recoveredDuringLoad"])
             self.assertTrue(snapshot["updatedAt"])
+            status = store.get_recovery_snapshot_status()
+            self.assertTrue(status["exists"])
+            self.assertEqual(status["updatedAt"], snapshot["updatedAt"])
+            self.assertGreater(status["bytes"], 0)
 
             store.project_path.write_text("{broken", encoding="utf-8")
             recovered = store.load()

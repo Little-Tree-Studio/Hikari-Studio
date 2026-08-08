@@ -1,6 +1,9 @@
-import type { AgentContext, AgentPatchApplyResult, AgentPatchPreconditionResult, AgentPlan, AgentResultComparison, AgentResultRef, AgentTask, AiModelDiscovery, AiSettings, AiSettingsInput, Asset, AssetFileStatus, AssetFolderRepairPreview, AssetRepairIssue, AssetRepairMatch, AudioCategory, CommandHistoryStorageStats, DesktopProjectSession, EditorAppearance, Project, ProjectCreationOptions, RecentProject, RecoverySnapshot, ScriptImportPreview } from './types';
+import type { AgentContext, AgentPatchApplyResult, AgentPatchPreconditionResult, AgentPlan, AgentResultComparison, AgentResultRef, AgentTask, AiModelDiscovery, AiSettings, AiSettingsInput, AppInfo, Asset, AssetFileStatus, AssetFolderRepairPreview, AssetRepairIssue, AssetRepairMatch, AudioCategory, BuildPreflightReport, BuildResult, BuildTarget, Character, CommandHistoryStorageStats, CrashReport, CrashReportCenter, CrashReportSummary, DesktopProjectSession, EditorAppearance, ProfiledDesktopProjectSession, Project, ProjectCreationOptions, ProjectLoadPerformance, ProjectReloadFrontendPerformance, ProjectReloadPerformance, RecentProject, RecoverySnapshot, RecoverySnapshotStatus, ScriptImportPreview, ScriptImportRules, UpdateStatus } from './types';
+import type { PreviewSeekPerformanceReport } from './performance/previewSeekProfiler';
 import { readLargeValue, writeLargeValue } from './core/storage';
 import type { PersistedCommandHistory } from './hooks/useCommandHistory';
+import { runBuildPreflight } from './engine-core/buildPreflight';
+import type { BranchSimulationProgress } from './engine-core/types';
 
 const waitForDesktopApi = async () => {
   const ready = () => typeof window.pywebview?.api?.load_project_session === 'function';
@@ -32,6 +35,25 @@ const acceptProjectSession = (session: DesktopProjectSession): Project => {
   return session.project;
 };
 
+const reloadMark = (reloadId: string, phase: string) => performance.mark(`hikari.reload.${reloadId}.${phase}`);
+const createReloadId = () => `reload-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+const supportsCompressedProjectPayload = () => typeof DecompressionStream === 'function' && typeof atob === 'function';
+
+const decodeProjectPayload = async (session: ProfiledDesktopProjectSession): Promise<string> => {
+  if (!session.projectPayload) {
+    if (session.projectJson) return session.projectJson;
+    throw new Error('桌面项目服务返回了空载荷');
+  }
+  if (!session.encoding || session.encoding === 'plain-json') return session.projectPayload;
+  if (session.encoding !== 'gzip-base64') throw new Error(`不支持的项目载荷编码：${String(session.encoding)}`);
+  if (!supportsCompressedProjectPayload()) throw new Error('当前 WebView2 不支持 gzip 项目载荷，请更新 WebView2 Runtime');
+  const binary = atob(session.projectPayload);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  const decompressed = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+  return new Response(decompressed).text();
+};
+
 const withTimeout = async <T>(promise: Promise<T>, milliseconds = 4000): Promise<T> => {
   let timer = 0;
   const timeout = new Promise<never>((_, reject) => {
@@ -56,11 +78,105 @@ export async function saveEditorAppearance(appearance: EditorAppearance): Promis
   return appearance;
 }
 
-export async function loadProject(fallback: Project): Promise<Project> {
+export async function getAppInfo(): Promise<AppInfo> {
+  const api = await waitForDesktopApi();
+  if (!api) return { name: 'Hikari Studio', version: '0.4.0-beta.1', channel: 'beta', platform: 'Web', projectPath: '', dataPath: '', buildPath: '', startupProjectRequested: false };
+  return withTimeout(api.get_app_info());
+}
+
+export async function getUpdateStatus(): Promise<UpdateStatus> {
+  const api = await waitForDesktopApi();
+  if (!api) return { status: 'idle', channel: 'beta', currentVersion: '0.4.0-beta.1', rollbackInstallers: [] };
+  return withTimeout(api.get_update_status());
+}
+
+export async function checkForUpdates(force = true, channel: 'stable' | 'beta' = 'beta'): Promise<UpdateStatus> {
+  const api = await waitForDesktopApi();
+  if (!api) throw new Error('更新检查仅在桌面应用中可用');
+  return withTimeout(api.check_for_updates(force, channel), 30000);
+}
+
+export async function downloadUpdate(): Promise<UpdateStatus> {
+  const api = await waitForDesktopApi();
+  if (!api) throw new Error('更新下载仅在桌面应用中可用');
+  return withTimeout(api.download_update(), 30 * 60 * 1000);
+}
+
+export async function installDownloadedUpdate(confirmed: boolean, version?: string) {
+  const api = await waitForDesktopApi();
+  if (!api) throw new Error('更新安装仅在桌面应用中可用');
+  return withTimeout(api.install_downloaded_update(confirmed, version), 30000);
+}
+
+export async function getCrashReports(): Promise<CrashReportCenter> {
+  const api = await waitForDesktopApi();
+  return api ? withTimeout(api.get_crash_reports()) : { uploadConfigured: false, reports: [] };
+}
+
+export async function getCrashReport(reportId: string): Promise<CrashReport> {
+  const api = await waitForDesktopApi();
+  if (!api) throw new Error('崩溃报告仅在桌面应用中可用');
+  return withTimeout(api.get_crash_report(reportId));
+}
+
+export async function reportFrontendCrash(payload: Record<string, unknown>): Promise<CrashReportSummary | null> {
+  const api = await waitForDesktopApi();
+  if (!api) return null;
+  return withTimeout(api.report_frontend_crash(payload));
+}
+
+export async function submitCrashReport(reportId: string, confirmed: boolean) {
+  const api = await waitForDesktopApi();
+  if (!api) throw new Error('崩溃报告上传仅在桌面应用中可用');
+  return withTimeout(api.submit_crash_report(reportId, confirmed), 30000);
+}
+
+export async function deleteCrashReport(reportId: string) {
+  const api = await waitForDesktopApi();
+  if (!api) return true;
+  return withTimeout(api.delete_crash_report(reportId));
+}
+
+export async function loadProjectWithPerformance(fallback: Project): Promise<{ project: Project; performance: ProjectLoadPerformance | null }> {
+  const startedAt = performance.now();
+  const reloadId = createReloadId();
+  reloadMark(reloadId, 'frontend-start');
   try {
+    const apiWaitStarted = performance.now();
     const api = await waitForDesktopApi();
+    const apiWaitMs = performance.now() - apiWaitStarted;
+    reloadMark(reloadId, 'api-ready');
     if (api) {
-      return acceptProjectSession(await withTimeout(api.load_project_session(), 30000));
+      if (typeof api.load_project_session_profiled === 'function') {
+        const bridgeStarted = performance.now();
+        const session = await withTimeout(api.load_project_session_profiled(reloadId, supportsCompressedProjectPayload()), 30000);
+        const bridgeRoundTripMs = performance.now() - bridgeStarted;
+        reloadMark(reloadId, 'bridge-complete');
+        const decodeStarted = performance.now();
+        const projectJson = await decodeProjectPayload(session);
+        const payloadDecodeMs = performance.now() - decodeStarted;
+        reloadMark(reloadId, 'payload-decoded');
+        const parseStarted = performance.now();
+        const project = JSON.parse(projectJson) as Project;
+        const jsonParseMs = performance.now() - parseStarted;
+        reloadMark(reloadId, 'json-parsed');
+        currentProjectSession = { projectPath: session.projectPath, sessionToken: session.sessionToken };
+        return {
+          project,
+          performance: {
+            reloadId,
+            startedAt,
+            backend: session.backend,
+            apiWaitMs,
+            bridgeRoundTripMs,
+            webViewTransferEstimateMs: Math.max(0, bridgeRoundTripMs - session.backend.pythonTotalMs),
+            payloadDecodeMs,
+            jsonParseMs,
+            frontendSessionLoadMs: performance.now() - startedAt,
+          },
+        };
+      }
+      return { project: acceptProjectSession(await withTimeout(api.load_project_session(), 30000)), performance: null };
     }
   } catch (error) {
     console.error('Python project loading failed', error);
@@ -68,7 +184,35 @@ export async function loadProject(fallback: Project): Promise<Project> {
   }
   if (window.__HIKARI_DESKTOP__ === true) throw new Error('桌面项目服务未就绪，已停止加载以保护项目文件');
   const cached = await readLargeValue('hikari-project');
-  return cached ? JSON.parse(cached) as Project : fallback;
+  return { project: cached ? JSON.parse(cached) as Project : fallback, performance: null };
+}
+
+export async function loadProject(fallback: Project): Promise<Project> {
+  return (await loadProjectWithPerformance(fallback)).project;
+}
+
+export async function reportProjectReloadPerformance(reloadId: string, surface: 'editor' | 'project-launcher', frontend: ProjectReloadFrontendPerformance): Promise<ProjectReloadPerformance | null> {
+  const api = await waitForDesktopApi();
+  if (!api || typeof api.report_project_reload_performance !== 'function') return null;
+  return withTimeout(api.report_project_reload_performance(reloadId, surface, frontend));
+}
+
+export async function getProjectReloadPerformance(): Promise<ProjectReloadPerformance | null> {
+  const api = await waitForDesktopApi();
+  if (!api || typeof api.get_project_reload_performance !== 'function') return window.__HIKARI_LAST_PROJECT_RELOAD__ ?? null;
+  return withTimeout(api.get_project_reload_performance());
+}
+
+export async function reportPreviewSeekPerformance(report: PreviewSeekPerformanceReport): Promise<PreviewSeekPerformanceReport | null> {
+  const api = await waitForDesktopApi();
+  if (!api || typeof api.report_preview_seek_performance !== 'function') return report;
+  return withTimeout(api.report_preview_seek_performance(report));
+}
+
+export async function getPreviewSeekPerformance(): Promise<PreviewSeekPerformanceReport | null> {
+  const api = await waitForDesktopApi();
+  if (!api || typeof api.get_preview_seek_performance !== 'function') return window.__HIKARI_PREVIEW_SEEK_PERFORMANCE__ ?? null;
+  return withTimeout(api.get_preview_seek_performance());
 }
 
 export async function saveProject(project: Project) {
@@ -94,6 +238,60 @@ export async function saveProjectAs(project: Project) {
 export async function callWindow(action: 'minimize_window' | 'toggle_maximize' | 'close_window') {
   const api = await waitForDesktopApi();
   return api?.[action]();
+}
+
+let windowDrag: { pointerId: number; offsetX: number; offsetY: number; target: Element } | null = null;
+let pendingWindowPosition: { x: number; y: number } | null = null;
+let movingWindow = false;
+
+const flushWindowPosition = async () => {
+  if (movingWindow) return;
+  movingWindow = true;
+  try {
+    while (pendingWindowPosition) {
+      const position = pendingWindowPosition;
+      pendingWindowPosition = null;
+      const api = await waitForDesktopApi();
+      await api?.move_window(position.x, position.y);
+    }
+  } catch {
+    pendingWindowPosition = null;
+  } finally {
+    movingWindow = false;
+  }
+};
+
+const updateWindowDrag = (event: PointerEvent) => {
+  if (!windowDrag || event.pointerId !== windowDrag.pointerId) return;
+  pendingWindowPosition = {
+    x: event.screenX - windowDrag.offsetX,
+    y: event.screenY - windowDrag.offsetY,
+  };
+  void flushWindowPosition();
+};
+
+const finishWindowDrag = (event: PointerEvent) => {
+  if (!windowDrag || event.pointerId !== windowDrag.pointerId) return;
+  updateWindowDrag(event);
+  if (windowDrag.target.hasPointerCapture(event.pointerId)) windowDrag.target.releasePointerCapture(event.pointerId);
+  windowDrag = null;
+  document.removeEventListener('pointermove', updateWindowDrag);
+  document.removeEventListener('pointerup', finishWindowDrag);
+  document.removeEventListener('pointercancel', finishWindowDrag);
+};
+
+export function beginWindowDrag(event: PointerEvent) {
+  if (window.__HIKARI_DESKTOP__ !== true || windowDrag) return;
+  if (event.button !== 0 || !event.isPrimary) return;
+  const target = event.target;
+  if (!(target instanceof Element) || !target.closest('.titlebar-drag')) return;
+  if (target.closest('.titlebar-no-drag,button,input,select,textarea,a,[role="button"]')) return;
+  event.preventDefault();
+  windowDrag = { pointerId: event.pointerId, offsetX: event.clientX, offsetY: event.clientY, target };
+  target.setPointerCapture(event.pointerId);
+  document.addEventListener('pointermove', updateWindowDrag);
+  document.addEventListener('pointerup', finishWindowDrag);
+  document.addEventListener('pointercancel', finishWindowDrag);
 }
 
 export async function setProjectCreationWindowMode(enabled: boolean) {
@@ -135,6 +333,12 @@ export async function selectProjectLocation(): Promise<string | null> {
   const api = await waitForDesktopApi();
   if (!api) return null;
   return withTimeout(api.select_project_location(), 30000);
+}
+
+export async function selectExportLocation(): Promise<string | null> {
+  const api = await waitForDesktopApi();
+  if (!api) return null;
+  return withTimeout(api.select_export_location(), 30000);
 }
 
 export async function openProjectPath(path: string): Promise<Project> {
@@ -197,28 +401,103 @@ export async function transcribeAudio(assets: Asset[], concurrency: number, forc
   return withTimeout(api.transcribe_audio(assets, concurrency, force), 30 * 60 * 1000);
 }
 
-export async function previewScriptImport(): Promise<ScriptImportPreview | null> {
+export async function previewScriptImport(characters: Character[], rules: ScriptImportRules): Promise<ScriptImportPreview | null> {
   const api = await waitForDesktopApi();
   if (!api) throw new Error('剧本导入仅在桌面应用中可用');
-  return withTimeout(api.preview_script_import(), 30000);
+  return withTimeout(api.preview_script_import(null, characters, rules), 30000);
 }
 
-export async function exportRenpy(project: Project) {
+export async function readClipboardText(fallback = ''): Promise<string> {
+  const api = await waitForDesktopApi();
+  if (api && typeof api.read_clipboard_text === 'function') {
+    try { return await withTimeout(api.read_clipboard_text(), 5000); } catch { /* use the WebView or editor fallback */ }
+  }
+  try { return await navigator.clipboard.readText() || fallback; } catch { return fallback; }
+}
+
+export async function writeClipboardText(text: string): Promise<boolean> {
+  const api = await waitForDesktopApi();
+  if (api && typeof api.write_clipboard_text === 'function') {
+    try { return await withTimeout(api.write_clipboard_text(text), 5000); } catch { /* preserve the editor-local fallback */ }
+  }
+  try { await navigator.clipboard.writeText(text); return true; } catch { return false; }
+}
+
+const previewClipboardFallback = (text: string, rules?: ScriptImportRules): ScriptImportPreview => {
+  const prefix = 'HIKARI_BLOCKS_V1\n';
+  if (text.startsWith(prefix)) {
+    try {
+      const blocks = JSON.parse(text.slice(prefix.length));
+      if (Array.isArray(blocks)) return { sourceName: '浏览器剪贴板', format: 'Hikari JSON', blocks, warnings: [], rules };
+    } catch { /* report an empty preview below */ }
+  }
+  const blocks = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line, index) => {
+    const dialogue = /^([^：:]{1,30})[：:]\s*(.+)$/.exec(line);
+    return dialogue
+      ? { id: `clipboard-${Date.now().toString(36)}-${index}`, type: 'dialogue' as const, speaker: dialogue[1].trim(), text: dialogue[2].trim(), expression: '默认' }
+      : { id: `clipboard-${Date.now().toString(36)}-${index}`, type: 'narration' as const, text: line };
+  });
+  return { sourceName: '浏览器剪贴板', format: 'TXT', blocks, warnings: blocks.length ? ['Web 开发模式使用兼容解析；桌面版由 Python 处理'] : ['剪贴板中没有文本'], rules };
+};
+
+export async function previewClipboardScript(fallback = '', characters: Character[] = [], rules?: ScriptImportRules): Promise<ScriptImportPreview> {
+  const api = await waitForDesktopApi();
+  if (api && typeof api.preview_clipboard_script === 'function') return withTimeout(api.preview_clipboard_script(fallback, characters, rules), 10000);
+  return previewClipboardFallback(await readClipboardText(fallback), rules);
+}
+
+export async function exportRenpy(project: Project, outputRoot?: string) {
   const api = await waitForDesktopApi();
   if (!api) throw new Error('导出仅在桌面应用中可用');
-  return withTimeout(api.export_renpy(project), 30000);
+  return withTimeout(api.export_renpy(project, outputRoot), 30000);
 }
 
-export async function buildWeb(project: Project) {
+export class BuildPreflightRejected extends Error {
+  constructor(public readonly report: BuildPreflightReport, message = `构建前检查发现 ${report.errors} 个阻断问题`) {
+    super(message);
+    this.name = 'BuildPreflightRejected';
+  }
+}
+
+export async function preflightBuild(project: Project, target: BuildTarget, options: { signal?: AbortSignal; onProgress?: (progress: BranchSimulationProgress) => void; bypassCache?: boolean } = {}) {
+  const frontendReport = await runBuildPreflight(project, target, options);
+  const api = await waitForDesktopApi();
+  if (!api || typeof api.preflight_build !== 'function') return frontendReport;
+  return withTimeout(api.preflight_build(project, target, frontendReport), 30000);
+}
+
+function acceptedBuild(result: BuildResult): asserts result is BuildResult & { ok: true; path: string } {
+  if (result.ok && result.path) return;
+  if (result.preflight) throw new BuildPreflightRejected(result.preflight, result.error?.message);
+  throw new Error(result.error?.message ?? '构建失败，桌面端没有返回产物路径');
+}
+
+export async function buildWeb(project: Project, preflight?: BuildPreflightReport, outputRoot?: string) {
   const api = await waitForDesktopApi();
   if (!api) throw new Error('构建仅在桌面应用中可用');
-  return withTimeout(api.build_web(project), 30000);
+  const result = await withTimeout(api.build_web(project, preflight, outputRoot), 30000);
+  acceptedBuild(result);
+  return result;
 }
 
-export async function buildWindows(project: Project) {
+export async function buildWindows(project: Project, preflight?: BuildPreflightReport, outputRoot?: string) {
   const api = await waitForDesktopApi();
   if (!api) throw new Error('Windows 构建仅在桌面应用中可用');
-  return withTimeout(api.build_windows(project), 15 * 60 * 1000);
+  const result = await withTimeout(api.build_windows(project, preflight, outputRoot), 15 * 60 * 1000);
+  acceptedBuild(result);
+  return result;
+}
+
+export async function openBuildOutput(path: string) {
+  const api = await waitForDesktopApi();
+  if (!api) throw new Error('打开输出目录仅在桌面应用中可用');
+  return withTimeout(api.open_build_output(path), 30000);
+}
+
+export async function launchBuildOutput(path: string) {
+  const api = await waitForDesktopApi();
+  if (!api) throw new Error('运行构建产物仅在桌面应用中可用');
+  return withTimeout(api.launch_build_output(path), 30000);
 }
 
 export async function getAiSettings(): Promise<AiSettings> {
@@ -297,6 +576,12 @@ export async function loadRecoverySnapshot(): Promise<RecoverySnapshot | null> {
   const api = await waitForDesktopApi();
   if (!api) return null;
   return withTimeout(api.load_recovery_snapshot(), 10000);
+}
+
+export async function getRecoverySnapshotStatus(): Promise<RecoverySnapshotStatus> {
+  const api = await waitForDesktopApi();
+  if (!api || typeof api.get_recovery_snapshot_status !== 'function') return { exists: false, updatedAt: null, bytes: 0, recoveredDuringLoad: false };
+  return withTimeout(api.get_recovery_snapshot_status(), 10000);
 }
 
 export async function saveCommandHistory(history: PersistedCommandHistory<Project>) {
