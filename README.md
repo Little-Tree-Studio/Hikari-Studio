@@ -28,11 +28,22 @@
 ## 下载与版本
 
 <p align="center">
-  <a href="https://github.com/kylemarvin884/Hikari-Studio/releases"><img src="https://img.shields.io/badge/下载-最新预览版-e56b4f?style=for-the-badge&logo=github" alt="下载最新预览版" /></a>
-  <a href="https://github.com/kylemarvin884/Hikari-Studio/releases"><img src="https://img.shields.io/badge/查看-全部版本-176b5b?style=for-the-badge&logo=github" alt="查看全部版本" /></a>
+  <a href="https://github.com/kylemarvin884/Hikari-Studio/releases/download/v0.4.0-beta.1/Hikari-Studio-Setup-0.4.0-beta.1.exe"><img src="https://img.shields.io/badge/下载-Windows%20安装包-e56b4f?style=for-the-badge&logo=windows11&logoColor=white" alt="下载 Windows 安装包" /></a>
+  <a href="https://github.com/kylemarvin884/Hikari-Studio/releases/download/v0.4.0-beta.1/Hikari-Studio-Portable-0.4.0-beta.1.zip"><img src="https://img.shields.io/badge/下载-Portable%20便携版-176b5b?style=for-the-badge&logo=windows11&logoColor=white" alt="下载 Portable 便携版" /></a>
+  <a href="https://github.com/kylemarvin884/Hikari-Studio/releases"><img src="https://img.shields.io/badge/查看-全部版本-202b33?style=for-the-badge&logo=github&logoColor=white" alt="查看全部版本" /></a>
 </p>
 
-最新公开预览版为 `v0.4.0-beta.1`。该版本带来完整演出时间轴、大型项目优化、统一构建前检查、SaveGame 恢复、更新与崩溃报告闭环，以及更完整的桌面导入与构建体验。Release 页面提供安装包、Portable ZIP、`latest.json` 与 SHA-256 清单。
+最新公开预览版为 `v0.4.0-beta.1`。该版本带来完整演出时间轴、大型项目优化、统一构建前检查、SaveGame 恢复、更新与崩溃报告闭环，以及更完整的桌面导入与构建体验。Release 页面同时提供 `latest.json` 和 SHA-256 清单。
+
+> [!WARNING]
+> 这是未签名的 Windows 预览版，安装前请核对 [`SHA256SUMS.txt`](https://github.com/kylemarvin884/Hikari-Studio/releases/download/v0.4.0-beta.1/SHA256SUMS.txt)。编辑器和 Windows 游戏需要 Microsoft Edge WebView2 Runtime；Ren'Py 导出仍是有限兼容。
+
+安装包校验示例：
+
+```powershell
+Get-FileHash .\Hikari-Studio-Setup-0.4.0-beta.1.exe -Algorithm SHA256
+Get-FileHash .\Hikari-Studio-Portable-0.4.0-beta.1.zip -Algorithm SHA256
+```
 
 ## 编辑器预览
 
@@ -279,7 +290,7 @@ pnpm run build
 pnpm exec playwright test
 ```
 
-最近一次 Windows 验证结果：Python `174` 项、崩溃收集服务 `4` 项、Vitest `118` 项、Playwright `33` 项全部通过；TypeScript 严格检查、编辑器与游戏运行时生产构建、Nuitka standalone 和 Inno Setup `v0.4.0-beta.1` 安装包构建均通过。
+最近一次本地 Windows 验证结果：Python `174` 项、崩溃收集服务 `4` 项、Vitest `118` 项、Playwright `33` 项通过；TypeScript 严格检查、编辑器与游戏运行时生产构建、Nuitka standalone 和 Inno Setup `v0.4.0-beta.1` 安装包构建均通过。GitHub runner 的 Windows 短路径规范化测试正在修复中，不影响本 Release 附件。
 
 安装版还通过了以下真实桌面流程：
 
