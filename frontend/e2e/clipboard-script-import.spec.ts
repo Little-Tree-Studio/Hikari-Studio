@@ -1,4 +1,9 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
+
+const selectOption = async (page: Page, trigger: Locator, value: string) => {
+  await trigger.click();
+  await page.locator(`[role="option"][data-value="${value}"]`).click();
+};
 
 test('clipboard text is parsed by the Python bridge before becoming Blocks', async ({ page }) => {
   const nativeDialogs: string[] = [];
@@ -42,10 +47,10 @@ test('clipboard text is parsed by the Python bridge before becoming Blocks', asy
   await page.getByRole('button', { name: '导入剧本' }).click();
   const importer = page.locator('.script-import-modal');
   const rules = importer.getByRole('region', { name: '文本解析规则' });
-  await rules.locator('label').filter({ hasText: '表情标记' }).locator('select').selectOption('brackets');
+  await selectOption(page, rules.locator('label').filter({ hasText: '表情标记' }).getByRole('combobox'), 'brackets');
   await importer.getByRole('button', { name: '粘贴文本' }).click();
   await expect(importer.getByText('系统剪贴板', { exact: true })).toBeVisible();
-  await expect(importer.getByLabel('第 1 行角色')).toHaveValue('lin');
+  await expect(importer.getByLabel('第 1 行角色')).toContainText('林澄');
   await expect(importer.getByLabel('第 1 行正文')).toHaveValue('由 Python 解析。');
   await expect(importer.getByText('显示名匹配 · 店长 → 林澄', { exact: true })).toBeVisible();
   await expect(importer.getByText('表情精确匹配 · 微笑', { exact: true })).toBeVisible();
@@ -109,11 +114,11 @@ test('import preview supports row correction and grouped character and expressio
   await importer.getByRole('button', { name: '粘贴文本' }).click();
   await expect(importer.getByRole('region', { name: '批量映射' })).toBeVisible();
   await expect(importer.getByLabel('批量映射角色 小林')).toBeVisible();
-  await importer.getByLabel('批量映射角色 小林').selectOption('lin');
-  await importer.getByLabel('第 3 行角色').selectOption('lin');
+  await selectOption(page, importer.getByLabel('批量映射角色 小林'), 'lin');
+  await selectOption(page, importer.getByLabel('第 3 行角色'), 'lin');
   await expect(importer.getByText('角色人工修正')).toHaveCount(3);
 
-  await importer.getByLabel('批量映射表情 林澄 开心').selectOption('微笑');
+  await selectOption(page, importer.getByLabel('批量映射表情 林澄 开心'), '微笑');
   await expect(importer.getByText('表情人工修正 · 微笑')).toHaveCount(3);
   await importer.getByLabel('第 3 行正文').fill('人工修正后的第三句。');
 

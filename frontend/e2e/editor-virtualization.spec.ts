@@ -114,7 +114,8 @@ test('seeking the OP timeline still selects the corresponding Block', async ({ p
 
   const opTimeline = page.getByRole('slider', { name: 'OP 时间轴' });
   await expect(opTimeline).toBeEnabled();
-  await opTimeline.fill('0');
+  await opTimeline.click();
+  await page.keyboard.press('Home');
   await expect(page.locator('[data-block-index="0"] .block-card')).toHaveClass(/selected/);
   await expect(page.locator('[data-block-index="2"] .block-card')).not.toHaveClass(/selected/);
 });

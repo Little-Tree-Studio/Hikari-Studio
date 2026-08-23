@@ -8,16 +8,15 @@ import { runEngineSelfTest } from './engine-core/selftest';
 import { getBlockConformanceCase } from './engine-core/blockConformance';
 import { EditorAppearanceProvider } from './core/editorAppearance';
 import { installGlobalErrorCapture } from './core/logger';
-import { beginWindowDrag } from './api';
 import './styles.css';
 import './save-games.css';
 import './design-system/tokens.css';
 import './design-system/motion.css';
 import './design-system/components.css';
+import './design-system/controls.css';
 import './design-system/project-launch.css';
 
 installGlobalErrorCapture();
-document.addEventListener('pointerdown', beginWindowDrag);
 
 const engineTestRequested = new URLSearchParams(window.location.search).has('engine-test');
 const blockConformanceCase = getBlockConformanceCase(new URLSearchParams(window.location.search).get('block-conformance'));

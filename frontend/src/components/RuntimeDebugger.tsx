@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CircleAlert, CircleCheck, GitBranch, Layers3, ListChecks, LoaderCircle, Play, Square, Terminal, Trash2, TriangleAlert, Variable } from "lucide-react";
 import { diagnoseProject } from "../engine-core/diagnostics";
 import { branchSimulationRunner } from "../engine-core/simulationRunner";
+import { Select } from "./ui/Select";
 import type { BranchSimulationProgress, BranchSimulationResult, EngineState } from "../engine-core/types";
 import type { Project } from "../types";
 
@@ -74,7 +75,7 @@ export function RuntimeDebugger({ project, state, consoleEntries, updateVariable
         {Object.entries(state.variables).map(([name, value]) => <label key={name}>
           <span><code>{name}</code><small>{typeof value}</small></span>
           {typeof value === "boolean"
-            ? <select value={String(value)} onChange={(event) => updateVariable(name, event.target.value)}><option value="true">true</option><option value="false">false</option></select>
+            ? <Select value={String(value)} onChange={(value) => updateVariable(name, value)}><option value="true">true</option><option value="false">false</option></Select>
             : <input value={String(value)} type={typeof value === "number" ? "number" : "text"} onChange={(event) => updateVariable(name, event.target.value)} />}
         </label>)}
         {!Object.keys(state.variables).length && <div className="runtime-empty">当前没有运行时变量</div>}

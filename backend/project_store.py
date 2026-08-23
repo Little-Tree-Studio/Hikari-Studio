@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+from .native_asset_worker import scan_assets
+
 
 PROJECT_VERSION = 3
 
@@ -599,16 +601,33 @@ class ProjectStore:
         if not root.is_dir():
             raise ValueError("选择的素材修复目录不存在")
 
-        candidates = sorted(
-            (path for path in root.rglob("*") if path.is_file() and path.suffix.lower() in SUPPORTED_ASSET_EXTENSIONS),
-            key=lambda path: str(path).casefold(),
-        )
-        hashes: dict[Path, str] = {}
+        expected_hashes = {
+            str(issue.get("contentHash") or "").lower()
+            for issue in issues
+            if str(issue.get("contentHash") or "")
+        }
+        native_files = scan_assets(root, SUPPORTED_ASSET_EXTENSIONS, hash_files=bool(expected_hashes))
+        if native_files is None:
+            candidates = sorted(
+                (path for path in root.rglob("*") if path.is_file() and path.suffix.lower() in SUPPORTED_ASSET_EXTENSIONS),
+                key=lambda path: str(path).casefold(),
+            )
+            sizes: dict[Path, int] = {}
+            hashes: dict[Path, str] = {}
+        else:
+            candidates = [item.path for item in native_files]
+            sizes = {item.path: item.size for item in native_files}
+            hashes = {item.path: item.sha256 for item in native_files if item.sha256}
 
         def candidate_hash(path: Path) -> str:
             if path not in hashes:
                 hashes[path] = _sha256(path)
             return hashes[path]
+
+        def candidate_size(path: Path) -> int:
+            if path not in sizes:
+                sizes[path] = path.stat().st_size
+            return sizes[path]
 
         matches: list[dict[str, Any]] = []
         ambiguous: list[dict[str, Any]] = []
@@ -640,7 +659,7 @@ class ProjectStore:
                     score, reason = 250, "文件名与扩展名一致"
                 elif candidate.stem.casefold() == expected_name.casefold() and (not expected_extension or candidate_extension == expected_extension):
                     score, reason = 200, "素材显示名与扩展名一致"
-                elif expected_size is not None and candidate_extension == expected_extension and candidate.stat().st_size == int(expected_size):
+                elif expected_size is not None and candidate_extension == expected_extension and candidate_size(candidate) == int(expected_size):
                     score, reason = 100, "文件大小与扩展名一致（弱匹配）"
                 if score:
                     ranked.append((score, reason, candidate))

@@ -11,7 +11,6 @@
 #define MyAppName "Hikari Studio"
 #define MyAppPublisher "Hikari Studio"
 #define MyAppExeName "HikariStudio.exe"
-#define WebView2Bootstrapper "MicrosoftEdgeWebview2Setup.exe"
 
 [Setup]
 AppId={{7E6765BA-9222-4B22-AE60-BE835D355E73}
@@ -47,7 +46,6 @@ Name: "chinesesimp"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 
 [Files]
 Source: "{#MyAppSourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "..\build\prerequisites\{#WebView2Bootstrapper}"; Flags: dontcopy
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
@@ -62,55 +60,3 @@ Root: HKA; Subkey: "Software\Classes\Applications\{#MyAppExeName}\SupportedTypes
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "启动 {#MyAppName}"; Flags: nowait postinstall skipifsilent
-
-[Code]
-const
-  WebView2ClientId = '{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
-  EdgeStableClientId = '{56EB18F8-B008-4CBD-B6D2-8C97FE7E9062}';
-
-function HasWebView2Version(RootKey: Integer; KeyName: String): Boolean;
-var
-  Version: String;
-begin
-  Result := RegQueryStringValue(RootKey, KeyName, 'pv', Version) and
-    (Version <> '') and (Version <> '0.0.0.0');
-end;
-
-function IsWebView2Installed(): Boolean;
-var
-  RuntimeKey: String;
-  EdgeKey: String;
-begin
-  RuntimeKey := 'Software\Microsoft\EdgeUpdate\Clients\' + WebView2ClientId;
-  EdgeKey := 'Software\Microsoft\EdgeUpdate\Clients\' + EdgeStableClientId;
-  Result := HasWebView2Version(HKCU, RuntimeKey) or
-    HasWebView2Version(HKLM32, RuntimeKey) or
-    HasWebView2Version(HKLM64, RuntimeKey) or
-    HasWebView2Version(HKCU, EdgeKey) or
-    HasWebView2Version(HKLM32, EdgeKey) or
-    HasWebView2Version(HKLM64, EdgeKey);
-end;
-
-function PrepareToInstall(var NeedsRestart: Boolean): String;
-var
-  ResultCode: Integer;
-begin
-  Result := '';
-  if IsWebView2Installed() then
-  begin
-    Log('Microsoft Edge WebView2 Runtime is already installed.');
-    exit;
-  end;
-
-  Log('Microsoft Edge WebView2 Runtime is missing; starting Evergreen bootstrapper.');
-  ExtractTemporaryFile('{#WebView2Bootstrapper}');
-  if not Exec(ExpandConstant('{tmp}\{#WebView2Bootstrapper}'), '/silent /install', '', SW_HIDE,
-    ewWaitUntilTerminated, ResultCode) then
-  begin
-    Result := '无法启动 Microsoft Edge WebView2 Runtime 安装程序。请检查系统权限后重试。';
-    exit;
-  end;
-  Log(Format('WebView2 bootstrapper exit code: %d', [ResultCode]));
-  if (ResultCode <> 0) or not IsWebView2Installed() then
-    Result := 'Microsoft Edge WebView2 Runtime 安装失败。请连接网络或手动安装 WebView2 Runtime 后重试。';
-end;

@@ -26,6 +26,7 @@ from .project_store import ProjectStore
 from .script_importer import preview_script_import, preview_script_text
 from .update_service import UpdateService
 from .version import APP_NAME, APP_VERSION, UPDATE_CHANNEL
+from .window_state import MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH
 from .windows_builder import build_windows_game
 
 
@@ -71,12 +72,8 @@ class DesktopApi:
             self._window_maximized = maximized
         if self._window is not None and self._window_state_store is not None:
             try:
-                screens: list[Any] = []
-                try:
-                    import webview
-                    screens = list(webview.screens or [])
-                except Exception:
-                    pass
+                current_screen = getattr(self._window, "screen", None)
+                screens: list[Any] = [current_screen] if current_screen is not None else list(getattr(self._window, "screens", []))
                 self._window_placement = self._window_state_store.capture(
                     self._window,
                     maximized=self._window_maximized,
@@ -94,10 +91,16 @@ class DesktopApi:
             self._window_maximized = maximized
         if self._window_state_timer is not None:
             self._window_state_timer.cancel()
-        timer = threading.Timer(0.3, self.persist_window_state)
-        timer.daemon = True
-        self._window_state_timer = timer
-        timer.start()
+        try:
+            from PySide6.QtCore import QTimer
+
+            self._window_state_timer = None
+            QTimer.singleShot(300, self.persist_window_state)
+        except ImportError:
+            timer = threading.Timer(0.3, self.persist_window_state)
+            timer.daemon = True
+            self._window_state_timer = timer
+            timer.start()
 
     def start_background_services(self) -> None:
         self._ai.start_health_monitor()
@@ -438,8 +441,7 @@ class DesktopApi:
     def save_project_as(self, project: dict[str, Any]) -> dict[str, Any] | None:
         if self._window is None:
             return None
-        import webview
-        result = self._window.create_file_dialog(webview.FOLDER_DIALOG)
+        result = self._window.create_file_dialog("folder")
         if not result:
             return None
         folder = result[0] if isinstance(result, (tuple, list)) else result
@@ -477,8 +479,7 @@ class DesktopApi:
     def select_project_location(self) -> str | None:
         if self._window is None:
             return None
-        import webview
-        result = self._window.create_file_dialog(webview.FOLDER_DIALOG)
+        result = self._window.create_file_dialog("folder")
         if not result:
             return None
         return str(result[0] if isinstance(result, (tuple, list)) else result)
@@ -486,8 +487,7 @@ class DesktopApi:
     def select_export_location(self) -> str | None:
         if self._window is None:
             return None
-        import webview
-        result = self._window.create_file_dialog(webview.FOLDER_DIALOG)
+        result = self._window.create_file_dialog("folder")
         if not result:
             return None
         return str(result[0] if isinstance(result, (tuple, list)) else result)
@@ -495,8 +495,7 @@ class DesktopApi:
     def open_project_dialog(self) -> dict[str, Any] | None:
         if self._window is None:
             return None
-        import webview
-        result = self._window.create_file_dialog(webview.OPEN_DIALOG, allow_multiple=False, file_types=("Hikari 项目 (*.json;*.hikari)",))
+        result = self._window.create_file_dialog("open", allow_multiple=False, file_types=("Hikari 项目 (*.json *.hikari)",))
         if not result:
             return None
         path = result[0] if isinstance(result, (tuple, list)) else result
@@ -543,8 +542,7 @@ class DesktopApi:
     def import_assets(self, paths: list[str] | None = None, audio_category: str | None = None) -> list[dict[str, Any]]:
         selected = paths or []
         if not selected and self._window is not None:
-            import webview
-            result = self._window.create_file_dialog(webview.OPEN_DIALOG, allow_multiple=True, file_types=("素材文件 (*.png;*.jpg;*.jpeg;*.webp;*.gif;*.mp3;*.ogg;*.wav;*.flac;*.m4a;*.mp4;*.webm;*.mov;*.ttf;*.otf;*.woff;*.woff2)", "全部文件 (*.*)"))
+            result = self._window.create_file_dialog("open", allow_multiple=True, file_types=("素材文件 (*.png *.jpg *.jpeg *.webp *.gif *.mp3 *.ogg *.wav *.flac *.m4a *.mp4 *.webm *.mov *.ttf *.otf *.woff *.woff2)", "全部文件 (*.*)"))
             selected = list(result or [])
         return self._store.import_assets(selected, audio_category)
 
@@ -569,8 +567,7 @@ class DesktopApi:
     def replace_asset_file(self, asset_id: str, path: str | None = None) -> dict[str, Any] | None:
         selected = path
         if not selected and self._window is not None:
-            import webview
-            result = self._window.create_file_dialog(webview.OPEN_DIALOG, allow_multiple=False, file_types=("素材文件 (*.png;*.jpg;*.jpeg;*.webp;*.gif;*.mp3;*.ogg;*.wav;*.flac;*.m4a;*.mp4;*.webm;*.mov;*.ttf;*.otf;*.woff;*.woff2)", "全部文件 (*.*)"))
+            result = self._window.create_file_dialog("open", allow_multiple=False, file_types=("素材文件 (*.png *.jpg *.jpeg *.webp *.gif *.mp3 *.ogg *.wav *.flac *.m4a *.mp4 *.webm *.mov *.ttf *.otf *.woff *.woff2)", "全部文件 (*.*)"))
             if result:
                 selected = result[0] if isinstance(result, (tuple, list)) else result
         if not selected:
@@ -580,8 +577,7 @@ class DesktopApi:
     def preview_asset_folder_repair(self, issues: list[dict[str, Any]], folder: str | None = None) -> dict[str, Any] | None:
         selected = folder
         if not selected and self._window is not None:
-            import webview
-            result = self._window.create_file_dialog(webview.FOLDER_DIALOG)
+            result = self._window.create_file_dialog("folder")
             if result:
                 selected = result[0] if isinstance(result, (tuple, list)) else result
         if not selected:
@@ -619,8 +615,7 @@ class DesktopApi:
     ) -> dict[str, Any] | None:
         selected = path
         if not selected and self._window is not None:
-            import webview
-            result = self._window.create_file_dialog(webview.OPEN_DIALOG, allow_multiple=False, file_types=("剧本文件 (*.txt;*.md;*.markdown;*.json)",))
+            result = self._window.create_file_dialog("open", allow_multiple=False, file_types=("剧本文件 (*.txt *.md *.markdown *.json)",))
             if result:
                 selected = result[0] if isinstance(result, (tuple, list)) else result
         if not selected:
@@ -732,7 +727,13 @@ class DesktopApi:
         LOGGER.info("Web export built: %s", output)
         return {"ok": True, "path": str(output), "preflight": report}
 
-    def build_windows(self, project: dict[str, Any], preflight: dict[str, Any] | None = None, output_root: str | None = None) -> dict[str, Any]:
+    def build_windows(
+        self,
+        project: dict[str, Any],
+        preflight: dict[str, Any] | None = None,
+        output_root: str | None = None,
+        browser_mode: str = "cefsharp",
+    ) -> dict[str, Any]:
         report = self.preflight_build(project, "windows", preflight)
         if report["blocked"]:
             return self._blocked_build(report)
@@ -750,6 +751,7 @@ class DesktopApi:
                 self._root,
                 self._root / "launcher" / "Hikari.GameLauncher" / "Hikari.GameLauncher.csproj",
                 self._root / "launcher" / "dist" / "win-x64",
+                browser_mode=browser_mode,
             ), "windows")
         except BuildPreflightError as error:
             return self._blocked_build(error.report)
@@ -834,17 +836,29 @@ class DesktopApi:
         return True
 
     def _window_scale_factor(self) -> float:
-        try:
-            value = float(getattr(getattr(self._window, "native", None), "scale_factor", 1) or 1)
-            return value if 1 <= value <= 4 else 1
-        except (TypeError, ValueError):
-            return 1
+        # Qt widgets and QScreen geometries already use device-independent pixels.
+        return 1
 
-    def _move_window_physical(self, x: int, y: int) -> None:
-        if self._window is None:
-            return
+    def resize_window(self, width: float, height: float, fix_x: str = "west", fix_y: str = "north") -> bool:
+        if self._window is None or self._window_maximized:
+            return False
+        try:
+            target_width = round(float(width))
+            target_height = round(float(height))
+        except (TypeError, ValueError, OverflowError):
+            return False
+        if not (1 <= target_width <= 100_000 and 1 <= target_height <= 100_000):
+            return False
+        target_width = max(MIN_WINDOW_WIDTH, target_width)
+        target_height = max(MIN_WINDOW_HEIGHT, target_height)
         scale_factor = self._window_scale_factor()
-        self._window.move(round(x / scale_factor), round(y / scale_factor))
+        target_width = round(target_width * scale_factor)
+        target_height = round(target_height * scale_factor)
+        try:
+            self._window.resize(target_width, target_height, (fix_x, fix_y))
+        except (AttributeError, TypeError):
+            self._window.resize(target_width, target_height)
+        return True
 
     def set_project_creation_mode(self, enabled: bool) -> bool:
         if self._window is None or enabled == self._project_creation_mode:
@@ -860,35 +874,33 @@ class DesktopApi:
 
             screen = getattr(self._window, "screen", None)
             if screen is None:
-                try:
-                    import webview
-                    screens = list(webview.screens or [])
-                    center_x = int(getattr(self._window, "x", 0) or 0) + int(getattr(self._window, "width", 1080) or 1080) // 2
-                    center_y = int(getattr(self._window, "y", 0) or 0) + int(getattr(self._window, "height", 680) or 680) // 2
-                    screen = next(
-                        (
-                            item for item in screens
-                            if item.x <= center_x < item.x + item.width and item.y <= center_y < item.y + item.height
-                        ),
-                        screens[0] if screens else None,
-                    )
-                except Exception:
-                    LOGGER.exception("Failed to resolve the screen for the project creation window")
-            # pywebview's WinForms resize API already uses Windows logical pixels.
-            # Applying the WebView scale factor again makes the compact wizard too
-            # large and leaves its layout viewport taller than the native client.
+                screens = list(getattr(self._window, "screens", []))
+                center_x = int(getattr(self._window, "x", 0) or 0) + int(getattr(self._window, "width", 1080) or 1080) // 2
+                center_y = int(getattr(self._window, "y", 0) or 0) + int(getattr(self._window, "height", 680) or 680) // 2
+                screen = next(
+                    (
+                        item for item in screens
+                        if item.x <= center_x < item.x + item.width and item.y <= center_y < item.y + item.height
+                    ),
+                    screens[0] if screens else None,
+                )
+            # Qt geometry uses device-independent logical pixels.
             compact_width = 1080
             compact_height = 680
+            if screen is not None:
+                frame = getattr(screen, "frame", None)
+                frame_width = int(getattr(frame, "Width", screen.width))
+                frame_height = int(getattr(frame, "Height", screen.height))
+                compact_width = min(compact_width, frame_width)
+                compact_height = min(compact_height, frame_height)
             self._window.resize(compact_width, compact_height)
             if screen is not None:
                 frame = getattr(screen, "frame", None)
                 frame_x = int(getattr(frame, "X", screen.x))
                 frame_y = int(getattr(frame, "Y", screen.y))
-                frame_width = int(getattr(frame, "Width", screen.width))
-                frame_height = int(getattr(frame, "Height", screen.height))
                 self._window.move(
-                    int(frame_x + max(0, frame_width - 1080) / 2),
-                    int(frame_y + max(0, frame_height - 680) / 2),
+                    int(frame_x + max(0, frame_width - compact_width) / 2),
+                    int(frame_y + max(0, frame_height - compact_height) / 2),
                 )
             self._window_maximized = False
             return True
@@ -896,29 +908,95 @@ class DesktopApi:
         placement = self._window_placement
         if placement is not None:
             self._window.restore()
-            scale_factor = self._window_scale_factor()
-            self._window.resize(round(placement.width * scale_factor), round(placement.height * scale_factor))
+            self._window.resize(placement.width, placement.height)
             if placement.x is not None and placement.y is not None:
                 self._window.move(placement.x, placement.y)
             if placement.maximized:
-                self._window.maximize()
-            self._window_maximized = bool(placement.maximized)
+                self._project_creation_mode = False
+                self._window_maximized = False
+                self.maximize_window()
+            else:
+                self._window_maximized = False
         self._project_creation_mode = False
+        return True
+
+    def _window_work_area(self) -> tuple[int, int, int, int] | None:
+        if self._window is None:
+            return None
+        screen = getattr(self._window, "screen", None)
+        if screen is None:
+            try:
+                screens = list(getattr(self._window, "screens", []))
+                window_x = int(getattr(self._window, "x", 0) or 0)
+                window_y = int(getattr(self._window, "y", 0) or 0)
+                screen = next(
+                    (
+                        item for item in screens
+                        if item.x <= window_x < item.x + item.width and item.y <= window_y < item.y + item.height
+                    ),
+                    screens[0] if screens else None,
+                )
+            except Exception:
+                LOGGER.exception("Failed to resolve the window work area")
+        if screen is None:
+            return None
+        frame = getattr(screen, "frame", None)
+        return (
+            int(getattr(frame, "X", getattr(screen, "x", 0))),
+            int(getattr(frame, "Y", getattr(screen, "y", 0))),
+            int(getattr(frame, "Width", getattr(screen, "width", 0))),
+            int(getattr(frame, "Height", getattr(screen, "height", 0))),
+        )
+
+    def _apply_maximized_bounds(self) -> bool:
+        bounds = self._window_work_area()
+        if self._window is None or bounds is None:
+            return False
+        x, y, width, height = bounds
+        if width <= 0 or height <= 0:
+            return False
+        maximize = getattr(self._window, "maximize", None)
+        if callable(maximize):
+            maximize()
+            return True
+        return False
+
+    def maximize_window(self) -> bool:
+        if self._window is None or self._project_creation_mode:
+            return False
+        if self._window_maximized:
+            return True
+        self.persist_window_state(False)
+        self._window.restore()
+        self._window_maximized = True
+        if not self._apply_maximized_bounds():
+            maximize = getattr(self._window, "maximize", None)
+            if not callable(maximize):
+                self._window_maximized = False
+                return False
+            maximize()
+        self.persist_window_state(True)
+        return True
+
+    def restore_window(self) -> bool:
+        if self._window is None:
+            return False
+        if not self._window_maximized:
+            return True
+        self._window.restore()
+        placement = self._window_placement
+        if placement is not None:
+            self._window.resize(placement.width, placement.height)
+            if placement.x is not None and placement.y is not None:
+                self._window.move(placement.x, placement.y)
+        self._window_maximized = False
+        self.persist_window_state(False)
         return True
 
     def toggle_maximize(self) -> bool:
         if self._project_creation_mode:
             return False
-        if self._window is not None:
-            if self._window_maximized:
-                self._window.restore()
-                self.persist_window_state(False)
-            else:
-                self.persist_window_state(False)
-                self._window_maximized = True
-                self._window.maximize()
-                self.persist_window_state(True)
-        return True
+        return self.restore_window() if self._window_maximized else self.maximize_window()
 
     def close_window(self) -> bool:
         if self._window is not None:

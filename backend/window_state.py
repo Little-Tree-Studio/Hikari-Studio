@@ -9,6 +9,10 @@ from pathlib import Path
 from typing import Any
 
 
+MIN_WINDOW_WIDTH = 760
+MIN_WINDOW_HEIGHT = 520
+
+
 @dataclass(frozen=True)
 class WindowPlacement:
     width: int = 1440
@@ -24,18 +28,24 @@ class WindowStateStore:
         self._lock = threading.RLock()
 
     @staticmethod
-    def _screen_bounds(screen: Any) -> tuple[int, int, int, int]:
+    def _screen_bounds(screen: Any, scale_factor: float = 1) -> tuple[int, int, int, int]:
         frame = getattr(screen, "frame", None)
+        factor = scale_factor if 1 <= scale_factor <= 4 else 1
         return (
-            int(getattr(frame, "X", getattr(screen, "x", 0))),
-            int(getattr(frame, "Y", getattr(screen, "y", 0))),
-            int(getattr(frame, "Width", getattr(screen, "width", 0))),
-            int(getattr(frame, "Height", getattr(screen, "height", 0))),
+            round(int(getattr(frame, "X", getattr(screen, "x", 0))) / factor),
+            round(int(getattr(frame, "Y", getattr(screen, "y", 0))) / factor),
+            round(int(getattr(frame, "Width", getattr(screen, "width", 0))) / factor),
+            round(int(getattr(frame, "Height", getattr(screen, "height", 0))) / factor),
         )
 
     @classmethod
-    def fit_to_screens(cls, placement: WindowPlacement, screens: list[Any] | tuple[Any, ...]) -> WindowPlacement:
-        bounds = [cls._screen_bounds(screen) for screen in screens]
+    def fit_to_screens(
+        cls,
+        placement: WindowPlacement,
+        screens: list[Any] | tuple[Any, ...],
+        scale_factor: float = 1,
+    ) -> WindowPlacement:
+        bounds = [cls._screen_bounds(screen, scale_factor) for screen in screens]
         bounds = [item for item in bounds if item[2] > 0 and item[3] > 0]
         if not bounds:
             return placement
@@ -67,8 +77,8 @@ class WindowStateStore:
                 raise ValueError
             version = int(value.get("version", 1))
             factor = scale_factor if version < 2 and 1 <= scale_factor <= 4 else 1
-            width = min(7680, max(1080, round(int(value.get("width", 1440)) / factor)))
-            height = min(4320, max(680, round(int(value.get("height", 900)) / factor)))
+            width = min(7680, max(MIN_WINDOW_WIDTH, round(int(value.get("width", 1440)) / factor)))
+            height = min(4320, max(MIN_WINDOW_HEIGHT, round(int(value.get("height", 900)) / factor)))
             x = value.get("x")
             y = value.get("y")
             placement = WindowPlacement(
@@ -78,10 +88,10 @@ class WindowStateStore:
                 round(int(y) / factor) if y is not None else None,
                 bool(value.get("maximized", False)),
             )
-            return self.fit_to_screens(placement, screens) if screens else placement
+            return self.fit_to_screens(placement, screens, scale_factor) if screens else placement
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             placement = WindowPlacement()
-            return self.fit_to_screens(placement, screens) if screens else placement
+            return self.fit_to_screens(placement, screens, scale_factor) if screens else placement
 
     def save(self, placement: WindowPlacement) -> None:
         payload = json.dumps({"version": 2, **asdict(placement)}, ensure_ascii=False, indent=2)
@@ -124,13 +134,13 @@ class WindowStateStore:
             placement = WindowPlacement(previous.width, previous.height, previous.x, previous.y, True)
         else:
             placement = WindowPlacement(
-                width=max(1080, round((window_value("width", round(previous.width * factor)) or round(previous.width * factor)) / factor)),
-                height=max(680, round((window_value("height", round(previous.height * factor)) or round(previous.height * factor)) / factor)),
+                width=max(MIN_WINDOW_WIDTH, round((window_value("width", round(previous.width * factor)) or round(previous.width * factor)) / factor)),
+                height=max(MIN_WINDOW_HEIGHT, round((window_value("height", round(previous.height * factor)) or round(previous.height * factor)) / factor)),
                 x=round(value / factor) if (value := window_value("x", None)) is not None else previous.x,
                 y=round(value / factor) if (value := window_value("y", None)) is not None else previous.y,
                 maximized=False,
             )
             if screens:
-                placement = self.fit_to_screens(placement, screens)
+                placement = self.fit_to_screens(placement, screens, factor)
         self.save(placement)
         return placement

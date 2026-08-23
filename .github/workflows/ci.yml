@@ -9,25 +9,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-go@v6
         with:
-          python-version: '3.13'
-      - run: pip install -r requirements-test.txt
+          go-version-file: services/crash-collector/go.mod
+          cache-dependency-path: services/crash-collector/go.sum
+      - run: go test -race ./...
         working-directory: services/crash-collector
-      - run: python -m unittest discover -s tests -v
+      - run: go vet ./...
         working-directory: services/crash-collector
-        env:
-          DATABASE_URL: postgresql://unused
-          S3_ENDPOINT: http://unused
-          S3_ACCESS_KEY: unused
-          S3_SECRET_KEY: unused
-          ADMIN_TOKEN: test-admin-token
-          IP_HASH_SALT: test-ip-hash-salt
+      - run: docker build -t hikari-crash-collector:test .
+        working-directory: services/crash-collector
   verify:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v6
         with:
           python-version: '3.12'
       - uses: pnpm/action-setup@v4
@@ -41,8 +37,14 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-      - run: python -m unittest discover -s tests -v
-      - run: python -m benchmarks.large_project_backend
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo test --workspace --locked
+      - run: cargo build --workspace --locked
+      - run: uv sync --extra build
+      - run: uv run --no-sync python -m unittest discover -s tests -v
+      - run: uv run --no-sync python -m benchmarks.large_project_backend
       - run: pnpm install --frozen-lockfile
         working-directory: frontend
       - run: pnpm run typecheck
@@ -55,12 +57,12 @@ jobs:
         working-directory: frontend
       - run: pnpm run build
         working-directory: frontend
-      - run: python -m pip install -r requirements.txt -r requirements-build.txt
-      - run: dotnet publish launcher/Hikari.GameLauncher/Hikari.GameLauncher.csproj --configuration Release --runtime win-x64 --self-contained true -p:DebugType=None -p:DebugSymbols=false --output launcher/dist/win-x64
+      - run: dotnet publish launcher/Hikari.GameLauncher/Hikari.GameLauncher.csproj --configuration Release --runtime win-x64 --self-contained true -p:DebugType=None -p:DebugSymbols=false -p:HikariBrowserMode=system --output launcher/dist/win-x64/system
+      - run: dotnet publish launcher/Hikari.GameLauncher/Hikari.GameLauncher.csproj --configuration Release --runtime win-x64 --self-contained true -p:DebugType=None -p:DebugSymbols=false -p:HikariBrowserMode=cefsharp --output launcher/dist/win-x64/cefsharp
       - uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}\HikariStudioNuitkaCache
-          key: nuitka-${{ runner.os }}-${{ hashFiles('requirements-build.txt', 'scripts/build-editor.ps1') }}
+          key: nuitka-${{ runner.os }}-${{ hashFiles('uv.lock', 'scripts/build-editor.ps1') }}
       - run: powershell -ExecutionPolicy Bypass -File scripts/build-editor.ps1 -SkipInstall -SkipLauncher
         env:
           HIKARI_NUITKA_CACHE: ${{ runner.temp }}\HikariStudioNuitkaCache

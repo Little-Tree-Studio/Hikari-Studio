@@ -1,16 +1,14 @@
-FROM python:3.13-slim
+FROM golang:1.26-alpine AS build
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY *.go ./
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/crash-collector .
 
-WORKDIR /app
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
-COPY app.py ./
+FROM gcr.io/distroless/static-debian13:nonroot
 
-RUN useradd --create-home --uid 10001 hikari
-USER hikari
+COPY --from=build /out/crash-collector /crash-collector
 EXPOSE 8080
 
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080", "--proxy-headers", "--forwarded-allow-ips", "*"]
-
+ENTRYPOINT ["/crash-collector"]

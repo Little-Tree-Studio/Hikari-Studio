@@ -45,7 +45,7 @@ Reload Performance** to inspect the latest result. The same report is written as
 structured `details` in the standard Windows application log at
 `logs/hikari-studio.jsonl`.
 
-The report separates Python project reads, Python JSON serialization, WebView2
+The report separates Python project reads, Python JSON serialization, Qt WebEngine
 bridge transfer, frontend JSON parsing, recovery/history loading, React commit,
 and stable-paint latency. It only includes timings, payload size, and aggregate
 project counts; project text, asset contents, and paths are excluded.

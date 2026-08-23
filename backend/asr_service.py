@@ -36,7 +36,7 @@ class AsrService:
         elif available:
             message = "模型尚未加载"
         else:
-            message = "内嵌模型缺失，请安装 requirements-asr.txt 后重启 Studio"
+            message = "内嵌模型缺失，请运行 uv sync --extra asr 后重启 Studio"
         return {
             "available": available,
             "loaded": self._model is not None,

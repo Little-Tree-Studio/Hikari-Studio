@@ -201,6 +201,10 @@ html[data-editor-theme="high-contrast"] img { color-scheme: normal; }
 
 .desktop-app .doc-tab { color: var(--muted); }
 .desktop-app .doc-tab.active { background: var(--accent-soft); color: var(--accent-strong); }
+.desktop-app .tabs-edge.left { background: linear-gradient(to right, var(--panel-2) 35%, transparent); }
+.desktop-app .tabs-edge.right { background: linear-gradient(to left, var(--panel-2) 35%, transparent); }
+.desktop-app .tabs-more:hover, .desktop-app .tabs-more.open { background: var(--panel-3); color: var(--ink); }
+.desktop-app .doc-tab .tab-close:hover { background: color-mix(in srgb, var(--ink) 10%, transparent); }
 .desktop-app .fragment-row { color: var(--muted-strong); }
 .desktop-app :where(.chapter-row:hover, .fragment-row:hover, .doc-tab:hover) { background: var(--panel-3); }
 .desktop-app :where(.chapter-row.active, .fragment-row.active, .doc-tab.active) {
@@ -213,6 +217,17 @@ html[data-editor-theme="high-contrast"] img { color-scheme: normal; }
   background: var(--panel);
   color: var(--ink);
 }
+.desktop-app .composer-menu {
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--ink);
+}
+.desktop-app :where(.composer-menu-grid button, .composer-characters button, .composer-menu-footer button) {
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--ink);
+}
+.desktop-app .composer-menu-footer { background: var(--panel); border-color: var(--line); }
 .desktop-app .insert-button {
   border-color: var(--line);
   background: var(--panel);
@@ -243,6 +258,7 @@ html[data-editor-theme="high-contrast"] img { color-scheme: normal; }
    legacy rules until each workspace stylesheet is migrated. */
 .desktop-app input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
 .desktop-app select,
+.desktop-app .ds-select,
 .desktop-app textarea,
 .desktop-app .field input,
 .desktop-app .field select,
@@ -468,7 +484,7 @@ html[data-editor-theme="high-contrast"] img { color-scheme: normal; }
 .timeline-transport { justify-content: center; }
 .timeline-transport code { min-width: 122px; color: var(--muted-strong); font: 11px var(--font-mono); text-align: center; }
 .timeline-tools { justify-content: flex-end; }
-.timeline-tools > input[type="range"] { width: 92px; accent-color: var(--accent); }
+.timeline-tools > .ds-slider { width: 92px; }
 .timeline-tools .icon-button.active { color: var(--accent); background: var(--accent-soft); }
 .timeline-tools .button.compact { min-height: 30px; height: 30px; padding: 0 9px; font-size: 10px; }
 .timeline-tools .button.compact.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
@@ -714,7 +730,7 @@ html[data-editor-theme="high-contrast"] img { color-scheme: normal; }
   .stage-timeline-upper { grid-template-columns: minmax(0, 1fr) 240px; }
   .timeline-ruler-row, .timeline-track { grid-template-columns: 164px minmax(0, 1fr); }
   .timeline-tools { gap: 4px; }
-  .timeline-tools > input[type="range"] { width: 62px; }
+  .timeline-tools > .ds-slider { width: 62px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

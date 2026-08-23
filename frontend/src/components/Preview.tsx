@@ -34,6 +34,9 @@ import type { BlockType, Project } from "../types";
 import { writeLargeValue } from "../core/storage";
 import { reportPreviewSeekPerformance } from "../api";
 import { PreviewSeekProfiler } from "../performance/previewSeekProfiler";
+import { Checkbox } from "./ui/Checkbox";
+import { Select } from "./ui/Select";
+import { Slider } from "./ui/Slider";
 import {
   captureSaveThumbnail,
   readSharedVariables,
@@ -565,14 +568,14 @@ export function Preview({
         <strong>
           {debugMode ? "游戏调试" : standalone ? project.meta.name : "游戏预览"}
         </strong>
-        <select
-          className="select-compact"
+        <Select
+          className="compact"
           value={resolution}
-          onChange={(event) => setResolution(event.target.value)}
+          onChange={(value) => setResolution(value)}
         >
           <option value="1280x720">1280 × 720</option>
           <option value="1920x1080">1920 × 1080</option>
-        </select>
+        </Select>
         <button
           className="icon-button small"
           title="回到当前 Block"
@@ -849,15 +852,13 @@ export function Preview({
         >
           {playing ? <Pause /> : <Play />}
         </button>
-        <input
-          aria-label="OP 时间轴"
-          className="range"
-          type="range"
-          min="0"
+        <Slider
+          ariaLabel="OP 时间轴"
+          min={0}
           max={Math.max(0, opEntries.length - 1)}
           value={Math.min(currentOpIndex, Math.max(0, opEntries.length - 1))}
           disabled={!opEntries.length}
-          onInput={(event) => seekOp(Number(event.currentTarget.value))}
+          onChange={(value) => seekOp(value)}
         />
         <button
           title="预览设置与调试"
@@ -882,39 +883,36 @@ export function Preview({
         <div className="preview-settings">
           <label>
             <span>自动播放间隔 {autoDelay.toFixed(1)} 秒</span>
-            <input
-              type="range"
-              min=".5"
-              max="5"
-              step=".1"
+            <Slider
+              ariaLabel="自动播放间隔"
+              min={0.5}
+              max={5}
+              step={0.1}
               value={autoDelay}
-              onChange={(event) => setAutoDelay(Number(event.target.value))}
+              onChange={(value) => setAutoDelay(value)}
             />
           </label>
           <label className="checkbox-field">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={showSafeArea}
-              onChange={(event) => setShowSafeArea(event.target.checked)}
+              onChange={(checked) => setShowSafeArea(checked)}
             />
             显示安全区域
           </label>
           {onStageCharacterMove && (
             <>
               <label className="checkbox-field">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={constrainToSafeArea}
-                  onChange={(event) => setConstrainToSafeArea(event.target.checked)}
+                  onChange={(checked) => setConstrainToSafeArea(checked)}
                 />
                 拖拽限制在安全区域
               </label>
               <label className="checkbox-field">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={snapCharacters}
-                  onChange={(event) => {
-                    setSnapCharacters(event.target.checked);
+                  onChange={(checked) => {
+                    setSnapCharacters(checked);
                     setStageGuides([]);
                   }}
                 />

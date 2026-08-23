@@ -1,4 +1,4 @@
-import type { AgentContext, AgentPatchApplyResult, AgentPatchPreconditionResult, AgentPlan, AgentResultComparison, AgentResultRef, AgentTask, AiModelDiscovery, AiSettings, AiSettingsInput, AppInfo, Asset, AssetFileStatus, AssetFolderRepairPreview, AssetRepairIssue, AssetRepairMatch, AudioCategory, BuildPreflightReport, BuildResult, BuildTarget, Character, CommandHistoryStorageStats, CrashReport, CrashReportCenter, CrashReportSummary, DesktopProjectSession, EditorAppearance, ProfiledDesktopProjectSession, Project, ProjectCreationOptions, ProjectLoadPerformance, ProjectReloadFrontendPerformance, ProjectReloadPerformance, RecentProject, RecoverySnapshot, RecoverySnapshotStatus, ScriptImportPreview, ScriptImportRules, UpdateStatus } from './types';
+import type { AgentContext, AgentPatchApplyResult, AgentPatchPreconditionResult, AgentPlan, AgentResultComparison, AgentResultRef, AgentTask, AiModelDiscovery, AiSettings, AiSettingsInput, AppInfo, Asset, AssetFileStatus, AssetFolderRepairPreview, AssetRepairIssue, AssetRepairMatch, AudioCategory, BrowserMode, BuildPreflightReport, BuildResult, BuildTarget, Character, CommandHistoryStorageStats, CrashReport, CrashReportCenter, CrashReportSummary, DesktopProjectSession, EditorAppearance, ProfiledDesktopProjectSession, Project, ProjectCreationOptions, ProjectLoadPerformance, ProjectReloadFrontendPerformance, ProjectReloadPerformance, RecentProject, RecoverySnapshot, RecoverySnapshotStatus, ScriptImportPreview, ScriptImportRules, UpdateStatus } from './types';
 import type { PreviewSeekPerformanceReport } from './performance/previewSeekProfiler';
 import { readLargeValue, writeLargeValue } from './core/storage';
 import type { PersistedCommandHistory } from './hooks/useCommandHistory';
@@ -46,7 +46,7 @@ const decodeProjectPayload = async (session: ProfiledDesktopProjectSession): Pro
   }
   if (!session.encoding || session.encoding === 'plain-json') return session.projectPayload;
   if (session.encoding !== 'gzip-base64') throw new Error(`不支持的项目载荷编码：${String(session.encoding)}`);
-  if (!supportsCompressedProjectPayload()) throw new Error('当前 WebView2 不支持 gzip 项目载荷，请更新 WebView2 Runtime');
+  if (!supportsCompressedProjectPayload()) throw new Error('当前 Qt WebEngine 不支持 gzip 项目载荷，请更新 Qt WebEngine');
   const binary = atob(session.projectPayload);
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
@@ -240,60 +240,6 @@ export async function callWindow(action: 'minimize_window' | 'toggle_maximize' |
   return api?.[action]();
 }
 
-let windowDrag: { pointerId: number; offsetX: number; offsetY: number; target: Element } | null = null;
-let pendingWindowPosition: { x: number; y: number } | null = null;
-let movingWindow = false;
-
-const flushWindowPosition = async () => {
-  if (movingWindow) return;
-  movingWindow = true;
-  try {
-    while (pendingWindowPosition) {
-      const position = pendingWindowPosition;
-      pendingWindowPosition = null;
-      const api = await waitForDesktopApi();
-      await api?.move_window(position.x, position.y);
-    }
-  } catch {
-    pendingWindowPosition = null;
-  } finally {
-    movingWindow = false;
-  }
-};
-
-const updateWindowDrag = (event: PointerEvent) => {
-  if (!windowDrag || event.pointerId !== windowDrag.pointerId) return;
-  pendingWindowPosition = {
-    x: event.screenX - windowDrag.offsetX,
-    y: event.screenY - windowDrag.offsetY,
-  };
-  void flushWindowPosition();
-};
-
-const finishWindowDrag = (event: PointerEvent) => {
-  if (!windowDrag || event.pointerId !== windowDrag.pointerId) return;
-  updateWindowDrag(event);
-  if (windowDrag.target.hasPointerCapture(event.pointerId)) windowDrag.target.releasePointerCapture(event.pointerId);
-  windowDrag = null;
-  document.removeEventListener('pointermove', updateWindowDrag);
-  document.removeEventListener('pointerup', finishWindowDrag);
-  document.removeEventListener('pointercancel', finishWindowDrag);
-};
-
-export function beginWindowDrag(event: PointerEvent) {
-  if (window.__HIKARI_DESKTOP__ !== true || windowDrag) return;
-  if (event.button !== 0 || !event.isPrimary) return;
-  const target = event.target;
-  if (!(target instanceof Element) || !target.closest('.titlebar-drag')) return;
-  if (target.closest('.titlebar-no-drag,button,input,select,textarea,a,[role="button"]')) return;
-  event.preventDefault();
-  windowDrag = { pointerId: event.pointerId, offsetX: event.clientX, offsetY: event.clientY, target };
-  target.setPointerCapture(event.pointerId);
-  document.addEventListener('pointermove', updateWindowDrag);
-  document.addEventListener('pointerup', finishWindowDrag);
-  document.addEventListener('pointercancel', finishWindowDrag);
-}
-
 export async function setProjectCreationWindowMode(enabled: boolean) {
   const api = await waitForDesktopApi();
   return api?.set_project_creation_mode(enabled);
@@ -480,10 +426,10 @@ export async function buildWeb(project: Project, preflight?: BuildPreflightRepor
   return result;
 }
 
-export async function buildWindows(project: Project, preflight?: BuildPreflightReport, outputRoot?: string) {
+export async function buildWindows(project: Project, preflight?: BuildPreflightReport, outputRoot?: string, browserMode: BrowserMode = 'cefsharp') {
   const api = await waitForDesktopApi();
   if (!api) throw new Error('Windows 构建仅在桌面应用中可用');
-  const result = await withTimeout(api.build_windows(project, preflight, outputRoot), 15 * 60 * 1000);
+  const result = await withTimeout(api.build_windows(project, preflight, outputRoot, browserMode), 15 * 60 * 1000);
   acceptedBuild(result);
   return result;
 }

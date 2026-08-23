@@ -1,4 +1,9 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
+
+const selectOption = async (page: Page, trigger: Locator, value: string) => {
+  await trigger.click();
+  await page.locator(`[role="option"][data-value="${value}"]`).click();
+};
 
 test('stage timeline edits clips, keyframes, and participates in command undo', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
@@ -19,7 +24,7 @@ test('stage timeline edits clips, keyframes, and participates in command undo', 
   await page.getByRole('button', { name: '在播放头添加' }).click();
   await expect(workspace.locator('[data-track-kind="scene"] .timeline-keyframe')).toHaveCount(keyframesBefore + 1);
   await page.locator('.timeline-keyframe-row').first().click();
-  await page.getByLabel('关键帧缓动').selectOption('cubicBezier');
+  await selectOption(page, page.getByLabel('关键帧缓动'), 'cubicBezier');
   await expect(page.getByLabel('贝塞尔缓动曲线')).toBeVisible();
   await expect(page.locator('.timeline-bezier-editor input')).toHaveCount(4);
 
@@ -156,7 +161,7 @@ test('camera shake stops when the timeline clip ends', async ({ page }) => {
   await page.getByRole('button', { name: '在播放头添加' }).click();
 
   const keyframeInspector = workspace.locator('.timeline-keyframe-inspector');
-  await keyframeInspector.getByLabel('关键帧属性').selectOption('shake');
+  await selectOption(page, keyframeInspector.getByLabel('关键帧属性'), 'shake');
   await keyframeInspector.getByLabel('关键帧值').fill('12');
   const stage = workspace.locator('.stage-timeline-preview .stage');
   await expect(stage).toHaveClass(/camera-shake/);

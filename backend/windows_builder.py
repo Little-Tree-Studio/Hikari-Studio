@@ -57,7 +57,10 @@ def build_launcher_distribution(
     launcher_project: Path,
     launcher_dist: Path,
     dotnet_path: Path | None = None,
+    browser_mode: str = "cefsharp",
 ) -> Path:
+    if browser_mode not in {"system", "cefsharp"}:
+        raise ValueError("不支持的浏览器运行方式")
     dotnet = find_dotnet_sdk(workspace_root, dotnet_path)
     launcher_dist.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="hikari-launcher-") as temporary:
@@ -72,6 +75,7 @@ def build_launcher_distribution(
             "--output", str(publish_dir),
             "-p:DebugType=None",
             "-p:DebugSymbols=false",
+            f"-p:HikariBrowserMode={browser_mode}",
         ]
         result = subprocess.run(command, cwd=workspace_root, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
         if result.returncode != 0:
@@ -97,18 +101,22 @@ def build_windows_game(
     launcher_project: Path,
     launcher_dist: Path,
     dotnet_path: Path | None = None,
+    browser_mode: str = "cefsharp",
 ) -> Path:
+    if browser_mode not in {"system", "cefsharp"}:
+        raise ValueError("不支持的浏览器运行方式")
     if output_dir.exists():
         shutil.rmtree(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    if not (launcher_dist / "Hikari.GameLauncher.exe").is_file():
-        build_launcher_distribution(workspace_root, launcher_project, launcher_dist, dotnet_path)
+    selected_launcher_dist = launcher_dist / browser_mode
+    if not (selected_launcher_dist / "Hikari.GameLauncher.exe").is_file():
+        build_launcher_distribution(workspace_root, launcher_project, selected_launcher_dist, dotnet_path, browser_mode)
 
     game_dir = output_dir / "game"
     build_web_game(project, game_dir, project_path, builtin_assets, custom_assets, runtime_dist, target="windows")
 
-    for source in launcher_dist.iterdir():
+    for source in selected_launcher_dist.iterdir():
         destination = output_dir / source.name
         if source.is_dir():
             shutil.copytree(source, destination, dirs_exist_ok=True)
@@ -121,6 +129,7 @@ def build_windows_game(
         "width": int(project.get("meta", {}).get("resolution", [1280, 720])[0]),
         "height": int(project.get("meta", {}).get("resolution", [1280, 720])[1]),
         "version": str(project.get("meta", {}).get("gameVersion") or "1.0.0"),
+        "browserMode": browser_mode,
     }
     (output_dir / "launcher.json").write_text(json.dumps(launcher_config, ensure_ascii=False, indent=2), encoding="utf-8")
 

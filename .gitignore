@@ -13,8 +13,10 @@ launcher/dist/
 exports/
 build/
 dist/
+target/
 __pycache__/
 *.pyc
+.venv/
 *.log
 nuitka-crash-report.xml
 .env

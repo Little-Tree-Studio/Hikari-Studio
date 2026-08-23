@@ -2,16 +2,19 @@ import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Box, BugPlay, CheckCircle2, ExternalLink, FileCode2, FolderOpen, LoaderCircle, MonitorCog, PackageX, RefreshCw, RotateCcw, RouteOff, ShieldCheck, X } from 'lucide-react';
 import { preflightBuild, selectExportLocation } from '../api';
 import { diagnosticSummary } from '../engine-core/diagnostics';
+import { Radio, RadioGroup } from './ui/RadioGroup';
 import type { BranchSimulationProgress } from '../engine-core/types';
-import type { BuildPreflightCategory, BuildPreflightReport, BuildTarget, Project } from '../types';
+import type { BrowserMode, BuildPreflightCategory, BuildPreflightReport, BuildTarget, Project } from '../types';
 
 interface BuildPublishDialogProps {
   project: Project;
   close: () => void;
-  runBuild: (kind: BuildTarget | 'renpy', report?: BuildPreflightReport, outputRoot?: string) => void;
+  runBuild: (kind: BuildTarget | 'renpy', report?: BuildPreflightReport, outputRoot?: string, browserMode?: BrowserMode) => void;
   locate: (fragmentId: string, blockIndex?: number) => void;
   outputRoot: string;
   updateOutputRoot: (path: string) => void;
+  browserMode: BrowserMode;
+  updateBrowserMode: (mode: BrowserMode) => void;
 }
 
 const CATEGORY_META: Record<BuildPreflightCategory, { label: string; icon: typeof PackageX }> = {
@@ -21,7 +24,7 @@ const CATEGORY_META: Record<BuildPreflightCategory, { label: string; icon: typeo
   compatibility: { label: '兼容性', icon: MonitorCog },
 };
 
-export function BuildPublishDialog({ project, close, runBuild, locate, outputRoot, updateOutputRoot }: BuildPublishDialogProps) {
+export function BuildPublishDialog({ project, close, runBuild, locate, outputRoot, updateOutputRoot, browserMode, updateBrowserMode }: BuildPublishDialogProps) {
   const [target, setTarget] = useState<BuildTarget>('web');
   const [report, setReport] = useState<BuildPreflightReport | null>(null);
   const [progress, setProgress] = useState<BranchSimulationProgress | null>(null);
@@ -76,9 +79,17 @@ export function BuildPublishDialog({ project, close, runBuild, locate, outputRoo
       <div className="modal-body build-publish-body">
         <div className="publish-options build-targets">
           <button className={`publish-card ${target === 'web' ? 'selected' : ''}`} onClick={() => setTarget('web')}><ExternalLink /><strong>Web 游戏</strong><small>HTML5 独立游戏包</small></button>
-          <button className={`publish-card ${target === 'windows' ? 'selected' : ''}`} onClick={() => setTarget('windows')}><Box /><strong>Windows 游戏</strong><small>WebView2 桌面游戏包</small></button>
+          <button className={`publish-card ${target === 'windows' ? 'selected' : ''}`} onClick={() => setTarget('windows')}><Box /><strong>Windows 游戏</strong><small>系统浏览器或 CefSharp 内置内核</small></button>
           <button className="publish-card renpy" disabled={renpy.errors > 0} onClick={() => runBuild('renpy', undefined, outputRoot.trim() || undefined)}><FileCode2 /><strong>Ren'Py 导出</strong><small>{renpy.errors ? `${renpy.errors} 个错误需要处理` : '使用兼容子集导出脚本'}</small></button>
         </div>
+
+        {target === 'windows' && <section className="build-output-location browser-mode-selector" aria-label="游戏运行方式">
+          <div><MonitorCog /><span><strong>运行方式</strong><small>选择导出后打开游戏的浏览器承载方式</small></span></div>
+          <RadioGroup className="browser-mode-options" aria-label="游戏运行方式" value={browserMode} onChange={(value) => updateBrowserMode(value as BrowserMode)}>
+            <label className={browserMode === 'cefsharp' ? 'selected' : ''}><Radio value="cefsharp" /><span><strong>内置浏览器</strong><small>CefSharp Chromium，包体较大但运行环境固定</small></span></label>
+            <label className={browserMode === 'system' ? 'selected' : ''}><Radio value="system" /><span><strong>系统默认浏览器</strong><small>不打包 Chromium，体积更小</small></span></label>
+          </RadioGroup>
+        </section>}
 
         <section className="build-output-location" aria-label="导出位置">
           <div><FolderOpen /><span><strong>导出位置</strong><small>将按游戏名称和目标平台创建子目录，不会清空所选文件夹</small></span></div>
@@ -117,7 +128,7 @@ export function BuildPublishDialog({ project, close, runBuild, locate, outputRoo
       <footer className="modal-footer build-publish-footer">
         <span>{report?.simulation.truncated ? '模拟达到状态空间上限，请检查警告后再构建。' : report?.blocked ? '修复红色阻断项后重新检查。' : '警告不会阻止构建，但可能造成运行时差异。'}</span>
         <button className="button ghost" onClick={close}>取消</button>
-        <button className="button primary" disabled={checking || !report || report.blocked} onClick={() => report && runBuild(target, report, outputRoot.trim() || undefined)}>{checking ? <LoaderCircle className="spin" /> : <ShieldCheck />}开始构建</button>
+        <button className="button primary" disabled={checking || !report || report.blocked} onClick={() => report && runBuild(target, report, outputRoot.trim() || undefined, browserMode)}>{checking ? <LoaderCircle className="spin" /> : <ShieldCheck />}开始构建</button>
       </footer>
     </section>
   </div>;

@@ -35,7 +35,7 @@ const STEP_LABELS: Record<BuildKind, Array<Omit<BuildProgressStep, 'status'>>> =
   windows: [
     { id: 'preflight', label: '检查项目完整性', detail: '检查素材、流程、分支与 Windows 兼容性' },
     { id: 'save', label: '保存项目快照', detail: '将当前编辑内容安全写入项目目录' },
-    { id: 'generate', label: '组装 Windows 游戏', detail: '生成游戏内容并复制 WebView2 启动器' },
+    { id: 'generate', label: '组装 Windows 游戏', detail: '生成游戏内容并复制所选浏览器启动器' },
     { id: 'verify', label: '确认输出产物', detail: '检查启动程序与游戏数据目录' },
   ],
   renpy: [

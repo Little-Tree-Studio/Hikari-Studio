@@ -36,7 +36,7 @@
 最新公开预览版为 `v0.4.0-beta.1`。该版本带来完整演出时间轴、大型项目优化、统一构建前检查、SaveGame 恢复、更新与崩溃报告闭环，以及更完整的桌面导入与构建体验。Release 页面同时提供 `latest.json` 和 SHA-256 清单。
 
 > [!WARNING]
-> 这是未签名的 Windows 预览版，安装前请核对 [`SHA256SUMS.txt`](https://github.com/kylemarvin884/Hikari-Studio/releases/download/v0.4.0-beta.1/SHA256SUMS.txt)。编辑器和 Windows 游戏需要 Microsoft Edge WebView2 Runtime；Ren'Py 导出仍是有限兼容。
+> 这是未签名的 Windows 预览版，安装前请核对 [`SHA256SUMS.txt`](https://github.com/kylemarvin884/Hikari-Studio/releases/download/v0.4.0-beta.1/SHA256SUMS.txt)。编辑器使用 Qt WebEngine；Windows 游戏可导出为轻量系统浏览器版或包含 CefSharp Chromium 的内置浏览器版。Ren'Py 导出仍是有限兼容。
 
 安装包校验示例：
 
@@ -67,7 +67,7 @@ Get-FileHash .\Hikari-Studio-Portable-0.4.0-beta.1.zip -Algorithm SHA256
 | **实时调试** | 编辑器与 OP 双向定位、变量观察、调用栈、Console、快速存档与流程回滚 |
 | **游戏运行时** | 打字机文本、自动播放、快进、历史、存读档、音量与文本速度设置 |
 | **双主题系统** | 四套编辑器主题、强调色、减少动效，以及独立的游戏对白、菜单和存档界面主题编辑器 |
-| **构建发布** | Web 游戏、Windows WebView2 游戏、Ren'Py 导出，以及基于 Nuitka 与 Inno Setup 的编辑器安装程序 |
+| **构建发布** | Web 游戏、可选系统浏览器或 CefSharp 内置内核的 Windows 游戏、Ren'Py 导出，以及基于 Nuitka、PySide6 与 Inno Setup 的编辑器安装程序 |
 | **桌面维护** | Stable/Beta 更新通道、24 小时检查缓存、SHA-256 校验、显式安装确认、安装包回退和本地崩溃报告预览 |
 | **AI Agent** | 模型发现与故障转移、流式任务、检查点分支、结构化 Patch、导演模式、制作记忆和全分支模拟 |
 
@@ -86,7 +86,7 @@ Get-FileHash .\Hikari-Studio-Portable-0.4.0-beta.1.zip -Algorithm SHA256
 ```mermaid
 flowchart LR
     Creator["创作者"] --> Editor["React + TypeScript 编辑器"]
-    Editor <--> Bridge["pywebview Desktop API"]
+    Editor <--> Bridge["FastAPI localhost RPC"]
     Bridge <--> Host["Python 桌面宿主"]
     Host --> FS["v3 目录项目 / 文件系统"]
     Host --> Build["构建 / Git / AI / 系统能力"]
@@ -94,7 +94,7 @@ flowchart LR
     Editor --> Timeline["舞台与演出时间轴"]
     Core --> Preview["编辑器实时预览"]
     Core --> Web["Web 游戏"]
-    Core --> Win["Windows WebView2 游戏"]
+    Core --> Win["Windows 系统浏览器 / CefSharp 游戏"]
     Timeline --> Core
 ```
 
@@ -152,10 +152,11 @@ flowchart LR
 | --- | --- |
 | `backend/` | Python 桌面宿主、项目存储、桌面 API、导入与构建能力 |
 | `frontend/src/` | React + TypeScript 编辑器界面 |
+| `native/asset-worker/` | Rust 素材扫描与并行 SHA-256 Worker |
 | `frontend/src/engine-core/` | Block 注册、运行状态、诊断和共享执行逻辑 |
 | `frontend/src/core/timeline.ts` | 演出时间轴计算、吸附、波纹编辑、关键帧与运行时求值 |
 | `frontend/src/runtime/` | 导出游戏使用的玩家运行时 |
-| `launcher/Hikari.GameLauncher/` | 基于 .NET 8 WebView2 的 Windows 游戏启动器 |
+| `launcher/Hikari.GameLauncher/` | .NET 8 Windows 游戏启动器；按导出选择生成轻量系统浏览器版或 CefSharp 内置版 |
 | `data/star-sea-echo/` | v3 格式示例项目 |
 | `tests/` | Python 项目存储、API、导入、导出和构建测试 |
 
@@ -164,8 +165,9 @@ flowchart LR
 ### 环境要求
 
 - Windows 10/11
-- Python 3.12+
+- [uv](https://docs.astral.sh/uv/)（自动管理 Python 3.12/3.13 与虚拟环境）
 - Node.js 22+ 与 pnpm 10+
+- Rust stable；用于构建素材扫描与并行哈希 Worker
 - .NET 8 SDK，仅在构建 Windows 游戏时需要
 
 ### 运行桌面编辑器
@@ -173,17 +175,17 @@ flowchart LR
 ```powershell
 git clone https://github.com/kylemarvin884/Hikari-Studio.git
 cd Hikari-Studio
+uv sync
 
-python -m pip install -r requirements.txt
 cd frontend
 pnpm install --frozen-lockfile
 pnpm build
 cd ..
 
-python run.py
+uv run run.py
 ```
 
-Windows 用户也可以在依赖安装完成后运行 `start.bat`。
+Windows 用户也可以在依赖安装完成后运行 `start.bat`（优先使用 `uv run`）。
 
 桌面版默认使用 Windows 标准目录：
 
@@ -199,9 +201,11 @@ Windows 用户也可以在依赖安装完成后运行 `start.bat`。
 powershell -ExecutionPolicy Bypass -File scripts/build-editor.ps1
 ```
 
-编辑器使用 Nuitka 编译为 Windows 本机 standalone 程序，产物位于 `dist/HikariStudio/HikariStudio.exe`，运行时不需要用户安装 Python、Node.js 或 pnpm。Windows 游戏构建所需的 WebView2 启动器也会预编译进编辑器目录。
+编辑器使用 Nuitka 编译为 Windows 本机 standalone 程序，产物位于 `dist/HikariStudio/HikariStudio.exe`，运行时不需要用户安装 Python、Node.js 或 pnpm。Windows 游戏构建所需的轻量系统浏览器启动器和 CefSharp 内置启动器都会预编译进编辑器目录；实际导出只复制所选模式，系统浏览器版不会携带 Chromium 运行时。
 
-Nuitka 2.x 的 Windows DLL 扫描器要求 **Python 基础安装目录使用纯 ASCII 路径**。当仓库或 Python 位于含中文字符的目录时，请在 `C:\HikariBuild` 等路径创建 Python 3.12/3.13 构建环境，并通过 `-Python C:\HikariBuild\venv\Scripts\python.exe` 指定解释器。脚本会在耗时构建开始前检查此条件；Nuitka 暂存与缓存目录也可分别通过 `HIKARI_NUITKA_STAGING` 和 `HIKARI_NUITKA_CACHE` 指向纯 ASCII 路径。
+Nuitka 2.x 的 Windows DLL 扫描器要求 **Python 基础安装目录使用纯 ASCII 路径**。当仓库或 Python 位于含中文字符的目录时，请先在 ASCII 路径准备一个 Python 3.12/3.13 解释器（例如 `uv python install 3.12 --install-dir C:\HikariBuild`），并通过 `-Python C:\HikariBuild\...\python.exe` 指定基础解释器；脚本会用它创建 `.venv` 并再次校验该条件。Nuitka 暂存与缓存目录也可分别通过 `HIKARI_NUITKA_STAGING` 和 `HIKARI_NUITKA_CACHE` 指向纯 ASCII 路径。
+
+可选的语音识别依赖（`faster-whisper`）通过 `uv sync --extra asr` 安装；构建依赖（Nuitka 等）通过 `--extra build` 安装。
 
 旧版编辑器仍在运行时，可以使用 `-OutputDirectory dist/HikariStudio-next` 生成侧边构建；随后将同一目录传给 `build-installer.ps1 -SkipEditor -EditorDirectory dist/HikariStudio-next`，无需覆盖被占用的运行目录。
 
@@ -213,7 +217,7 @@ Nuitka 2.x 的 Windows DLL 扫描器要求 **Python 基础安装目录使用纯 
 powershell -ExecutionPolicy Bypass -File scripts/build-installer.ps1
 ```
 
-安装程序输出到 `dist/installer/`，采用当前用户安装，不要求管理员权限。它会检查并按需安装 Microsoft Edge WebView2 Runtime，创建开始菜单快捷方式、标准卸载入口，并将 `.hikari` 项目文件关联到 Hikari Studio。CI 也会生成可下载的安装程序 Artifact。
+安装程序输出到 `dist/installer/`，采用当前用户安装，不要求管理员权限。编辑器会随安装包携带 Qt WebEngine 运行时；Windows 游戏启动器仍按导出模式使用系统浏览器或 CefSharp。安装程序创建开始菜单快捷方式、标准卸载入口，并将 `.hikari` 项目文件关联到 Hikari Studio。CI 也会生成可下载的安装程序 Artifact。
 
 ### 部署崩溃报告服务
 
@@ -233,7 +237,7 @@ cd frontend
 pnpm dev
 ```
 
-浏览器开发模式使用本地缓存模拟项目存储；通过 `python run.py` 启动时，文件系统与系统能力会自动切换到 Python Desktop API。
+浏览器开发模式使用本地缓存模拟项目存储；通过 `uv run run.py` 启动时，文件系统与系统能力会自动切换到 Python Desktop API。
 
 ## 项目格式
 
@@ -273,7 +277,7 @@ Windows / Web 发布       █████████░  更新与崩溃闭环
 
 1. 用完整示例项目持续扩展安装版内容级回归，覆盖长剧情、复杂分支和多角色演出。
 2. 完成更新下载中断、安装回退、崩溃服务故障与用户授权上传的真实环境验收。
-3. 继续降低大型项目的 WebView2 传输、React 首次渲染和时间轴冷定位开销。
+3. 继续降低大型项目的 Qt WebEngine 传输、React 首次渲染和时间轴冷定位开销。
 4. 收集 Beta 反馈、处理高 DPI 与 Windows 10/11 兼容问题，并为后续代码签名接入 PFX。
 
 完整阶段规划见 [`docs/phase-2-roadmap.md`](docs/phase-2-roadmap.md)。
@@ -281,7 +285,9 @@ Windows / Web 发布       █████████░  更新与崩溃闭环
 ## 验证
 
 ```powershell
-python -m unittest discover -s tests -q
+uv run --no-sync python -m unittest discover -s tests -q
+cargo fmt --all -- --check
+cargo test --workspace --locked
 
 cd frontend
 pnpm test
@@ -299,7 +305,7 @@ pnpm exec playwright test
 - 在编辑器运行时双击 `.hikari`，由现有单实例接管并切换项目。
 - 自动备份 v2 单文件项目，再迁移为 v3 目录项目。
 - `v0.4.0-beta.1` standalone 通过项目路径冷启动并直接进入编辑器，运行设置与应用维护保持独立入口。
-- 维护中心在真实 WebView2 窗口中完成更新通道、安装包回退与本地崩溃报告空状态检查。
+- 维护中心在真实 Qt WebEngine 窗口中完成更新通道、安装包回退与本地崩溃报告空状态检查。
 
 每次推送和 Pull Request 都会在 Windows runner 上执行 Python 测试、TypeScript 检查、Playwright、两套前端构建、.NET 启动器、Nuitka 与 Inno Setup 验证，并在 Linux runner 上验证崩溃报告服务。
 

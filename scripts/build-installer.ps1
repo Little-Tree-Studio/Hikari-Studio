@@ -29,15 +29,6 @@ if (-not $EditorDirectory.StartsWith($DistRoot + [IO.Path]::DirectorySeparatorCh
 $Editor = Join-Path $EditorDirectory 'HikariStudio.exe'
 if (-not (Test-Path $Editor)) { throw "Editor build is missing: $Editor" }
 
-$PrerequisiteDir = Join-Path $Root 'build\prerequisites'
-$Bootstrapper = Join-Path $PrerequisiteDir 'MicrosoftEdgeWebview2Setup.exe'
-New-Item -ItemType Directory -Force -Path $PrerequisiteDir | Out-Null
-if (-not (Test-Path $Bootstrapper)) {
-  Write-Host 'Downloading Microsoft Edge WebView2 Evergreen Bootstrapper...'
-  Invoke-WebRequest 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile $Bootstrapper
-}
-if ((Get-Item $Bootstrapper).Length -lt 100000) { throw 'Downloaded WebView2 bootstrapper is invalid.' }
-
 if (-not $IsccPath) {
   $Command = Get-Command ISCC.exe -ErrorAction SilentlyContinue
   if ($Command) { $IsccPath = $Command.Source }

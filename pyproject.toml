@@ -1,0 +1,24 @@
+[project]
+name = "hikari-studio"
+version = "0.4.0-beta.1"
+description = "Hikari Studio Visual Novel Editor"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "fastapi>=0.115,<1",
+    "PySide6>=6.8,<7",
+    "uvicorn>=0.34,<1",
+]
+
+[project.optional-dependencies]
+asr = [
+    "faster-whisper>=1.1,<2",
+]
+build = [
+    "nuitka>=2.7,<3",
+    "ordered-set>=4.1,<5",
+    "zstandard>=0.23,<1",
+]
+
+[tool.uv]
+package = false

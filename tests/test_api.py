@@ -448,9 +448,10 @@ class DesktopApiTests(unittest.TestCase):
             windows_entry.parent.mkdir(parents=True)
             windows_entry.write_bytes(b"executable")
             with patch("backend.api.build_windows_game", return_value=windows_entry) as build_windows:
-                windows_result = api.build_windows(project, None, str(selected))
+                windows_result = api.build_windows(project, None, str(selected), "system")
             self.assertTrue(windows_result["ok"])
             self.assertEqual(build_windows.call_args.args[1], selected / "Custom-Output" / "windows")
+            self.assertEqual(build_windows.call_args.kwargs["browser_mode"], "system")
 
             with patch("backend.api.os.startfile") as startfile:
                 opened = api.open_build_output(web_result["path"])

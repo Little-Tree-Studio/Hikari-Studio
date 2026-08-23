@@ -10,8 +10,28 @@ $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 
-$PythonCommand = Get-Command $Python -ErrorAction Stop
-$Python = $PythonCommand.Source
+if (-not $SkipInstall) {
+  $UvCommand = Get-Command uv -ErrorAction Stop
+  $SyncArgs = @('sync', '--extra', 'build')
+  if ($PSBoundParameters.ContainsKey('Python')) {
+    $PythonCommand = Get-Command $Python -ErrorAction Stop
+    $SyncArgs += @('--python', $PythonCommand.Source)
+  }
+  & $UvCommand.Source @SyncArgs
+  if ($LASTEXITCODE -ne 0) {
+    throw "uv sync failed with exit code $LASTEXITCODE"
+  }
+}
+$VenvPython = Join-Path $Root '.venv\Scripts\python.exe'
+if (Test-Path $VenvPython) {
+  # Nuitka must run inside the uv-managed project environment.
+  $Python = $VenvPython
+} elseif ($SkipInstall) {
+  throw "The project virtual environment is missing. Run 'uv sync --extra build' first, or omit -SkipInstall."
+} else {
+  $PythonCommand = Get-Command $Python -ErrorAction Stop
+  $Python = $PythonCommand.Source
+}
 
 $PythonVersion = (& $Python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')").Trim()
 $PythonVersionParts = $PythonVersion.Split('.')
@@ -42,7 +62,6 @@ $NumericAppVersion = "$($Matches[1]).$($Matches[2]).$($Matches[3]).$AppRevision"
 & (Join-Path $PSScriptRoot 'prepare-brand-assets.ps1')
 
 if (-not $SkipInstall) {
-  & $Python -m pip install -r requirements.txt -r requirements-build.txt
   Push-Location frontend
   try { pnpm install --frozen-lockfile } finally { Pop-Location }
 }
@@ -61,19 +80,36 @@ foreach ($FrontendOutput in @((Join-Path $FrontendRoot 'dist'), (Join-Path $Fron
 Push-Location frontend
 try { pnpm run build } finally { Pop-Location }
 
+cargo build --release --locked --package hikari-asset-worker
+if ($LASTEXITCODE -ne 0) {
+  throw "Rust asset worker build failed with exit code $LASTEXITCODE"
+}
+$AssetWorker = Join-Path $Root 'target\release\hikari-asset-worker.exe'
+if (-not (Test-Path $AssetWorker)) {
+  throw "Rust asset worker build completed without producing $AssetWorker"
+}
+
 if (-not $SkipLauncher) {
-  dotnet publish launcher/Hikari.GameLauncher/Hikari.GameLauncher.csproj `
-    --configuration Release `
-    --runtime win-x64 `
-    --self-contained true `
-    -p:DebugType=None `
-    -p:DebugSymbols=false `
-    --output launcher/dist/win-x64
-  if ($LASTEXITCODE -ne 0) {
-    throw "Windows game launcher build failed with exit code $LASTEXITCODE"
+  $LauncherDistRoot = Join-Path $Root 'launcher\dist\win-x64'
+  if (Test-Path $LauncherDistRoot) {
+    Remove-Item -LiteralPath $LauncherDistRoot -Recurse -Force
   }
-  if (-not (Test-Path (Join-Path $Root 'launcher\dist\win-x64\Hikari.GameLauncher.exe'))) {
-    throw 'Windows game launcher build completed without producing Hikari.GameLauncher.exe'
+  foreach ($BrowserMode in @('system', 'cefsharp')) {
+    $LauncherOutput = "launcher/dist/win-x64/$BrowserMode"
+    dotnet publish launcher/Hikari.GameLauncher/Hikari.GameLauncher.csproj `
+      --configuration Release `
+      --runtime win-x64 `
+      --self-contained true `
+      -p:DebugType=None `
+      -p:DebugSymbols=false `
+      -p:HikariBrowserMode=$BrowserMode `
+      --output $LauncherOutput
+    if ($LASTEXITCODE -ne 0) {
+      throw "Windows $BrowserMode game launcher build failed with exit code $LASTEXITCODE"
+    }
+    if (-not (Test-Path (Join-Path $Root "$LauncherOutput\Hikari.GameLauncher.exe"))) {
+      throw "Windows $BrowserMode game launcher build completed without producing Hikari.GameLauncher.exe"
+    }
   }
 }
 
@@ -117,6 +153,8 @@ New-Item -ItemType Directory -Force -Path (Join-Path $StagingRoot 'frontend') | 
 Copy-Item -LiteralPath (Join-Path $Root 'frontend\dist') -Destination (Join-Path $StagingRoot 'frontend\dist') -Recurse
 Copy-Item -LiteralPath (Join-Path $Root 'frontend\runtime-dist') -Destination (Join-Path $StagingRoot 'frontend\runtime-dist') -Recurse
 Copy-Item -LiteralPath (Join-Path $Root 'assets') -Destination (Join-Path $StagingRoot 'assets') -Recurse
+New-Item -ItemType Directory -Force -Path (Join-Path $StagingRoot 'native') | Out-Null
+Copy-Item -LiteralPath $AssetWorker -Destination (Join-Path $StagingRoot 'native\hikari-asset-worker.exe')
 Copy-Item -LiteralPath (Join-Path $Root 'installer\HikariStudio.ico') -Destination (Join-Path $StagingRoot 'HikariStudio.ico')
 
 # MSVC receives the Python import library as a bare filename from Nuitka. Let
@@ -136,8 +174,10 @@ $NuitkaArgs = @(
   '--standalone',
   '--msvc=latest',
   '--assume-yes-for-downloads',
-  '--windows-console-mode=disable',
-  '--windows-icon-from-ico=HikariStudio.ico',
+   '--windows-console-mode=disable',
+   '--enable-plugin=pyside6',
+   '--include-qt-plugins=all',
+   '--windows-icon-from-ico=HikariStudio.ico',
   '--company-name=Hikari Studio',
   '--product-name=Hikari Studio',
   '--file-description=Hikari Studio Visual Novel Editor',
@@ -149,7 +189,8 @@ $NuitkaArgs = @(
   '--include-package=clr_loader',
   '--include-data-dir=frontend/dist=frontend/dist',
   '--include-data-dir=frontend/runtime-dist=frontend/runtime-dist',
-  '--include-data-dir=assets=assets'
+  '--include-data-dir=assets=assets',
+  '--include-data-dir=native=native'
 )
 $PreviousNuitkaCache = $env:NUITKA_CACHE_DIR
 $PreviousLib = $env:LIB

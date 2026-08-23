@@ -353,6 +353,7 @@ export interface DesktopApiResult<T> {
 }
 
 export type BuildTarget = 'web' | 'windows';
+export type BrowserMode = 'system' | 'cefsharp';
 export type BuildPreflightCategory = 'assets' | 'flow' | 'reachability' | 'compatibility';
 
 export interface BuildPreflightIssue {
@@ -662,10 +663,9 @@ export interface DesktopApi {
   export_renpy(project: Project, outputRoot?: string): Promise<{ ok: boolean; path: string }>;
   preflight_build(project: Project, target: BuildTarget, frontendReport: BuildPreflightReport): Promise<BuildPreflightReport>;
   build_web(project: Project, preflight?: BuildPreflightReport, outputRoot?: string): Promise<BuildResult>;
-  build_windows(project: Project, preflight?: BuildPreflightReport, outputRoot?: string): Promise<BuildResult>;
+  build_windows(project: Project, preflight?: BuildPreflightReport, outputRoot?: string, browserMode?: BrowserMode): Promise<BuildResult>;
   open_build_output(path: string): Promise<{ ok: boolean; path: string }>;
   launch_build_output(path: string): Promise<{ ok: boolean; path: string }>;
-  move_window(x: number, y: number): Promise<boolean>;
   minimize_window(): Promise<boolean>;
   set_project_creation_mode(enabled: boolean): Promise<boolean>;
   toggle_maximize(): Promise<boolean>;
@@ -935,6 +935,7 @@ declare global {
     __HIKARI_BOOT_STARTED_AT__?: number;
     __HIKARI_LAST_PROJECT_RELOAD__?: ProjectReloadPerformance;
     __HIKARI_PREVIEW_SEEK_PERFORMANCE__?: import('./performance/previewSeekProfiler').PreviewSeekPerformanceReport;
+    __HIKARI_RPC__?: { baseUrl: string; token: string };
     pywebview?: { api: DesktopApi };
     __HIKARI_RUNTIME_SELF_TEST__?: () => { ok: boolean; engineVersion: number; current?: string; readCount: number; backlogCount: number; characterCount: number; diagnosticErrors: number; diagnosticWarnings: number };
   }

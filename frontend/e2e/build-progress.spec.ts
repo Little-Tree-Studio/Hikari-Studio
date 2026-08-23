@@ -68,6 +68,25 @@ test('build output folder can be selected, reused, and restored to default', asy
   expect(await page.evaluate(() => localStorage.getItem('hikari-build-output-root'))).toBeNull();
 });
 
+test('Windows export persists browser mode and explains package size difference', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto('/?editor=1');
+
+  await page.getByRole('button', { name: '发布游戏' }).click();
+  let publish = page.getByRole('dialog', { name: '构建与发布' });
+  await publish.getByRole('button', { name: /Windows 游戏/ }).click();
+  await expect(publish.getByText('CefSharp Chromium，包体较大但运行环境固定')).toBeVisible();
+  await expect(publish.getByText('不打包 Chromium，体积更小')).toBeVisible();
+  await publish.getByRole('radio', { name: /系统默认浏览器/ }).check();
+  expect(await page.evaluate(() => localStorage.getItem('hikari-browser-mode'))).toBe('system');
+  await publish.getByRole('button', { name: '关闭' }).click();
+
+  await page.getByRole('button', { name: '发布游戏' }).click();
+  publish = page.getByRole('dialog', { name: '构建与发布' });
+  await publish.getByRole('button', { name: /Windows 游戏/ }).click();
+  await expect(publish.getByRole('radio', { name: /系统默认浏览器/ })).toBeChecked();
+});
+
 test('completed build exposes trusted open-folder and launch-game actions', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
   const project = {

@@ -1,4 +1,9 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
+
+const selectResolution = async (page: Page, value: string) => {
+  await page.getByRole('combobox').click();
+  await page.locator(`[role="option"][data-value="${value}"]`).click();
+};
 
 test('startup center opens a complete four-step project wizard', async ({ page }) => {
   await page.setViewportSize({ width: 960, height: 600 });
@@ -23,7 +28,7 @@ test('startup center opens a complete four-step project wizard', async ({ page }
   await page.getByPlaceholder('例如：星海回声').fill('玻璃海岸');
   await next.click();
 
-  await page.locator('select').selectOption('custom');
+  await selectResolution(page, 'custom');
   await page.getByText('宽度').locator('..').getByRole('spinbutton').fill('1600');
   await page.getByText('高度').locator('..').getByRole('spinbutton').fill('900');
   await page.getByPlaceholder('创作者或团队名称').fill('Hikari Team');
