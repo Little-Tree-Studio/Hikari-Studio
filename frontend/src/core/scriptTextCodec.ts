@@ -51,6 +51,35 @@ export function parseJsonBlocks(text: string): StoryBlock[] {
   });
 }
 
+/** JSON 视图的一键整理：校验结构后按 2 空格缩进重新输出。 */
+export function formatJsonBlocksText(text: string): string {
+  return JSON.stringify(parseJsonBlocks(text), null, 2);
+}
+
+/**
+ * Ren'Py 视图的一键整理：规范化已知指令行的空白与引号，
+ * 无法识别的行仅去除首尾空白，绝不删除任何内容。
+ */
+export function formatRenpyText(text: string): string {
+  return text.split(/\r?\n/).map((line) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) return trimmed;
+    for (const keyword of ['jump', 'call', 'scene', 'menu']) {
+      if (trimmed === keyword) return trimmed;
+      if (trimmed.startsWith(`${keyword} `)) return `${keyword} ${trimmed.slice(keyword.length).trim()}`;
+    }
+    const sound = /^(play|stop)\s+(\S+)\s*(.*)$/.exec(trimmed);
+    if (sound) return `${sound[1]} ${sound[2]} ${sound[3]}`.trimEnd();
+    if (trimmed === 'return') return 'return';
+    const set = /^\$\s*(\S+)\s*=\s*(.+)$/.exec(trimmed);
+    if (set) return `$ ${set[1]} = ${set[2].trim()}`;
+    if (trimmed.startsWith('$')) return `$ ${trimmed.slice(1).trim()}`;
+    const dialogue = /^([^\s"']+)\s+(["'])(.*)\2\s*$/.exec(trimmed);
+    if (dialogue) return `${dialogue[1]} ${dialogue[2]}${dialogue[3]}${dialogue[2]}`;
+    return trimmed;
+  }).join('\n');
+}
+
 export function parsePlainBlocks(text: string, oldBlocks: StoryBlock[]): StoryBlock[] {
   return text.split(/\r?\n/).map((line, index) => {
     const old = oldBlocks[index];

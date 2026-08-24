@@ -1,13 +1,10 @@
-import { Activity, AlertTriangle, CheckCircle2, Download, FileWarning, History, LoaderCircle, RefreshCw, Send, Settings2, ShieldCheck, Trash2, Upload, X } from 'lucide-react';
+import { Activity, AlertTriangle, CheckCircle2, Download, FileWarning, History, LoaderCircle, RefreshCw, Send, ShieldCheck, Trash2, Upload } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { checkForUpdates, deleteCrashReport, downloadUpdate, getAppInfo, getCrashReport, getCrashReports, getProjectReloadPerformance, getUpdateStatus, installDownloadedUpdate, submitCrashReport } from '../api';
 import type { AppInfo, BlockType, ComponentRenderSurface, CrashReport, CrashReportCenter, DialogueStoryCardRegion, ProjectReloadPerformance, UpdateStatus } from '../types';
-import { AnimatedModal } from './ui/AnimatedModal';
 import { Select } from './ui/Select';
 
 interface Props {
-  open: boolean;
-  close: () => void;
   notify: (message: string, tone?: 'error' | 'success') => void;
   requestConfirm: (options: { title: string; message: string; confirmText?: string; danger?: boolean }) => Promise<boolean>;
 }
@@ -30,7 +27,7 @@ const blockTypeLabels: Record<BlockType, string> = {
 };
 const dialogueRegionLabels: Record<DialogueStoryCardRegion, string> = { speaker: '角色与显示名', expression: '表情选择', body: '正文与语音' };
 
-export function DesktopMaintenanceDialog({ open, close, notify, requestConfirm }: Props) {
+export function DesktopMaintenanceSection({ notify, requestConfirm }: Props) {
   const [tab, setTab] = useState<'updates' | 'performance' | 'crashes'>('updates');
   const [app, setApp] = useState<AppInfo | null>(null);
   const [updates, setUpdates] = useState<UpdateStatus | null>(null);
@@ -47,7 +44,6 @@ export function DesktopMaintenanceDialog({ open, close, notify, requestConfirm }
   };
 
   useEffect(() => {
-    if (!open) return;
     setBusy('loading');
     void Promise.all([getAppInfo(), getUpdateStatus(), getCrashReports(), getProjectReloadPerformance()]).then(([info, status, center, profile]) => {
       setApp(info);
@@ -56,7 +52,7 @@ export function DesktopMaintenanceDialog({ open, close, notify, requestConfirm }
       setCrashes(center);
       setReloadPerformance(profile);
     }).catch((error) => notify(`维护中心加载失败：${String(error)}`, 'error')).finally(() => setBusy(null));
-  }, [open]);
+  }, []);
 
   const runCheck = async () => {
     setBusy('check');
@@ -111,8 +107,7 @@ export function DesktopMaintenanceDialog({ open, close, notify, requestConfirm }
   };
 
   const isBusy = busy !== null;
-  return <AnimatedModal open={open} close={close} className="maintenance-dialog" labelledBy="maintenance-title">
-    <header className="modal-header maintenance-header"><div className="modal-heading-icon"><Settings2 /></div><div><strong id="maintenance-title">Slide Studio 维护中心</strong><small>更新、安装回退与隐私可控的崩溃恢复</small></div><button className="icon-button" title="关闭" onClick={close}><X /></button></header>
+  return <div className="maintenance-shell">
     <nav className="maintenance-tabs"><button className={tab === 'updates' ? 'active' : ''} onClick={() => setTab('updates')}><RefreshCw />软件更新</button><button className={tab === 'performance' ? 'active' : ''} onClick={() => setTab('performance')}><Activity />重载性能</button><button className={tab === 'crashes' ? 'active' : ''} onClick={() => setTab('crashes')}><FileWarning />崩溃报告{crashes.reports.length > 0 && <span>{crashes.reports.length}</span>}</button></nav>
     {tab === 'updates' ? <div className="maintenance-body">
       <section className="maintenance-version"><div className="maintenance-logo">S</div><div><strong>{app?.name ?? 'Slide Studio'}</strong><span>v{app?.version ?? updates?.currentVersion ?? '0.4.0-beta.1'} · {channel === 'beta' ? 'Beta 预览通道' : '稳定通道'}</span></div><label>更新通道<Select value={channel} disabled={isBusy} onChange={(value) => setChannel(value as 'stable' | 'beta')}><option value="beta">Beta</option><option value="stable">Stable</option></Select></label></section>
@@ -125,5 +120,5 @@ export function DesktopMaintenanceDialog({ open, close, notify, requestConfirm }
       <section className="performance-components"><header><strong>React 首次渲染组件</strong><small>挂载、更新、动态测量与提交次数</small></header><div>{(Object.entries(reloadPerformance.frontend?.componentRenders ?? {}) as [ComponentRenderSurface, NonNullable<ProjectReloadPerformance['frontend']>['componentRenders'][ComponentRenderSurface]][]).map(([surface, measurement]) => measurement && <article className={surface === 'block-list' ? 'block-list-performance' : ''} key={surface}><span>{componentLabels[surface]}</span><strong>{formatMs(measurement.actualDurationMs)}</strong><small>挂载 {formatMs(measurement.mountDurationMs)} · 更新 {formatMs(measurement.updateDurationMs)} · {measurement.commits} 次</small>{surface === 'block-list' && <><small>首次测量 {formatMs(measurement.firstMeasurementDurationMs)} · 重测 {formatMs(measurement.observerMeasurementDurationMs)} · Observer {measurement.observerCallbacks ?? 0} 次 · Revision {measurement.revisionFlushes ?? 0} 次 · 峰值 {measurement.peakObservedRows ?? 0} 行</small>{measurement.storyCardTypes && <div className="story-card-performance"><strong>StoryCard 类型挂载</strong>{(Object.entries(measurement.storyCardTypes) as [BlockType, NonNullable<typeof measurement.storyCardTypes>[BlockType]][]).sort((left, right) => (right[1]?.mountDurationMs ?? 0) - (left[1]?.mountDurationMs ?? 0)).map(([type, card]) => card && <span key={type}><b>{blockTypeLabels[type]}</b><em>{card.mounts} 张 · {formatMs(card.mountDurationMs)} · 均值 {formatMs(card.mounts ? card.mountDurationMs / card.mounts : 0)}</em></span>)}</div>}{measurement.dialogueRegions && <div className="story-card-performance dialogue-region-performance"><strong>对白卡片内部挂载</strong>{(Object.entries(measurement.dialogueRegions) as [DialogueStoryCardRegion, NonNullable<typeof measurement.dialogueRegions>[DialogueStoryCardRegion]][]).sort((left, right) => (right[1]?.mountDurationMs ?? 0) - (left[1]?.mountDurationMs ?? 0)).map(([region, value]) => value && <span key={region}><b>{dialogueRegionLabels[region]}</b><em>{formatMs(value.mountDurationMs)} · 更新 {formatMs(value.updateDurationMs)}</em></span>)}</div>}</>}</article>)}</div></section>
       <section className="performance-payload"><header><div><strong>测试负载</strong><small>{formatBytes(reloadPerformance.backend.payloadBytes)} 原始 JSON · {formatBytes(reloadPerformance.backend.transportBytes ?? reloadPerformance.backend.payloadBytes)} 桥接载荷</small></div><ShieldCheck /></header><div><span>{reloadPerformance.backend.counts.chapters}<small>章节</small></span><span>{reloadPerformance.backend.counts.fragments}<small>片段</small></span><span>{reloadPerformance.backend.counts.blocks}<small>Block</small></span><span>{reloadPerformance.backend.counts.assets}<small>素材</small></span><span>{reloadPerformance.backend.counts.timelineClips}<small>时间轴片段</small></span></div><footer>报告只记录阶段耗时、载荷大小和数量，不包含项目正文、路径或素材内容。</footer></section>
     </> : <div className="maintenance-empty"><Activity /><strong>暂无完整重载报告</strong><span>重新启动桌面安装版后，此处将展示 Python、Qt WebEngine 和 React 各阶段耗时。</span></div>}</div> : <div className="maintenance-body crash-layout"><aside><header><strong>待处理报告</strong><button className="icon-button tiny" title="刷新" disabled={isBusy} onClick={() => void refreshCrashes()}><RefreshCw /></button></header>{crashes.reports.length ? crashes.reports.map((report) => <button className={selectedReport?.id === report.id ? 'active' : ''} key={report.id} onClick={() => void openReport(report.id)}><FileWarning /><span><strong>{report.kind}</strong><small>{report.message}</small><time>{dateTime(report.createdAt)}</time></span></button>) : <div className="maintenance-empty"><CheckCircle2 />没有待处理的崩溃报告</div>}</aside><section className="crash-preview">{selectedReport ? <><header><div><strong>{selectedReport.kind}</strong><small>{selectedReport.source} · {dateTime(selectedReport.createdAt)}</small></div><code>{selectedReport.fingerprint}</code></header><div className="privacy-note"><ShieldCheck /><span><strong>本地脱敏预览</strong><small>只会发送此处数据；敏感内容已在 Python 后端写盘前移除。</small></span></div><pre>{JSON.stringify(selectedReport, null, 2)}</pre><footer><button className="button ghost danger" disabled={isBusy} onClick={() => void removeReport()}><Trash2 />删除</button><button className="button primary" disabled={isBusy || !crashes.uploadConfigured} title={crashes.uploadConfigured ? '发送报告' : '报告服务尚未配置'} onClick={() => void sendReport()}>{busy === `send-${selectedReport.id}` ? <LoaderCircle className="spin" /> : <Send />}发送报告</button></footer></> : <div className="maintenance-empty"><FileWarning /><strong>选择一份报告查看脱敏内容</strong><span>报告不会自动上传。</span></div>}</section></div>}
-  </AnimatedModal>;
+  </div>;
 }

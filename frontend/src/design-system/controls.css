@@ -24,6 +24,14 @@ html[data-motion="full"] .ds-select-content[data-state="open"] { animation: ds-p
 .ds-checkbox[data-state="checked"], .ds-checkbox[data-state="indeterminate"] { border-color: var(--accent); background: var(--accent); }
 .ds-checkbox-indicator { display: grid; place-items: center; }
 
+.ds-switch { flex: 0 0 auto; display: inline-flex; align-items: center; width: 34px; height: 20px; padding: 2px; border: 1px solid var(--line); border-radius: calc(var(--radius-sm) + 9px); background: var(--panel-3); cursor: pointer; transition: border-color var(--motion-fast), background var(--motion-fast), box-shadow var(--motion-fast); }
+.ds-switch:hover:not(:disabled) { border-color: var(--accent); }
+.ds-switch:disabled { cursor: not-allowed; opacity: .45; }
+.ds-switch:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.ds-switch[data-state="checked"] { border-color: var(--accent); background: var(--accent); }
+.ds-switch-thumb { display: block; width: 14px; height: 14px; border-radius: calc(var(--radius-xs) + 6px); background: var(--muted); transition: transform var(--motion-base) var(--motion-ease), background var(--motion-fast); transform: translateX(0); will-change: transform; }
+.ds-switch-thumb[data-state="checked"] { background: #fff; transform: translateX(14px); }
+
 :where(.ds-radio-group) { display: contents; }
 .ds-radio { display: inline-flex; align-items: center; gap: 8px; border: 0; background: transparent; color: var(--ink); font-size: 12px; text-align: left; cursor: pointer; outline: none; }
 .ds-radio:disabled { cursor: not-allowed; opacity: .45; }

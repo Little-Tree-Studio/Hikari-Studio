@@ -189,8 +189,15 @@ export function SceneManager({ project, commit, notify, requestText, requestConf
     return <button draggable key={scene.id} className={`scene-list-item ${selectedIds.has(scene.id) ? 'active' : ''}`} onClick={(event) => selectScene(scene, event)} onDoubleClick={() => void renameScene()} onDragStart={(event) => { if (!selectedIds.has(scene.id)) { setSelectedIds(new Set([scene.id])); setSelectedId(scene.id); } event.dataTransfer.setData('text/slide-scene', scene.id); }}><span>{thumbnail?.uri ? <img src={thumbnail.uri} alt={scene.name} /> : <Image />}</span><span><strong>{scene.name}</strong><small>{scene.layers.length}L · {count ? `${count} 处引用` : '游离'}</small></span><em>{scene.layers.length}L</em><MoreHorizontal /></button>;
   };
   const parallaxStyle = (layer: SceneDefinitionLayer, index: number) => {
+    const relativeDistance = layer.distance - 1;
     const relativeZoom = 1 + (camera.zoom - 1) * layer.distance;
-    return { opacity: layer.visible === false || isolation === 'only' && layer.id !== selectedLayer?.id ? 0 : (isolation === 'dim' && layer.id !== selectedLayer?.id ? .25 : layer.opacity), transform: `translate(calc(-50% + ${layer.offsetX - camera.x * layer.distance}%), calc(-50% + ${layer.offsetY - camera.y * layer.distance}%)) scale(${layer.scale * relativeZoom})`, zIndex: selected.layers.length - index, mixBlendMode: layer.blendMode } as React.CSSProperties;
+    return {
+      opacity: layer.visible === false || isolation === 'only' && layer.id !== selectedLayer?.id ? 0 : (isolation === 'dim' && layer.id !== selectedLayer?.id ? .25 : layer.opacity),
+      transform: `translate(calc(-50% + ${layer.offsetX + camera.x * relativeDistance}%), calc(-50% + ${layer.offsetY + camera.y * relativeDistance}%)) scale(${layer.scale * relativeZoom})`,
+      zIndex: selected.layers.length - index,
+      mixBlendMode: layer.blendMode,
+      willChange: camera.x !== 0 || camera.y !== 0 || camera.zoom !== 1 ? 'transform' : undefined,
+    } as React.CSSProperties;
   };
 
   return <div className="scene-manager">
