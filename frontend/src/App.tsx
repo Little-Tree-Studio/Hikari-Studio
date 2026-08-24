@@ -39,13 +39,13 @@ import { BuildPublishDialog } from './components/BuildPublishDialog';
 import { BuildProgressDialog } from './components/BuildProgressDialog';
 import { DialogueStoryCard } from './components/story/DialogueStoryCard';
 import { EditorTabBar } from './components/EditorTabBar';
-import { analyzeAssetReferences } from './core/assetReferences';
 import { applyAssetImport, describeAssetImport } from './core/assetImport';
 import { audioCategoryOf, matchingVoice } from './core/audio';
 import { log } from './core/logger';
 import { buildAgentPatchSemanticRecord, restoreAgentPatchCategory, type AgentPatchSemanticRecord } from './core/agentPatchHistory';
 import { diffProjects, type ProjectDiff } from './core/projectDiff';
 import { readSmallValue, removeSmallValue, writeSmallValue } from './core/storage';
+import { defaultEditorSession, loadEditorSession, saveEditorSession, type EditorSessionState } from './core/editorSession';
 import { projectScenes, sceneBlockSnapshot } from './core/scenes';
 import { useEditorAppearance } from './core/editorAppearance';
 import { defaultLanguage, projectLanguages } from './core/localization';
@@ -465,7 +465,7 @@ function ScriptPage({ project, commit, selected, setSelected, view, setView, ope
       byId.set(asset.id, asset);
       byReference.set(asset.id, asset);
       byReference.set(asset.name, asset);
-      byReference.set(asset.path.split(/[\\/]/).at(-1) ?? asset.path, asset);
+      byReference.set(asset.path?.split(/[\\/]/).at(-1) ?? asset.path, asset);
     }
     return { byId, byReference };
   }, [project.assets]);
@@ -866,146 +866,6 @@ function PageHeader({ title, sub, children }: { title: string; sub: string; chil
   return <div className="page-header"><div><h1>{title}</h1><p>{sub}</p></div><div className="page-header-actions">{children}</div></div>;
 }
 
-function AssetsPage({ project, importing, commit, notify, requestConfirm, section }: { project: Project; importing: () => void; commit: (updater: (project: Project) => Project, label?: string) => void; notify: (message: string, tone?: 'error' | 'success') => void; requestConfirm: RequestConfirm; section: string }) {
-  const [filter, setFilter] = useState('全部');
-  const [query, setQuery] = useState('');
-  const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
-  useEffect(() => setFilter(section), [section]);
-  const kinds: Record<string, string> = { 场景: 'scene', 音频: 'audio', 视频: 'video' };
-  const report = analyzeAssetReferences(project);
-  const filterAssets = filter === '全部' ? project.assets : filter === '未使用' ? project.assets.filter((asset) => !report.references[asset.id]?.length) : filter === '强制打包' ? project.assets.filter((asset) => asset.forceBundle) : ['BGM', 'SE', '语音'].includes(filter) ? project.assets.filter((asset) => asset.kind === 'audio') : project.assets.filter((asset) => asset.kind === kinds[filter]);
-  const shown = filterAssets.filter((asset) => asset.name.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
-  const size = project.assets.reduce((total, asset) => total + (asset.size ?? 0), 0);
-  const selectedAsset = project.assets.find((asset) => asset.id === selectedAssetId);
-  const remove = async (asset: Asset) => { const count = report.references[asset.id]?.length ?? 0; if (count) { notify(`${asset.name} 仍被 ${count} 处内容引用，无法删除`, 'error'); return; } if (!await requestConfirm({ title: '删除素材', message: `从项目中删除素材“${asset.name}”？`, confirmText: '删除', danger: true })) return; commit((current) => ({ ...current, assets: current.assets.filter((item) => item.id !== asset.id) }), `删除素材 ${asset.name}`); };
-  const play = (asset: Asset) => { if (!asset.uri) { notify('素材没有可试听的本地地址', 'error'); return; } const audio = new Audio(asset.uri); void audio.play().catch((error) => notify(String(error), 'error')); };
-  return <div className="dashboard-page"><PageHeader title="素材引用与打包" sub="追踪角色、场景和剧本引用；构建时仅收集已引用或强制打包的素材"><button className="button primary" onClick={importing}><FileUp />导入素材</button></PageHeader><div className="content-pad"><div className="stats-row"><div className="stat"><span>全部素材</span><strong>{project.assets.length}</strong><small>{(size / 1024 / 1024).toFixed(1)} MB 已登记</small></div><div className="stat"><span>预计打包</span><strong>{report.bundledIds.size}</strong><small>{(report.bundledSize / 1024 / 1024).toFixed(1)} MB</small></div><div className="stat"><span>缺失引用</span><strong>{report.missing.length}</strong><small>构建前必须处理</small></div><div className="stat"><span>未使用</span><strong>{project.assets.filter((asset) => !report.references[asset.id]?.length).length}</strong><small>不会默认打包</small></div></div>{report.missing.length > 0 && <div className="asset-missing-banner">检测到 {report.missing.length} 个缺失素材引用：{report.missing.slice(0, 3).map((item) => `${item.sourceName} · ${item.detail}`).join('、')}</div>}{selectedAsset && <section className="asset-reference-panel"><header><strong>{selectedAsset.name} · 引用位置</strong><small>{report.references[selectedAsset.id]?.length ?? 0} 处引用 · {selectedAsset.forceBundle ? '强制打包' : report.bundledIds.has(selectedAsset.id) ? '随引用打包' : '不会打包'}</small><button className="icon-button" title="关闭引用详情" onClick={() => setSelectedAssetId(null)}><X /></button></header><div className="asset-reference-list">{(report.references[selectedAsset.id] ?? []).map((reference) => <button key={`${reference.sourceId}-${reference.detail}`} onClick={() => notify(`${reference.sourceName} · ${reference.detail}`)}><strong>{reference.sourceName}</strong><span>{reference.detail}</span><small>{reference.sourceType === 'character' ? '角色' : `Block ${(reference.blockIndex ?? 0) + 1}`}</small></button>)}{!report.references[selectedAsset.id]?.length && <span>当前没有直接引用；开启强制打包后仍会进入构建产物。</span>}</div></section>}<div className="filterbar"><div className="asset-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索素材" /></div>{['全部', '场景', '音频', '视频', '未使用', '强制打包'].map((item) => <button className={`button ${filter === item ? 'primary' : 'ghost'}`} onClick={() => setFilter(item)} key={item}>{item}</button>)}</div><div className="asset-grid">{shown.map((asset) => { const count = report.references[asset.id]?.length ?? 0; return <article className={`asset-card ${selectedAssetId === asset.id ? 'selected' : ''}`} key={asset.id} onClick={() => setSelectedAssetId(asset.id)}><div className="asset-preview">{asset.kind === 'scene' || asset.kind === 'image' || asset.kind === 'character' ? <img src={asset.uri} alt={asset.name} /> : <button className="asset-audio" title="试听" onClick={(event) => { event.stopPropagation(); play(asset); }}><AudioLines /></button>}<span className="asset-kind">{asset.kind}</span>{!count && <span className="asset-unused">未使用</span>}</div><div className="asset-info"><input className="inline-name" defaultValue={asset.name} onClick={(event) => event.stopPropagation()} onBlur={(event) => { const name = event.target.value.trim(); if (name && name !== asset.name) commit((current) => ({ ...current, assets: current.assets.map((item) => item.id === asset.id ? { ...item, name } : item) }), `重命名素材 ${asset.name}`); }} /><small>{count} 处引用 · {asset.size ? `${(asset.size / 1024).toFixed(0)} KB` : '内置素材'}</small><label className="asset-bundle-toggle" onClick={(event) => event.stopPropagation()}><Checkbox checked={asset.forceBundle ?? false} onChange={(checked) => commit((current) => ({ ...current, assets: current.assets.map((item) => item.id === asset.id ? { ...item, forceBundle: checked } : item) }), `${checked ? '强制打包' : '取消强制打包'} ${asset.name}`)} />强制打包</label><button className="asset-delete" title="删除素材" onClick={(event) => { event.stopPropagation(); void remove(asset); }}><Trash2 /></button></div></article>; })}</div>{!shown.length && <div className="empty-state large"><Image /><strong>没有匹配的素材</strong><span>调整搜索条件或导入新素材</span></div>}</div></div>;
-}
-
-type MapEdge = { id: string; source: string; target: string; label: string; kind: 'branch' | 'condition' | 'jump' | 'call'; blockId: string; slot?: 'true' | 'false'; optionIndex?: number };
-
-function MapPage({ project, activate, commit, notify, requestText }: { project: Project; activate: (id: string) => void; commit: (updater: (project: Project) => Project, label?: string) => void; notify: (message: string, tone?: 'error' | 'success') => void; requestText: RequestText }) {
-  const fragments = project.chapters.flatMap((chapter) => chapter.fragments.map((fragment) => ({ ...fragment, chapter: chapter.name })));
-  const defaultPositions = Object.fromEntries(fragments.map((fragment, index) => [fragment.id, { x: 90 + (index % 4) * 270, y: 90 + Math.floor(index / 4) * 190 }]));
-  const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>(() => ({ ...defaultPositions, ...(project.settings.narrativeMap?.positions ?? {}) }));
-  const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
-  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
-  const [wireDraft, setWireDraft] = useState<{ source: string; x: number; y: number } | null>(null);
-  const [wireTargetId, setWireTargetId] = useState<string | null>(null);
-  const positionsRef = useRef(positions);
-  const canvasRef = useRef<HTMLDivElement>(null);
-  const panRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
-  const nodeDragRef = useRef<{ pointerId: number; fragmentId: string; startX: number; startY: number; originX: number; originY: number } | null>(null);
-  const wireRef = useRef<{ pointerId: number; source: string } | null>(null);
-
-  useEffect(() => { setPositions((current) => { const next = Object.fromEntries(fragments.map((fragment, index) => [fragment.id, current[fragment.id] ?? project.settings.narrativeMap?.positions?.[fragment.id] ?? { x: 90 + (index % 4) * 270, y: 90 + Math.floor(index / 4) * 190 }])); positionsRef.current = next; return next; }); }, [project.chapters]);
-
-  const allEdges: MapEdge[] = [];
-  for (const [source, blocks] of Object.entries(project.scripts)) for (const block of blocks) {
-    if (block.type === 'branch') (block.options ?? []).forEach((option, optionIndex) => allEdges.push({ id: `${block.id}-option-${optionIndex}`, source, target: option.target, label: option.text, kind: 'branch', blockId: block.id, optionIndex }));
-    else if (block.type === 'condition') { allEdges.push({ id: `${block.id}-true`, source, target: block.trueTarget ?? '', label: '成立', kind: 'condition', blockId: block.id, slot: 'true' }); allEdges.push({ id: `${block.id}-false`, source, target: block.falseTarget ?? '', label: '否则', kind: 'condition', blockId: block.id, slot: 'false' }); }
-    else if (block.type === 'jump' || block.type === 'call') allEdges.push({ id: block.id, source, target: block.target ?? '', label: block.type === 'call' ? '调用' : '跳转', kind: block.type, blockId: block.id });
-  }
-  const edges = allEdges.filter((edge) => Boolean(edge.target && positions[edge.source] && positions[edge.target]));
-
-  const toCanvasPoint = (clientX: number, clientY: number) => { const rect = canvasRef.current?.getBoundingClientRect(); return { x: ((clientX - (rect?.left ?? 0)) - viewport.x) / viewport.scale, y: ((clientY - (rect?.top ?? 0)) - viewport.y) / viewport.scale }; };
-  const edgePath = (sourceId: string, targetX: number, targetY: number) => { const source = positions[sourceId]; const x1 = source.x + 210; const y1 = source.y + 54; const bend = Math.max(65, Math.abs(targetX - x1) * .45); return `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${targetX - bend} ${targetY}, ${targetX} ${targetY}`; };
-  const findWireTarget = (clientX: number, clientY: number) => {
-    let closestId: string | null = null;
-    let closestDistance = Number.POSITIVE_INFINITY;
-    for (const port of document.querySelectorAll<HTMLElement>('.node-port.in[data-fragment-id]')) {
-      const rect = port.getBoundingClientRect();
-      const distance = Math.hypot(clientX - (rect.left + rect.width / 2), clientY - (rect.top + rect.height / 2));
-      const id = port.dataset.fragmentId;
-      if (id && distance <= 34 && distance < closestDistance) { closestId = id; closestDistance = distance; }
-    }
-    return closestId;
-  };
-  const persistPositions = (next: Record<string, { x: number; y: number }>, label = '移动叙事地图节点') => commit((current) => ({ ...current, settings: { ...current.settings, narrativeMap: { positions: next } } }), label);
-  const zoom = (delta: number) => setViewport((current) => ({ ...current, scale: Math.max(.4, Math.min(2, Number((current.scale + delta).toFixed(2)))) }));
-
-  const beginPan = (event: ReactPointerEvent<HTMLDivElement>) => { if ((event.target as HTMLElement).closest('.node,.map-path')) return; event.currentTarget.setPointerCapture(event.pointerId); panRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originX: viewport.x, originY: viewport.y }; setSelectedEdgeId(null); };
-  const movePan = (event: ReactPointerEvent<HTMLDivElement>) => { const pan = panRef.current; if (!pan || pan.pointerId !== event.pointerId) return; setViewport((current) => ({ ...current, x: pan.originX + event.clientX - pan.startX, y: pan.originY + event.clientY - pan.startY })); };
-  const endPan = (event: ReactPointerEvent<HTMLDivElement>) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); panRef.current = null; };
-
-  const beginNodeDrag = (fragmentId: string, event: ReactPointerEvent<HTMLDivElement>) => { event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId); const position = positions[fragmentId]; nodeDragRef.current = { pointerId: event.pointerId, fragmentId, startX: event.clientX, startY: event.clientY, originX: position.x, originY: position.y }; };
-  const moveNode = (event: ReactPointerEvent<HTMLDivElement>) => { event.stopPropagation(); const drag = nodeDragRef.current; if (!drag || drag.pointerId !== event.pointerId) return; setPositions((current) => { const next = { ...current, [drag.fragmentId]: { x: Math.max(20, Math.round(drag.originX + (event.clientX - drag.startX) / viewport.scale)), y: Math.max(20, Math.round(drag.originY + (event.clientY - drag.startY) / viewport.scale)) } }; positionsRef.current = next; return next; }); };
-  const endNodeDrag = (event: ReactPointerEvent<HTMLDivElement>) => { event.stopPropagation(); const drag = nodeDragRef.current; if (!drag) return; if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); nodeDragRef.current = null; persistPositions(positionsRef.current); };
-
-  const connectFragments = (source: string, target: string) => {
-    if (source === target) { notify('不能把节点输出连接到自身', 'error'); return; }
-    commit((current) => {
-      const blocks = [...(current.scripts[source] ?? [])];
-      const terminal = blocks.at(-1);
-      if (terminal?.type === 'branch') blocks[blocks.length - 1] = { ...terminal, options: [...(terminal.options ?? []), { text: `前往 ${target}`, target }] };
-      else if (terminal?.type === 'condition' && !terminal.trueTarget) blocks[blocks.length - 1] = { ...terminal, trueTarget: target };
-      else if (terminal?.type === 'condition' && !terminal.falseTarget) blocks[blocks.length - 1] = { ...terminal, falseTarget: target };
-      else if (terminal?.type === 'jump') blocks[blocks.length - 1] = { ...terminal, target };
-      else blocks.push({ id: makeId('block'), type: 'jump', version: 1, target });
-      return { ...current, scripts: { ...current.scripts, [source]: blocks } };
-    }, `连接叙事节点 ${source} → ${target}`);
-    notify(`已连接 ${source} → ${target}`);
-  };
-  const beginWire = (source: string, event: ReactPointerEvent<HTMLButtonElement>) => { event.stopPropagation(); wireRef.current = { pointerId: event.pointerId, source }; const point = toCanvasPoint(event.clientX, event.clientY); setWireTargetId(null); setWireDraft({ source, ...point }); };
-
-  useEffect(() => {
-    const moveWire = (event: PointerEvent) => {
-      const wire = wireRef.current;
-      if (!wire || wire.pointerId !== event.pointerId) return;
-      const point = toCanvasPoint(event.clientX, event.clientY);
-      setWireTargetId(findWireTarget(event.clientX, event.clientY));
-      setWireDraft({ source: wire.source, ...point });
-    };
-    const endWire = (event: PointerEvent) => {
-      const wire = wireRef.current;
-      if (!wire || wire.pointerId !== event.pointerId) return;
-      const target = findWireTarget(event.clientX, event.clientY);
-      wireRef.current = null;
-      setWireDraft(null);
-      setWireTargetId(null);
-      if (target) connectFragments(wire.source, target);
-    };
-    window.addEventListener('pointermove', moveWire);
-    window.addEventListener('pointerup', endWire);
-    window.addEventListener('pointercancel', endWire);
-    return () => { window.removeEventListener('pointermove', moveWire); window.removeEventListener('pointerup', endWire); window.removeEventListener('pointercancel', endWire); };
-  });
-
-  const detachEdge = () => { const edge = edges.find((item) => item.id === selectedEdgeId); if (!edge) return; commit((current) => ({ ...current, scripts: { ...current.scripts, [edge.source]: current.scripts[edge.source].flatMap((block) => { if (block.id !== edge.blockId) return [block]; if (block.type === 'branch') return [{ ...block, options: block.options?.filter((_, index) => index !== edge.optionIndex) }]; if (block.type === 'condition') return [{ ...block, [edge.slot === 'true' ? 'trueTarget' : 'falseTarget']: undefined }]; return []; }) } }), `拆除连线 ${edge.source} → ${edge.target}`); setSelectedEdgeId(null); notify('连线已拆除'); };
-  const addNode = async () => { const name = await requestText({ title: '添加叙事模块', message: '新模块会添加到当前章节，并放置在画布中心。', placeholder: `新片段 ${fragments.length + 1}`, confirmText: '添加模块' }); if (!name) return; const id = makeId('fragment'); const activeChapter = project.chapters.find((chapter) => chapter.fragments.some((fragment) => fragment.id === project.activeFragmentId)) ?? project.chapters[0]; const center = toCanvasPoint((canvasRef.current?.getBoundingClientRect().left ?? 0) + (canvasRef.current?.clientWidth ?? 800) / 2, (canvasRef.current?.getBoundingClientRect().top ?? 0) + (canvasRef.current?.clientHeight ?? 600) / 2); const nextPositions = { ...positions, [id]: { x: Math.round(center.x - 105), y: Math.round(center.y - 54) } }; setPositions(nextPositions); commit((current) => ({ ...current, chapters: current.chapters.map((chapter) => chapter.id === activeChapter.id ? { ...chapter, fragments: [...chapter.fragments, { id, name }] } : chapter), scripts: { ...current.scripts, [id]: [] }, settings: { ...current.settings, narrativeMap: { positions: nextPositions } } }), `新增叙事节点 ${name}`); notify(`已新增片段模块“${name}”`); };
-  const locateActive = () => { const position = positions[project.activeFragmentId]; if (position) setViewport((current) => ({ ...current, x: -position.x * current.scale + 300, y: -position.y * current.scale + 180 })); };
-
-  useEffect(() => { const remove = (event: KeyboardEvent) => { if ((event.key === 'Delete' || event.key === 'Backspace') && selectedEdgeId && !(event.target instanceof HTMLInputElement) && !(event.target instanceof HTMLTextAreaElement)) detachEdge(); }; window.addEventListener('keydown', remove); return () => window.removeEventListener('keydown', remove); }, [selectedEdgeId, edges]);
-
-  return <div className="dashboard-page map-page"><PageHeader title="叙事蓝图" sub={`${fragments.length} 个模块 · ${edges.length} 条连接 · 拖动端口创建流程`}><button className="button primary" onClick={addNode}><Plus />添加模块</button><button className="button danger" disabled={!selectedEdgeId} onClick={detachEdge}><Trash2 />拆除连线</button><div className="map-zoom"><button className="icon-button" title="缩小" onClick={() => zoom(-.1)}><Minus /></button><span>{Math.round(viewport.scale * 100)}%</span><button className="icon-button" title="放大" onClick={() => zoom(.1)}><Plus /></button></div><button className="button ghost" onClick={locateActive}><LocateFixed />当前节点</button><button className="button ghost" onClick={() => setViewport({ x: 0, y: 0, scale: 1 })}><Maximize2 />复位画布</button></PageHeader><div className="map-canvas blueprint-canvas" ref={canvasRef} onPointerDown={beginPan} onPointerMove={movePan} onPointerUp={endPan} onPointerCancel={endPan}><div className="map-viewport" style={{ transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})` }}><div className="map-inner blueprint-inner"><svg className="map-lines" width="2400" height="1400"><defs><marker id="map-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" /></marker></defs>{edges.map((edge) => { const target = positions[edge.target]; const path = edgePath(edge.source, target.x, target.y + 54); return <g key={edge.id} className={selectedEdgeId === edge.id ? 'selected' : ''} onClick={(event) => { event.stopPropagation(); setSelectedEdgeId(edge.id); }}><path className="map-path-hit" d={path} /><path className={`map-path ${edge.kind}`} d={path} markerEnd="url(#map-arrow)" /><text x={(positions[edge.source].x + 210 + target.x) / 2} y={(positions[edge.source].y + target.y) / 2 + 42}>{edge.label}</text></g>; })}{wireDraft && <path className="map-path draft" d={edgePath(wireDraft.source, wireDraft.x, wireDraft.y)} />}</svg>{fragments.map((fragment) => { const outgoing = edges.filter((edge) => edge.source === fragment.id).length; const incoming = edges.filter((edge) => edge.target === fragment.id).length; return <article className={`node blueprint-node ${fragment.id === project.activeFragmentId ? 'active' : ''}`} style={{ left: positions[fragment.id].x, top: positions[fragment.id].y }} key={fragment.id} onDoubleClick={() => activate(fragment.id)}><button className={`node-port in ${wireTargetId === fragment.id ? 'snap-target' : ''}`} data-fragment-id={fragment.id} title={`连接到 ${fragment.name}`} aria-label={`连接到 ${fragment.name}`} /><div className="node-header" onPointerDown={(event) => beginNodeDrag(fragment.id, event)} onPointerMove={moveNode} onPointerUp={endNodeDrag} onPointerCancel={endNodeDrag}><GripVertical /><GitBranch /><span>{fragment.name}</span></div><div className="node-body"><span>{fragment.chapter}</span><strong>{project.scripts[fragment.id]?.length ?? 0} Blocks</strong><small>{incoming} 输入 · {outgoing} 输出</small></div><button className="node-port out" title={`从 ${fragment.name} 创建连线`} aria-label={`从 ${fragment.name} 创建连线`} onPointerDown={(event) => beginWire(fragment.id, event)} /></article>; })}</div></div></div></div>;
-}
-
-function CharactersPage({ project, commit, notify, requestText, requestConfirm }: { project: Project; commit: (updater: (project: Project) => Project, label?: string) => void; notify: (message: string, tone?: 'error' | 'success') => void; requestText: RequestText; requestConfirm: RequestConfirm }) {
-  const add = async () => { const name = await requestText({ title: '新增角色', message: '输入角色在剧本和游戏中显示的名称。', placeholder: '角色名称', confirmText: '创建角色' }); if (!name) return; commit((current) => ({ ...current, characters: [...current.characters, { id: makeId('character'), name, color: '#3478c5', expressions: ['默认'], portraits: {} }] })); };
-  const references = (name: string) => Object.values(project.scripts).flat().filter((block) => block.speaker === name).length;
-  const remove = async (id: string, name: string) => { const count = references(name); if (count) { notify(`${name} 仍被 ${count} 条对白引用，无法删除`, 'error'); return; } if (await requestConfirm({ title: '删除角色', message: `删除角色“${name}”？`, confirmText: '删除', danger: true })) commit((current) => ({ ...current, characters: current.characters.filter((item) => item.id !== id) }), `删除角色 ${name}`); };
-  const importPortrait = async (characterId: string, characterName: string, expression: string) => {
-    try {
-      const imported = await importAssets();
-      if (!imported.length) return;
-      const portraits = imported.map((asset) => ({ ...asset, kind: 'character' }));
-      commit((current) => ({ ...current, assets: [...current.assets, ...portraits], characters: current.characters.map((item) => item.id === characterId ? { ...item, portraits: { ...(item.portraits ?? {}), [expression]: portraits[0].id } } : item) }), `导入 ${characterName} · ${expression} 立绘`);
-      notify(`已为“${characterName} · ${expression}”配置 ${portraits[0].name}`);
-    } catch (error) { notify(String(error), 'error'); }
-  };
-  const imageAssets = project.assets.filter((asset) => ['character', 'image', 'scene'].includes(asset.kind));
-  return <div className="dashboard-page"><PageHeader title="角色与立绘" sub="每个表情使用一张独立图片；对白会自动加载并切换对应立绘"><button className="button primary" onClick={add}><UserPlus />新建角色</button></PageHeader><div className="content-pad"><div className="character-grid">{project.characters.map((character) => {
-    const portraitId = character.portraits?.[character.expressions[0]];
-    const portraitAsset = project.assets.find((asset) => asset.id === portraitId);
-    const assignedIds = character.expressions.map((expression) => character.portraits?.[expression]).filter(Boolean);
-    const incomplete = assignedIds.length !== character.expressions.length || new Set(assignedIds).size !== assignedIds.length;
-    return <article className={`character-card ${incomplete ? 'incomplete' : ''}`} key={character.id}><div className="character-portrait">{portraitAsset?.uri ? <img src={portraitAsset.uri} alt={`${character.name} · ${character.expressions[0]}`} /> : <div className="mini-person" style={{ background: character.color }} />}</div><div className="character-fields"><div className="field"><label>显示名 · {references(character.name)} 处引用</label><input defaultValue={character.name} onBlur={(event) => { const name = event.target.value.trim(); if (name && name !== character.name) commit((current) => ({ ...current, characters: current.characters.map((item) => item.id === character.id ? { ...item, name } : item), scripts: Object.fromEntries(Object.entries(current.scripts).map(([fragmentId, blocks]) => [fragmentId, blocks.map((block) => block.speaker === character.name ? { ...block, speaker: name } : block)])) }), `重命名角色 ${character.name}`); }} /></div><div className="field"><label>角色颜色</label><input type="color" value={character.color} onChange={(event) => commit((current) => ({ ...current, characters: current.characters.map((item) => item.id === character.id ? { ...item, color: event.target.value } : item) }), `修改角色颜色 ${character.name}`)} /></div><div className="field full"><label>表情列表（用逗号分隔）</label><input defaultValue={character.expressions.join(', ')} onBlur={(event) => { const expressions = [...new Set(event.target.value.split(/[,，]/).map((item) => item.trim()).filter(Boolean))]; if (expressions.length) commit((current) => ({ ...current, characters: current.characters.map((item) => { if (item.id !== character.id) return item; const portraits = Object.fromEntries(Object.entries(item.portraits ?? {}).filter(([expression]) => expressions.includes(expression))); return { ...item, expressions, portraits }; }) }), `更新角色表情 ${character.name}`); }} /></div><div className="expression-assets"><div className="expression-assets-heading"><label>表情差分素材</label>{incomplete && <small>仍有表情未配置独立图片</small>}</div>{character.expressions.map((expression) => {
-      const selectedId = character.portraits?.[expression] ?? '';
-      const expressionAsset = project.assets.find((asset) => asset.id === selectedId);
-      return <div className={`expression-asset-row ${selectedId ? '' : 'missing'}`} key={expression}><div className="expression-thumb">{expressionAsset?.uri ? <img src={expressionAsset.uri} alt={`${character.name} · ${expression}`} /> : <Image />}</div><span>{expression}</span><Select aria-label={`${character.name} ${expression} 立绘`} value={selectedId} onChange={(value) => commit((current) => ({ ...current, characters: current.characters.map((item) => { if (item.id !== character.id) return item; const portraits = { ...(item.portraits ?? {}) }; if (value) portraits[expression] = value; else delete portraits[expression]; return { ...item, portraits }; }) }), `设置 ${character.name} · ${expression} 立绘`)}><option value="">未配置</option>{imageAssets.map((asset) => <option disabled={asset.id !== selectedId && assignedIds.includes(asset.id)} key={asset.id} value={asset.id}>{asset.name}</option>)}</Select><button className="icon-button" title={`导入 ${character.name} · ${expression} 立绘`} onClick={() => void importPortrait(character.id, character.name, expression)}><FileUp /></button></div>;
-    })}</div></div><button className="icon-button character-delete" title="删除角色" onClick={() => void remove(character.id, character.name)}><Trash2 /></button></article>;
-  })}</div></div></div>;
-}
 
 function SnapshotDiff({ diff }: { diff: ProjectDiff }) {
   if (!diff.total) return <div className="snapshot-identical"><CheckCircle2 /><span>两个快照内容一致</span></div>;
@@ -1094,6 +954,7 @@ export default function App() {
   const [debugRunning, setDebugRunning] = useState(false);
   const [openFragmentIds, setOpenFragmentIds] = useState<string[]>(() => [fallbackProject.activeFragmentId]);
   const [inspectorDock, setInspectorDock] = useState<InspectorDock>(() => fallbackProject.settings.editorSession?.inspectorDock ?? 'preview');
+  const sessionRef = useRef<EditorSessionState>(defaultEditorSession(fallbackProject.activeFragmentId));
   const [creatorName, setCreatorName] = useState(() => readSmallValue('slide-creator-name') ?? '');
   const [saveState, setSaveState] = useState('正在载入');
   const [startupReady, setStartupReady] = useState(false);
@@ -1141,14 +1002,28 @@ export default function App() {
   const navigateForward = () => { const next = forwardPages[0]; if (!next) return; setForwardPages((items) => items.slice(1)); setBackPages((items) => [...items, page].slice(-40)); setPage(next); };
   const { commit, commitSaved, replace, reset: resetHistory, restoreHistory, serializeHistory, undo, redo, undoCategory, renameCommand, toggleCommandPinned, clearUnpinnedHistory, undoCount, redoCount, history: commandEntries, historyVersion, dirty, markSaved } = history;
   const resetProject = (next: Project, persistedHistory?: PersistedCommandHistory<Project> | null) => {
+    // 会话状态不再写入项目文件：优先取 localStorage，其次读取旧版本项目中的遗留字段（一次性迁移），
+    // 并从内存项目中剥离，避免继续进入命令历史与保存载荷。
+    const legacySession = next.settings.editorSession;
+    const storedSession = loadEditorSession(next.meta.id);
+    const session: EditorSessionState = storedSession ?? (legacySession ? {
+      openFragmentIds: legacySession.openFragmentIds,
+      selectedBlockByFragment: legacySession.selectedBlockByFragment ?? {},
+      scrollTopByFragment: legacySession.scrollTopByFragment ?? {},
+      inspectorDock: legacySession.inspectorDock ?? 'preview',
+      scriptView: legacySession.scriptView ?? 'cards',
+    } : defaultEditorSession(next.activeFragmentId));
+    if (legacySession) next = { ...next, settings: { ...next.settings, editorSession: undefined } };
+    if (!storedSession) saveEditorSession(next.meta.id, session);
+    sessionRef.current = session;
     const fragmentIds = new Set(next.chapters.flatMap((chapter) => chapter.fragments.map((fragment) => fragment.id)));
-    const savedTabs = next.settings.editorSession?.openFragmentIds.filter((id) => fragmentIds.has(id)) ?? [];
+    const savedTabs = session.openFragmentIds.filter((id) => fragmentIds.has(id));
     if (persistedHistory?.projectId === next.meta.id) restoreHistory(next, persistedHistory, commandRestoreStrategies);
     else resetHistory(next);
-    setSelected(next.settings.editorSession?.selectedBlockByFragment?.[next.activeFragmentId] ?? 0);
+    setSelected(session.selectedBlockByFragment[next.activeFragmentId] ?? 0);
     setOpenFragmentIds(savedTabs.length ? savedTabs : [next.activeFragmentId]);
-    setInspectorDock(next.settings.editorSession?.inspectorDock ?? 'preview');
-    setView(next.settings.editorSession?.scriptView ?? 'cards');
+    setInspectorDock(session.inspectorDock);
+    setView(session.scriptView);
   };
   const updateBuildOutputRoot = (path: string) => {
     setBuildOutputRoot(path);
@@ -1347,21 +1222,13 @@ export default function App() {
   useEffect(() => { if (!appDialog) return; const handler = (event: KeyboardEvent) => { if (event.key !== 'Escape') return; event.preventDefault(); event.stopImmediatePropagation(); closeAppDialog(appDialog.kind === 'text' ? null : false); }; window.addEventListener('keydown', handler, true); return () => window.removeEventListener('keydown', handler, true); }, [appDialog]);
   useEffect(() => {
     if (!hydrated.current) return;
-    replace((current) => {
-      const session = current.settings.editorSession;
-      const sameTabs = session?.openFragmentIds.length === openFragmentIds.length
-        && session.openFragmentIds.every((id, index) => id === openFragmentIds[index]);
-      if (sameTabs && session?.inspectorDock === inspectorDock && session.scriptView === view) return current;
-      return { ...current, settings: { ...current.settings, editorSession: { ...session, openFragmentIds, selectedBlockByFragment: session?.selectedBlockByFragment ?? {}, scrollTopByFragment: session?.scrollTopByFragment ?? {}, inspectorDock, scriptView: view } } };
-    });
+    sessionRef.current = { ...sessionRef.current, openFragmentIds, inspectorDock, scriptView: view };
+    saveEditorSession(project.meta.id, sessionRef.current);
   }, [openFragmentIds, inspectorDock, view]);
   useEffect(() => {
     if (!hydrated.current) return;
-    replace((current) => {
-      const session = current.settings.editorSession;
-      if (session?.selectedBlockByFragment?.[current.activeFragmentId] === selected) return current;
-      return { ...current, settings: { ...current.settings, editorSession: { ...session, openFragmentIds, selectedBlockByFragment: { ...(session?.selectedBlockByFragment ?? {}), [current.activeFragmentId]: selected }, scrollTopByFragment: session?.scrollTopByFragment ?? {}, inspectorDock, scriptView: view } } };
-    });
+    sessionRef.current = { ...sessionRef.current, selectedBlockByFragment: { ...sessionRef.current.selectedBlockByFragment, [project.activeFragmentId]: selected } };
+    saveEditorSession(project.meta.id, sessionRef.current);
   }, [selected, project.activeFragmentId]);
 
   const addChapter = async () => { const name = await requestText({ title: '新建章节', message: '章节会创建一个名为“主线”的初始片段。', placeholder: '章节名称', confirmText: '创建章节' }); if (!name) return; const fragmentId = makeId('fragment'); commit((current) => ({ ...current, activeFragmentId: fragmentId, chapters: [...current.chapters, { id: makeId('chapter'), name, fragments: [{ id: fragmentId, name: '主线' }] }], scripts: { ...current.scripts, [fragmentId]: [] } })); setSelected(0); };
@@ -1533,7 +1400,7 @@ export default function App() {
       buildInProgressRef.current = false;
     }
   };
-  const activate = (id: string, blockIndex?: number) => { setOpenFragmentIds((items) => items.includes(id) ? items : [...items, id]); replace((current) => ({ ...current, activeFragmentId: id })); setSelected(blockIndex ?? project.settings.editorSession?.selectedBlockByFragment?.[id] ?? 0); navigatePage('script'); };
+  const activate = (id: string, blockIndex?: number) => { setOpenFragmentIds((items) => items.includes(id) ? items : [...items, id]); replace((current) => ({ ...current, activeFragmentId: id })); setSelected(blockIndex ?? sessionRef.current.selectedBlockByFragment[id] ?? 0); navigatePage('script'); };
   const closeFragment = (id: string) => {
     const index = openFragmentIds.indexOf(id);
     if (index < 0) return;
@@ -1546,7 +1413,10 @@ export default function App() {
   const reorderFragmentTabs = (fromId: string, toId: string) => setOpenFragmentIds((items) => { const from = items.indexOf(fromId); const to = items.indexOf(toId); if (from < 0 || to < 0 || from === to) return items; const next = [...items]; next.splice(to, 0, next.splice(from, 1)[0]); return next; });
   const closeOtherFragments = () => { if (!openFragmentIds.includes(project.activeFragmentId)) return; setOpenFragmentIds([project.activeFragmentId]); };
   const closeAllFragments = () => { const firstFragment = project.chapters.flatMap((chapter) => chapter.fragments)[0]?.id; if (!firstFragment) return; setOpenFragmentIds([firstFragment]); if (project.activeFragmentId !== firstFragment) replace((current) => ({ ...current, activeFragmentId: firstFragment })); };
-  const saveFragmentScrollTop = (value: number) => replace((current) => ({ ...current, settings: { ...current.settings, editorSession: { ...current.settings.editorSession, openFragmentIds, selectedBlockByFragment: current.settings.editorSession?.selectedBlockByFragment ?? {}, scrollTopByFragment: { ...(current.settings.editorSession?.scrollTopByFragment ?? {}), [current.activeFragmentId]: value }, inspectorDock, scriptView: view } } }));
+  const saveFragmentScrollTop = (value: number) => {
+    sessionRef.current = { ...sessionRef.current, openFragmentIds, scrollTopByFragment: { ...sessionRef.current.scrollTopByFragment, [project.activeFragmentId]: value }, inspectorDock, scriptView: view };
+    saveEditorSession(project.meta.id, sessionRef.current);
+  };
   useEffect(() => { const handler = (event: KeyboardEvent) => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'w' && page === 'script') { event.preventDefault(); closeFragment(project.activeFragmentId); } }; window.addEventListener('keydown', handler); return () => window.removeEventListener('keydown', handler); }, [page, project.activeFragmentId, openFragmentIds]);
   const locateSearchResult = (location: SearchLocation) => {
     if (location.page) { navigatePage(location.page); return; }
@@ -1654,7 +1524,7 @@ export default function App() {
 
   const activeName = project.chapters.flatMap((chapter) => chapter.fragments).find((fragment) => fragment.id === project.activeFragmentId)?.name ?? '片段';
   const pages: Record<Page, ReactNode> = {
-    script: <Profiler id="script-page" onRender={recordComponentRender}><ScriptPage project={project} commit={commit} selected={selected} setSelected={setSelected} view={view} setView={setView} openBlocks={(insertIndex) => { setBlockInsertIndex(insertIndex ?? null); setModal('blocks'); }} openImport={() => setScriptImportOpen(true)} requestConfirm={requestConfirm} openFragmentIds={openFragmentIds} activateFragment={activate} closeFragment={closeFragment} closeOtherFragments={closeOtherFragments} closeAllFragments={closeAllFragments} reorderFragmentTabs={reorderFragmentTabs} inspectorDock={inspectorDock} setInspectorDock={setInspectorDock} initialScrollTop={project.settings.editorSession?.scrollTopByFragment?.[project.activeFragmentId] ?? 0} saveScrollTop={saveFragmentScrollTop} debugRunning={debugRunning} notify={show} pendingBlockReveal={pendingBlockReveal} completeBlockReveal={completeBlockReveal} previewLanguage={previewLanguage} onPreviewLanguageChange={changePreviewLanguage} /></Profiler>,
+    script: <Profiler id="script-page" onRender={recordComponentRender}><ScriptPage project={project} commit={commit} selected={selected} setSelected={setSelected} view={view} setView={setView} openBlocks={(insertIndex) => { setBlockInsertIndex(insertIndex ?? null); setModal('blocks'); }} openImport={() => setScriptImportOpen(true)} requestConfirm={requestConfirm} openFragmentIds={openFragmentIds} activateFragment={activate} closeFragment={closeFragment} closeOtherFragments={closeOtherFragments} closeAllFragments={closeAllFragments} reorderFragmentTabs={reorderFragmentTabs} inspectorDock={inspectorDock} setInspectorDock={setInspectorDock} initialScrollTop={sessionRef.current.scrollTopByFragment[project.activeFragmentId] ?? 0} saveScrollTop={saveFragmentScrollTop} debugRunning={debugRunning} notify={show} pendingBlockReveal={pendingBlockReveal} completeBlockReveal={completeBlockReveal} previewLanguage={previewLanguage} onPreviewLanguageChange={changePreviewLanguage} /></Profiler>,
     stage: <StageTimelineWorkspace project={project} selectedBlock={selected} commit={commit} locateBlock={(index) => setSelected(index)} notify={show} />,
     texts: <TextWorkbench project={project} commit={commit} notify={show} requestText={requestText} requestConfirm={requestConfirm} activate={activate} previewLanguage={previewLanguage} setPreviewLanguage={changePreviewLanguage} />,
     assets: <AssetManager project={project} commit={commit} notify={show} requestConfirm={requestConfirm} activate={activate} />,

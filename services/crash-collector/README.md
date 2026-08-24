@@ -19,5 +19,13 @@ Set `SLIDE_CRASH_REPORT_URL=https://your-host/v1/crash-reports` in the editor de
 
 `S3_SERVER_SIDE_ENCRYPTION` defaults to `AES256` for S3 backends with SSE-S3 configured. The bundled MinIO Compose stack sets it to `none` because it does not include a KMS; protect its data volumes with host-level encryption in production.
 
-Administrative metadata is available at `GET /v1/admin/crash-reports` with `Authorization: Bearer <ADMIN_TOKEN>`. Report bodies remain in the private S3-compatible bucket.
+Administrative metadata is available at `GET /v1/admin/crash-reports?limit=100&offset=0` with `Authorization: Bearer <ADMIN_TOKEN>` (response includes `total` for pagination). Report bodies remain in the private S3-compatible bucket.
+
+Expired reports (default retention 180 days, override with `RETENTION_DAYS`) are removed automatically at startup; operators can also trigger cleanup manually:
+
+```powershell
+Invoke-RestMethod -Method Post `
+  -Headers @{ Authorization = "Bearer <ADMIN_TOKEN>" } `
+  "http://127.0.0.1:8080/v1/admin/crash-reports/cleanup?olderThanDays=30"
+```
 

@@ -225,6 +225,20 @@ class ExporterTests(unittest.TestCase):
             with self.assertRaises(FileNotFoundError):
                 build_web_game(default_project(), root / "build", project_file, builtin, runtime_dist=root / "missing-runtime")
 
+    def test_renpy_export_rejects_project_without_enabled_fragments(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = default_project()
+            for chapter in project["chapters"]:
+                chapter["disabled"] = True
+            with self.assertRaisesRegex(ValueError, "没有可导出的片段"):
+                export_renpy(project, root / "renpy")
+            empty_fragments = default_project()
+            for chapter in empty_fragments["chapters"]:
+                chapter["fragments"] = []
+            with self.assertRaisesRegex(ValueError, "没有可导出的片段"):
+                export_renpy(empty_fragments, root / "renpy")
+
     def test_web_build_excludes_production_memory(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -14,6 +14,7 @@ from typing import Any
 
 from .ai_service import AiService
 from .ai_provider import ProviderRequestCancelled, RequestCancellation
+from .dpapi import protect as dpapi_protect, unprotect as dpapi_unprotect
 
 
 ACTIVE_STATUSES = {"queued", "running", "pausing", "paused", "cancelling"}
@@ -857,15 +858,17 @@ class AgentTaskManager:
         sessions.mkdir(parents=True, exist_ok=True)
         path = sessions / f"{task['id']}.json"
         temporary = path.with_suffix(".json.tmp")
-        temporary.write_text(json.dumps(task, ensure_ascii=False, indent=2), encoding="utf-8")
+        encoded = json.dumps(task, ensure_ascii=False, indent=2).encode("utf-8")
+        # 检查点包含模型对话与项目上下文，落盘前用 DPAPI 加密（非 Windows 平台回退为明文）。
+        temporary.write_bytes(dpapi_protect(encoded))
         os.replace(temporary, path)
 
     @staticmethod
     def _read_task(path: Path) -> dict[str, Any] | None:
         try:
-            value = json.loads(path.read_text(encoding="utf-8"))
+            value = json.loads(dpapi_unprotect(path.read_bytes()).decode("utf-8"))
             return value if isinstance(value, dict) and value.get("id") == path.stem else None
-        except (OSError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError, ValueError):
             return None
 
     @staticmethod

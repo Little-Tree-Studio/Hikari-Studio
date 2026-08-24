@@ -168,10 +168,14 @@ class AgentTaskManagerTests(unittest.TestCase):
         incremental = manager.get_task(started["id"], self.root, after_seq=1)
         self.assertTrue(all(event["seq"] > 1 for event in incremental["events"]))
         session = self.root / ".slide" / "agent" / "sessions" / f"{started['id']}.json"
-        saved = session.read_text(encoding="utf-8")
-        self.assertNotIn('"scripts"', saved)
-        self.assertNotIn("apiKey", saved)
-        self.assertEqual(json.loads(saved)["status"], "completed")
+        raw = session.read_bytes()
+        # 检查点含模型对话与项目上下文，磁盘内容必须加密（明文 JSON 会以 "{" 开头）
+        self.assertFalse(raw.lstrip().startswith(b"{"))
+        saved = manager._read_task(session)
+        self.assertIsNotNone(saved)
+        self.assertNotIn('"scripts"', json.dumps(saved))
+        self.assertNotIn("apiKey", json.dumps(saved))
+        self.assertEqual(saved["status"], "completed")
 
     def test_queue_executes_only_one_task_at_a_time(self) -> None:
         ai = ControlledAi(steps=25)

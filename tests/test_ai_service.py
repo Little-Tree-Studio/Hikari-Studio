@@ -47,6 +47,30 @@ class AiServiceTests(unittest.TestCase):
         self.assertTrue(result["hasKey"])
         self.assertEqual(result["url"], "https://example.com/v1")
 
+    def test_public_http_endpoint_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "公网 http"):
+            self.service.save_settings({"url": "http://example.com/v1", "model": "test-model"})
+        with self.assertRaisesRegex(ValueError, "公网 http"):
+            self.service.save_settings({"url": "http://8.8.8.8/v1", "model": "test-model"})
+
+    def test_local_and_private_http_endpoints_are_allowed(self) -> None:
+        for url in ["http://127.0.0.1:11434/v1", "http://localhost:1234/v1", "http://[::1]:8000/v1", "http://192.168.1.10:8080/v1"]:
+            result = self.service.save_settings({"url": url, "model": "llama3", "apiKey": "local-secret"})
+            self.assertEqual(result["url"], url)
+        self.assertTrue(self.service.get_settings()["hasKey"])
+
+    def test_clear_key_removes_saved_credential(self) -> None:
+        self.service.save_settings({"url": "https://example.com/v1", "model": "test-model", "apiKey": "secret-value"})
+        result = self.service.clear_key()
+        self.assertEqual(self.secret_store.value, "")
+        self.assertFalse(result["hasKey"])
+
+    def test_save_settings_clear_key_flag_removes_credential(self) -> None:
+        self.secret_store.value = "saved-secret"
+        result = self.service.save_settings({"url": "https://example.com/v1", "model": "test-model", "apiKey": "ignored", "clearKey": True})
+        self.assertEqual(self.secret_store.value, "")
+        self.assertFalse(result["hasKey"])
+
     def test_openai_compatible_endpoint_is_normalized(self) -> None:
         self.assertEqual(AiService._endpoint("https://api.openai.com/v1"), "https://api.openai.com/v1/chat/completions")
         self.assertEqual(AiService._endpoint("https://host.example"), "https://host.example/v1/chat/completions")

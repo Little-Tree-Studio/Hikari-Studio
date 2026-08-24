@@ -11,17 +11,6 @@
     "sceneId": "scene-lake"
   },
   {
-    "id": "b2",
-    "type": "sound",
-    "title": "summer_memory.mp3",
-    "volume": 0.68,
-    "loop": true,
-    "version": 1,
-    "channel": "bgm",
-    "action": "play",
-    "fadeDuration": 0
-  },
-  {
     "id": "b3",
     "type": "narration",
     "text": "薄雾沿着湖面缓慢散开，夏日的第一束阳光落在旧码头上。",
@@ -30,10 +19,9 @@
   {
     "id": "b4",
     "type": "dialogue",
-    "speaker": "1",
+    "speaker": "真琴",
     "text": "你果然还是来了。",
     "expression": "微笑",
-    "voice": "lc_001.ogg",
     "version": 1
   },
   {
@@ -42,7 +30,6 @@
     "speaker": "苏芮",
     "text": "因为有人在信里说，错过今天就再也见不到这片星海了。",
     "expression": "平静",
-    "voice": "sr_014.ogg",
     "version": 1
   },
   {

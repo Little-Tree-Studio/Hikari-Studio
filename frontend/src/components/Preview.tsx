@@ -29,6 +29,8 @@ import {
 import type { EngineState } from "../engine-core/types";
 import { BLOCK_CONFORMANCE_MATRIX_VERSION, observeEngineState } from "../engine-core/blockConformance";
 import type { TimelinePreviewValues } from "../core/timeline";
+import { assetMatchesTrack } from "../core/audio";
+import { TransitioningBackground } from "./ui/TransitioningBackground";
 import { characterWidthCss, dimensionCss } from "../core/stageLayout";
 import type { BlockType, Project } from "../types";
 import { writeLargeValue } from "../core/storage";
@@ -355,7 +357,7 @@ export function Preview({
       const asset = assetIndexes.byId.get(channelState.assetId ?? '')
         ?? assetIndexes.byId.get(channelState.track)
         ?? assetIndexes.byName.get(channelState.track)
-        ?? project.assets.find((item) => item.path.endsWith(channelState.track ?? ""));
+        ?? project.assets.find((item) => assetMatchesTrack(item, channelState.track));
       if (!asset?.uri || previous?.dataset.track === channelState.track) {
         if (previous) previous.volume = channelState.volume;
         continue;
@@ -692,7 +694,7 @@ export function Preview({
               transitionDuration: `${camera.duration}s`,
             }}
           >
-            <img className="stage-bg" src={background} alt="游戏场景" style={{ opacity: timelinePreview?.sceneOpacity ?? 1 }} />
+            <TransitioningBackground className="stage-bg" src={background} alt="游戏场景" transition={state.stage.transition} duration={state.stage.transitionDuration} opacity={timelinePreview?.sceneOpacity ?? 1} />
             {state.stage.sceneLayers.map((layer) => {
               const asset = assetIndexes.byId.get(layer.assetId ?? '');
               const distance = layer.distance ?? 1;

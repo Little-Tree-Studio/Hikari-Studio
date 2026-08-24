@@ -5,12 +5,19 @@ import { testProject } from './fixtures';
 describe('engine control flow', () => {
   it.each([
     [3, 'eq', 3, true],
-    [3, 'neq', '3', true],
+    [3, 'eq', '3', true],
+    [3, 'neq', '3', false],
+    ['3', 'neq', 4, true],
     [4, 'gt', 3, true],
+    ['4', 'gt', 3, true],
     [3, 'gte', 3, true],
     [2, 'lt', 3, true],
     [3, 'lte', 3, true],
     [3, 'gt', 4, false],
+    ['abc', 'lt', 'bcd', true],
+    ['abc', 'gt', 'aaa', true],
+    [true, 'neq', 'true', true],
+    [true, 'eq', true, true],
   ] as const)('compares %s %s %s', (left, operator, right, expected) => {
     expect(compareValues(left, operator, right)).toBe(expected);
   });

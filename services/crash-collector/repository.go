@@ -42,7 +42,9 @@ type repository interface {
 	Reserve(context.Context, reportMetadata) (string, bool, bool, error)
 	MarkStored(context.Context, string) error
 	Delete(context.Context, string) error
-	ListReports(context.Context, int) ([]storedReport, error)
+	ListReports(context.Context, int, int) ([]storedReport, error)
+	CountReports(context.Context) (int, error)
+	CleanupExpired(context.Context, time.Time) ([]string, error)
 }
 
 type postgresRepository struct {
@@ -141,14 +143,14 @@ func (r *postgresRepository) Delete(ctx context.Context, reportID string) error 
 	return nil
 }
 
-func (r *postgresRepository) ListReports(ctx context.Context, limit int) ([]storedReport, error) {
+func (r *postgresRepository) ListReports(ctx context.Context, limit int, offset int) ([]storedReport, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, fingerprint, app_version, source, kind, message, object_key, size_bytes, client_created_at, received_at
 		FROM crash_reports
 		WHERE stored = TRUE
 		ORDER BY received_at DESC
-		LIMIT $1
-	`, limit)
+		LIMIT $1 OFFSET $2
+	`, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("list crash reports: %w", err)
 	}
@@ -166,4 +168,38 @@ func (r *postgresRepository) ListReports(ctx context.Context, limit int) ([]stor
 		return nil, fmt.Errorf("iterate crash reports: %w", err)
 	}
 	return reports, nil
+}
+
+func (r *postgresRepository) CountReports(ctx context.Context) (int, error) {
+	var count int
+	if err := r.pool.QueryRow(ctx, "SELECT COUNT(*) FROM crash_reports WHERE stored = TRUE").Scan(&count); err != nil {
+		return 0, fmt.Errorf("count crash reports: %w", err)
+	}
+	return count, nil
+}
+
+func (r *postgresRepository) CleanupExpired(ctx context.Context, before time.Time) ([]string, error) {
+	rows, err := r.pool.Query(ctx, "SELECT object_key FROM crash_reports WHERE received_at < $1", before)
+	if err != nil {
+		return nil, fmt.Errorf("select expired crash reports: %w", err)
+	}
+	keys := make([]string, 0)
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan expired crash report: %w", err)
+		}
+		keys = append(keys, key)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate expired crash reports: %w", err)
+	}
+	if len(keys) > 0 {
+		if _, err := r.pool.Exec(ctx, "DELETE FROM crash_reports WHERE received_at < $1", before); err != nil {
+			return nil, fmt.Errorf("delete expired crash reports: %w", err)
+		}
+	}
+	return keys, nil
 }

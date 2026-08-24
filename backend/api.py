@@ -764,11 +764,11 @@ class DesktopApi:
     def save_ai_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
         return self._ai.save_settings(settings)
 
+    def clear_ai_key(self) -> dict[str, Any]:
+        return self._ai.clear_key()
+
     def discover_ai_models(self, settings: dict[str, Any]) -> dict[str, Any]:
         return self._ai.discover_models(settings)
-
-    def run_ai_agent(self, instruction: str, project: dict[str, Any]) -> dict[str, Any]:
-        return self._ai.run(instruction, project)
 
     def start_ai_task(self, instruction: str, project: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
         return self._agent_tasks.start_task(instruction, project, self._store.project_root, context)

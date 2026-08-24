@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { ArchiveRestore, ChevronDown, DoorOpen, Eye, EyeOff, History, Pause, Play, RotateCcw, Save, Settings2, Volume2, X, Zap } from 'lucide-react';
 import { SaveGameDialog } from '../components/SaveGameDialog';
+import { TransitioningBackground } from '../components/ui/TransitioningBackground';
+import { assetMatchesTrack } from '../core/audio';
 import { gameUiThemeCssVariables, normalizeGameUiTheme } from '../core/gameUiTheme';
 import { acknowledgeSaveSlotNotice, captureSaveThumbnail, listSaveSlots, readSaveSlotWithRecovery, readSharedVariables, writeSaveSlot, writeSharedVariables, type SaveSlotRecord } from '../core/saveGames';
 import { readLargeValue, readSmallValue, writeLargeValue, writeSmallValue } from '../core/storage';
@@ -94,7 +96,8 @@ export function GameRuntime({ project: baseProject, conformanceCaseId }: { proje
   const cameraFilter = camera.filter === 'monochrome' ? 'grayscale(1)' : camera.filter === 'sepia' ? 'sepia(.85)' : camera.filter === 'blur' ? 'blur(3px)' : 'none';
   const titleBackground = assetUri(project.ui?.title?.backgroundAssetId ?? project.scenes?.[0]?.layers.at(-1)?.assetId ?? project.assets.find((asset) => asset.kind === 'scene' || asset.kind === 'image')?.id);
   const titleLogo = assetUri(project.ui?.title?.logoAssetId);
-  const readHistoryKey = `slide-read-blocks:${project.meta.id}`;
+  // Conformance 用例共享 project id，禁用读历史持久化/水合，保证各用例互不污染。
+  const readHistoryKey = conformanceCaseId ? null : `slide-read-blocks:${project.meta.id}`;
   const fastForwardActive = skipMode || controlFastForward;
   const runtimeTheme = normalizeGameUiTheme(project.ui?.runtimeTheme);
   const runtimeFontUri = assetUri(runtimeTheme.fontAssetId);
@@ -185,6 +188,7 @@ export function GameRuntime({ project: baseProject, conformanceCaseId }: { proje
   };
 
   useEffect(() => {
+    if (!readHistoryKey) return;
     let cancelled = false;
     void readLargeValue(readHistoryKey).then((encoded) => {
       if (cancelled) return;
@@ -199,7 +203,7 @@ export function GameRuntime({ project: baseProject, conformanceCaseId }: { proje
   }, [readHistoryKey]);
 
   useEffect(() => {
-    if (!readHistoryReady.current) return;
+    if (!readHistoryKey || !readHistoryReady.current) return;
     globalReadBlocks.current = { ...globalReadBlocks.current, ...state.readBlocks };
     const timer = window.setTimeout(() => void writeLargeValue(readHistoryKey, JSON.stringify(globalReadBlocks.current)).catch(() => undefined), 250);
     return () => window.clearTimeout(timer);
@@ -368,7 +372,7 @@ export function GameRuntime({ project: baseProject, conformanceCaseId }: { proje
         });
         continue;
       }
-      const asset = project.assets.find((item) => item.id === channelState.assetId || item.id === channelState.track || item.name === channelState.track || item.path.endsWith(channelState.track ?? ''));
+      const asset = project.assets.find((item) => item.id === channelState.assetId || assetMatchesTrack(item, channelState.track));
       if (!asset?.uri) continue;
       const channelVolume = channel === 'bgm' ? preferences.bgmVolume : channel === 'sfx' ? preferences.sfxVolume : preferences.voiceVolume;
       const outputVolume = clamp(channelState.volume * preferences.masterVolume * channelVolume);
@@ -499,7 +503,7 @@ export function GameRuntime({ project: baseProject, conformanceCaseId }: { proje
     {runtimeFontUri && <style>{`@font-face{font-family:"Slide Project Font";src:url(${JSON.stringify(runtimeFontUri)})}`}</style>}
     <section className="game-stage" onClick={() => { if (screen === 'playing' && !systemMenuOpen) advance(); }}>
       <div className="game-camera" style={{ transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.zoom}) rotate(${camera.rotation}deg)`, filter: cameraFilter, transitionDuration: `${camera.duration}s` }}>
-        {background && <img className="game-background" src={background} alt="" style={{ opacity: timelinePreview.sceneOpacity ?? 1 }} />}
+        {background && <TransitioningBackground className="game-background" src={background} alt="" transition={state.stage.transition} duration={state.stage.transitionDuration} opacity={timelinePreview.sceneOpacity ?? 1} />}
         {state.stage.sceneLayers.map((layer) => {
           const uri = assetUri(layer.assetId);
           const distance = layer.distance ?? 1;

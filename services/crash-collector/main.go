@@ -47,9 +47,12 @@ func run() error {
 		return err
 	}
 
+	handler := newServer(settings, repository, store)
+	handler.cleanupExpiredAtStartup(initializeCtx)
+
 	httpServer := &http.Server{
 		Addr:              ":8080",
-		Handler:           newServer(settings, repository, store),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       20 * time.Second,
 		WriteTimeout:      20 * time.Second,

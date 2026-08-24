@@ -70,19 +70,60 @@ func (r *fakeRepository) Delete(_ context.Context, reportID string) error {
 	return nil
 }
 
-func (r *fakeRepository) ListReports(context.Context, int) ([]storedReport, error) {
-	return []storedReport{{
-		ID:              strings.Repeat("a", 32),
-		Fingerprint:     strings.Repeat("b", 20),
-		AppVersion:      "0.4.0-beta.1",
-		Source:          "react",
-		Kind:            "RenderError",
-		Message:         "redacted failure",
-		ObjectKey:       "reports/2026/07/30/report.json",
-		SizeBytes:       100,
-		ClientCreatedAt: time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC),
-		ReceivedAt:      time.Date(2026, 7, 30, 0, 1, 0, 0, time.UTC),
-	}}, nil
+func (r *fakeRepository) ListReports(_ context.Context, limit int, offset int) ([]storedReport, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	stored := make([]storedReport, 0)
+	for _, report := range r.reports {
+		if !report.stored {
+			continue
+		}
+		stored = append(stored, storedReport{
+			ID:              report.metadata.ID,
+			Fingerprint:     report.metadata.Fingerprint,
+			AppVersion:      report.metadata.AppVersion,
+			Source:          report.metadata.Source,
+			Kind:            report.metadata.Kind,
+			Message:         report.metadata.Message,
+			ObjectKey:       report.metadata.ObjectKey,
+			SizeBytes:       report.metadata.SizeBytes,
+			ClientCreatedAt: time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC),
+			ReceivedAt:      time.Date(2026, 7, 30, 0, 1, 0, 0, time.UTC),
+		})
+	}
+	if offset >= len(stored) {
+		return []storedReport{}, nil
+	}
+	end := offset + limit
+	if end > len(stored) {
+		end = len(stored)
+	}
+	return stored[offset:end], nil
+}
+
+func (r *fakeRepository) CountReports(_ context.Context) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	count := 0
+	for _, report := range r.reports {
+		if report.stored {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (r *fakeRepository) CleanupExpired(_ context.Context, before time.Time) ([]string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	keys := make([]string, 0)
+	for id, report := range r.reports {
+		if report.metadata.ClientCreatedAt < before.Format(time.RFC3339) {
+			keys = append(keys, report.metadata.ObjectKey)
+			delete(r.reports, id)
+		}
+	}
+	return keys, nil
 }
 
 type fakeStore struct {
@@ -107,6 +148,13 @@ func (s *fakeStore) Put(_ context.Context, key string, body []byte) error {
 	return nil
 }
 
+func (s *fakeStore) DeleteMany(_ context.Context, keys []string) error {
+	for _, key := range keys {
+		delete(s.objects, key)
+	}
+	return nil
+}
+
 func validReport() map[string]any {
 	return map[string]any{
 		"schemaVersion":  1,
@@ -127,7 +175,7 @@ func validReport() map[string]any {
 func testServer() (http.Handler, *fakeRepository, *fakeStore) {
 	repository := newFakeRepository()
 	store := newFakeStore()
-	handler := newServer(settings{adminToken: "admin-secret", ipHashSalt: "salt"}, repository, store)
+	handler := newServer(settings{adminToken: "admin-secret", ipHashSalt: "salt", retentionDays: 180}, repository, store)
 	return handler, repository, store
 }
 
@@ -266,6 +314,83 @@ func TestAdminRequiresBearerTokenAndClampsLimit(t *testing.T) {
 	response := requestJSON(t, handler, http.MethodGet, "/v1/admin/crash-reports?limit=999", nil, map[string]string{"Authorization": "Bearer admin-secret"})
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"reports"`) {
 		t.Fatalf("admin response = %d %s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"total"`) {
+		t.Fatalf("admin response missing total: %s", response.Body.String())
+	}
+}
+
+func TestAdminListSupportsOffsetAndTotal(t *testing.T) {
+	handler, repository, _ := testServer()
+	for index := 0; index < 3; index++ {
+		metadata := reportMetadata{
+			ID:              strings.Repeat(string(rune('a'+index)), 32),
+			Fingerprint:     strings.Repeat(string(rune('b'+index)), 20),
+			AppVersion:      "0.4.0-beta.1",
+			Source:          "react",
+			Kind:            "RenderError",
+			Message:         "redacted failure",
+			ObjectKey:       "reports/report.json",
+			SizeBytes:       100,
+			IPHash:          "hash",
+			ClientCreatedAt: "2026-07-30T00:00:00+00:00",
+		}
+		repository.mu.Lock()
+		repository.reports[metadata.ID] = fakeReport{metadata: metadata, stored: true}
+		repository.mu.Unlock()
+	}
+	response := requestJSON(t, handler, http.MethodGet, "/v1/admin/crash-reports?limit=2&offset=1", nil, map[string]string{"Authorization": "Bearer admin-secret"})
+	if response.Code != http.StatusOK {
+		t.Fatalf("admin response = %d", response.Code)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode admin response: %v", err)
+	}
+	if int(payload["total"].(float64)) != 3 || int(payload["offset"].(float64)) != 1 || len(payload["reports"].([]any)) != 2 {
+		t.Fatalf("unexpected pagination payload: %v", payload)
+	}
+}
+
+func TestAdminCleanupRemovesExpiredReportsAndObjects(t *testing.T) {
+	handler, repository, store := testServer()
+	metadata := reportMetadata{
+		ID:              strings.Repeat("e", 32),
+		Fingerprint:     strings.Repeat("f", 20),
+		AppVersion:      "0.4.0-beta.1",
+		Source:          "react",
+		Kind:            "RenderError",
+		Message:         "redacted failure",
+		ObjectKey:       "reports/old.json",
+		SizeBytes:       100,
+		IPHash:          "hash",
+		ClientCreatedAt: "2020-01-01T00:00:00+00:00",
+	}
+	repository.mu.Lock()
+	repository.reports[metadata.ID] = fakeReport{metadata: metadata, stored: true}
+	repository.mu.Unlock()
+	store.objects[metadata.ObjectKey] = []byte("{}")
+
+	response := requestJSON(t, handler, http.MethodPost, "/v1/admin/crash-reports/cleanup?olderThanDays=30", nil, map[string]string{"Authorization": "Bearer admin-secret"})
+	if response.Code != http.StatusOK {
+		t.Fatalf("cleanup response = %d %s", response.Code, response.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode cleanup response: %v", err)
+	}
+	if int(payload["removed"].(float64)) != 1 {
+		t.Fatalf("cleanup removed = %v", payload["removed"])
+	}
+	if _, exists := store.objects[metadata.ObjectKey]; exists {
+		t.Fatalf("expired object was not deleted")
+	}
+}
+
+func TestCleanupRequiresAdminToken(t *testing.T) {
+	handler, _, _ := testServer()
+	if response := requestJSON(t, handler, http.MethodPost, "/v1/admin/crash-reports/cleanup", nil, nil); response.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized cleanup status = %d", response.Code)
 	}
 }
 

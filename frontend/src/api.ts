@@ -1,4 +1,4 @@
-import type { AgentContext, AgentPatchApplyResult, AgentPatchPreconditionResult, AgentPlan, AgentResultComparison, AgentResultRef, AgentTask, AiModelDiscovery, AiSettings, AiSettingsInput, AppInfo, Asset, AssetFileStatus, AssetFolderRepairPreview, AssetRepairIssue, AssetRepairMatch, AudioCategory, BrowserMode, BuildPreflightReport, BuildResult, BuildTarget, Character, CommandHistoryStorageStats, CrashReport, CrashReportCenter, CrashReportSummary, DesktopProjectSession, EditorAppearance, ProfiledDesktopProjectSession, Project, ProjectCreationOptions, ProjectLoadPerformance, ProjectReloadFrontendPerformance, ProjectReloadPerformance, RecentProject, RecoverySnapshot, RecoverySnapshotStatus, ScriptImportPreview, ScriptImportRules, UpdateStatus } from './types';
+import type { AgentContext, AgentPatchApplyResult, AgentPatchPreconditionResult, AgentResultComparison, AgentResultRef, AgentTask, AiModelDiscovery, AiSettings, AiSettingsInput, AppInfo, Asset, AssetFileStatus, AssetFolderRepairPreview, AssetRepairIssue, AssetRepairMatch, AudioCategory, BrowserMode, BuildPreflightReport, BuildResult, BuildTarget, Character, CommandHistoryStorageStats, CrashReport, CrashReportCenter, CrashReportSummary, DesktopProjectSession, EditorAppearance, ProfiledDesktopProjectSession, Project, ProjectCreationOptions, ProjectLoadPerformance, ProjectReloadFrontendPerformance, ProjectReloadPerformance, RecentProject, RecoverySnapshot, RecoverySnapshotStatus, ScriptImportPreview, ScriptImportRules, UpdateStatus } from './types';
 import type { PreviewSeekPerformanceReport } from './performance/previewSeekProfiler';
 import { readLargeValue, writeLargeValue } from './core/storage';
 import type { PersistedCommandHistory } from './hooks/useCommandHistory';
@@ -458,16 +458,16 @@ export async function saveAiSettings(settings: AiSettingsInput): Promise<AiSetti
   return withTimeout(api.save_ai_settings(settings));
 }
 
+export async function clearAiKey(): Promise<AiSettings> {
+  const api = await waitForDesktopApi();
+  if (!api) throw new Error('AI Agent 仅在桌面应用中可用');
+  return withTimeout(api.clear_ai_key());
+}
+
 export async function discoverAiModels(settings: AiSettingsInput): Promise<AiModelDiscovery> {
   const api = await waitForDesktopApi();
   if (!api) throw new Error('模型发现仅在桌面应用中可用');
   return withTimeout(api.discover_ai_models({ ...settings, probe: true, probeLimit: 4 }), 120000);
-}
-
-export async function runAiAgent(instruction: string, project: Project): Promise<AgentPlan> {
-  const api = await waitForDesktopApi();
-  if (!api) throw new Error('AI Agent 仅在桌面应用中可用');
-  return withTimeout(api.run_ai_agent(instruction, project), 120000);
 }
 
 export async function startAiTask(instruction: string, project: Project, context: AgentContext): Promise<AgentTask> {

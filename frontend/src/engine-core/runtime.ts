@@ -1,5 +1,6 @@
 import type { ConditionOperator, Project, StoryBlock } from '../types';
 import type { AudioChannelState, EngineSnapshot, EngineState, EngineTraceEntry, SaveGame, SaveGameCompatibility, SaveGameLoadErrorCode, SaveGameLoadResult, StageState } from './types';
+import { assetMatchesTrack } from '../core/audio';
 
 export const ENGINE_VERSION = 3;
 const MAX_SETTLE_STEPS = 1000;
@@ -108,13 +109,35 @@ function applySideEffect(state: EngineState, block: StoryBlock, project: Project
   return state;
 }
 
+/**
+ * 变量比较的统一语义：数字串与数字按数值比较，避免 `3 neq '3'` 为 true 的
+ * 跨类型歧义；非数值字符串回退为字典序比较；布尔值保持严格相等语义。
+ */
+const toComparable = (value: unknown): string | number | boolean => {
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  if (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))) return Number(value);
+  return String(value ?? '');
+};
+
 export function compareValues(left: unknown, operator: ConditionOperator | undefined, right: unknown): boolean {
-  if (operator === 'neq') return left !== right;
-  if (operator === 'gt') return Number(left) > Number(right);
-  if (operator === 'gte') return Number(left) >= Number(right);
-  if (operator === 'lt') return Number(left) < Number(right);
-  if (operator === 'lte') return Number(left) <= Number(right);
-  return left === right;
+  const comparableLeft = toComparable(left);
+  const comparableRight = toComparable(right);
+  if (operator === 'neq') return comparableLeft !== comparableRight;
+  if (operator === 'gt' || operator === 'gte' || operator === 'lt' || operator === 'lte') {
+    if (typeof comparableLeft === 'number' && typeof comparableRight === 'number') {
+      if (operator === 'gt') return comparableLeft > comparableRight;
+      if (operator === 'gte') return comparableLeft >= comparableRight;
+      if (operator === 'lt') return comparableLeft < comparableRight;
+      return comparableLeft <= comparableRight;
+    }
+    const leftText = String(comparableLeft);
+    const rightText = String(comparableRight);
+    if (operator === 'gt') return leftText > rightText;
+    if (operator === 'gte') return leftText >= rightText;
+    if (operator === 'lt') return leftText < rightText;
+    return leftText <= rightText;
+  }
+  return comparableLeft === comparableRight;
 }
 
 function goTo(project: Project, state: EngineState, target?: string): EngineState {
@@ -129,7 +152,7 @@ function prepareVisible(state: EngineState, block: StoryBlock, project: Project)
     : state;
   if (block.type !== 'dialogue') return next;
   if (block.voice) {
-    const voiceAsset = project.assets.find((asset) => asset.id === block.voice || asset.name === block.voice || asset.path.endsWith(block.voice ?? ''));
+    const voiceAsset = project.assets.find((asset) => assetMatchesTrack(asset, block.voice));
     next = { ...next, audio: { ...next.audio, voice: { track: voiceAsset?.name ?? block.voice, assetId: voiceAsset?.id, playing: true, volume: 1, loop: false, fadeDuration: 0 } } };
   }
 
@@ -259,7 +282,7 @@ function advanceEngineWithOptions(project: Project, state: EngineState, options:
   let next = options.captureRollback ? withRollback(state, options.cloneSnapshots) : state;
   if (current.type === 'dialogue' || current.type === 'narration') {
     const voiceAsset = current.type === 'dialogue' && current.voice
-      ? project.assets.find((asset) => asset.id === current.voice || asset.name === current.voice || asset.path.endsWith(current.voice ?? ''))
+      ? project.assets.find((asset) => assetMatchesTrack(asset, current.voice))
       : undefined;
     next = { ...next, readBlocks: { ...next.readBlocks, [current.id]: true }, backlog: [...next.backlog, { blockId: current.id, fragmentId: state.fragmentId, speaker: current.type === 'dialogue' ? resolveDialogueSpeaker(project, current, state.variables) : undefined, text: current.text ?? '', voiceAssetId: voiceAsset?.id, timestamp: Date.now() }].slice(-MAX_BACKLOG) };
   }
