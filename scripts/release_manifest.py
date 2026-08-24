@@ -24,7 +24,7 @@ def create_manifest(version: str, installer: Path, portable: Path, repository: s
         "version": normalized_version,
         "channel": "beta" if "-" in normalized_version else "stable",
         "publishedAt": datetime.now(timezone.utc).isoformat(),
-        "notes": notes or f"Hikari Studio {normalized_version}. See the GitHub Release page for complete notes.",
+        "notes": notes or f"Slide Studio {normalized_version}. See the GitHub Release page for complete notes.",
         "releaseUrl": f"https://github.com/{repository}/releases/tag/{tag}",
         "minimumVersion": "0.3.0",
         "installer": {
@@ -48,7 +48,7 @@ def write_release_files(manifest: dict[str, Any], installer: Path, portable: Pat
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Generate Hikari Studio release metadata")
+    parser = argparse.ArgumentParser(description="Generate Slide Studio release metadata")
     parser.add_argument("--version", required=True)
     parser.add_argument("--installer", type=Path, required=True)
     parser.add_argument("--portable", type=Path, required=True)

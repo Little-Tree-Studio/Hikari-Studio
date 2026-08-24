@@ -4,7 +4,7 @@ test('generic image import requires a purpose and creates the selected entity', 
   const nativeDialogs: string[] = [];
   page.on('dialog', async (dialog) => { nativeDialogs.push(dialog.message()); await dialog.dismiss(); });
   await page.addInitScript(() => {
-    localStorage.setItem('hikari-project', JSON.stringify({
+    localStorage.setItem('slide-project', JSON.stringify({
       version: 3,
       meta: { id: 'asset-import-e2e', name: '素材用途测试', author: '', resolution: [1280, 720], updatedAt: '' },
       characters: [],

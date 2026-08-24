@@ -12,8 +12,8 @@ class ReleaseManifestTests(unittest.TestCase):
     def test_beta_manifest_contains_verified_release_assets(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            installer = root / "Hikari-Studio-Setup-0.4.0-beta.1.exe"
-            portable = root / "Hikari-Studio-Portable-0.4.0-beta.1.zip"
+            installer = root / "Slide-Studio-Setup-0.4.0-beta.1.exe"
+            portable = root / "Slide-Studio-Portable-0.4.0-beta.1.zip"
             installer.write_bytes(b"installer")
             portable.write_bytes(b"portable")
             manifest = create_manifest("0.4.0-beta.1", installer, portable, "owner/repo", "v0.4.0-beta.1")

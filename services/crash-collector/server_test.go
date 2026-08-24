@@ -114,7 +114,7 @@ func validReport() map[string]any {
 		"fingerprint":    strings.Repeat("b", 20),
 		"createdAt":      "2026-07-30T00:00:00+00:00",
 		"createdAtEpoch": 1.0,
-		"app":            map[string]any{"name": "Hikari Studio", "version": "0.4.0-beta.1"},
+		"app":            map[string]any{"name": "Slide Studio", "version": "0.4.0-beta.1"},
 		"system":         map[string]any{"platform": "Windows", "release": "11", "architecture": "AMD64"},
 		"source":         "react",
 		"kind":           "RenderError",

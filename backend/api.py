@@ -105,7 +105,7 @@ class DesktopApi:
     def start_background_services(self) -> None:
         self._ai.start_health_monitor()
         if self._update_thread is None or not self._update_thread.is_alive():
-            self._update_thread = threading.Thread(target=self._background_update_check, name="hikari-update-check", daemon=True)
+            self._update_thread = threading.Thread(target=self._background_update_check, name="slide-update-check", daemon=True)
             self._update_thread.start()
 
     def stop_background_services(self) -> None:
@@ -495,7 +495,7 @@ class DesktopApi:
     def open_project_dialog(self) -> dict[str, Any] | None:
         if self._window is None:
             return None
-        result = self._window.create_file_dialog("open", allow_multiple=False, file_types=("Hikari 项目 (*.json *.hikari)",))
+        result = self._window.create_file_dialog("open", allow_multiple=False, file_types=("Slide 项目 (*.json *.slide)",))
         if not result:
             return None
         path = result[0] if isinstance(result, (tuple, list)) else result
@@ -749,7 +749,7 @@ class DesktopApi:
                 self._store.asset_dir,
                 self._root / "frontend" / "runtime-dist",
                 self._root,
-                self._root / "launcher" / "Hikari.GameLauncher" / "Hikari.GameLauncher.csproj",
+                self._root / "launcher" / "Slide.GameLauncher" / "Slide.GameLauncher.csproj",
                 self._root / "launcher" / "dist" / "win-x64",
                 browser_mode=browser_mode,
             ), "windows")

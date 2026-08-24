@@ -24,7 +24,7 @@ LOGGER = logging.getLogger(__name__)
 
 def default_production_memory() -> dict[str, Any]:
     return {"version": 1, "world": "", "characterRules": [], "styleRules": [], "facts": [], "restrictions": [], "updatedAt": ""}
-MANIFEST_NAME = "project.hikari.json"
+MANIFEST_NAME = "project.slide.json"
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 AUDIO_EXTENSIONS = {".mp3", ".ogg", ".wav", ".flac", ".m4a"}
 VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov"}
@@ -124,7 +124,7 @@ def default_project(name: str = "星海回声") -> dict[str, Any]:
         },
         "settings": {"textSpeed": 35, "autoSave": True, "skipRead": True},
         "locale": {"default": "zh-CN", "languages": ["zh-CN"]},
-        "ui": {"theme": "hikari-light", "dialogueStyle": "glass"},
+        "ui": {"theme": "slide-light", "dialogueStyle": "glass"},
         "productionMemory": default_production_memory(),
     }
 
@@ -150,9 +150,9 @@ class ProjectStore:
     def __init__(self, data_dir: Path, state_dir: Path | None = None) -> None:
         self.data_dir = data_dir.resolve()
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        self.state_dir = (state_dir or self.data_dir / ".hikari-studio").resolve()
+        self.state_dir = (state_dir or self.data_dir / ".slide-studio").resolve()
         self.state_dir.mkdir(parents=True, exist_ok=True)
-        legacy = self.data_dir / "star-sea-echo.hikari.json"
+        legacy = self.data_dir / "star-sea-echo.slide.json"
         current = self.data_dir / "star-sea-echo" / MANIFEST_NAME
         self.project_path = legacy if legacy.exists() and not current.exists() else current
         self._lock = threading.RLock()
@@ -172,11 +172,11 @@ class ProjectStore:
 
     @property
     def recovery_path(self) -> Path:
-        return self.project_root / ".hikari" / "recovery.json"
+        return self.project_root / ".slide" / "recovery.json"
 
     @property
     def command_history_path(self) -> Path:
-        return self.project_root / ".hikari" / "history" / "commands.json"
+        return self.project_root / ".slide" / "history" / "commands.json"
 
     @property
     def recent_projects_path(self) -> Path:
@@ -215,7 +215,7 @@ class ProjectStore:
         path = self._runtime_value_path(key)
         with self._lock:
             path.parent.mkdir(parents=True, exist_ok=True)
-            fd, temporary_name = tempfile.mkstemp(prefix=".hikari-runtime-", suffix=".tmp", dir=path.parent)
+            fd, temporary_name = tempfile.mkstemp(prefix=".slide-runtime-", suffix=".tmp", dir=path.parent)
             try:
                 with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as stream:
                     stream.write(value)
@@ -465,9 +465,9 @@ class ProjectStore:
         resolved = path.expanduser().resolve()
         if resolved.is_dir():
             resolved = resolved / MANIFEST_NAME
-        is_legacy = resolved.is_file() and (resolved.suffix.lower() == ".hikari" or resolved.name.endswith(".hikari.json")) and resolved.name != MANIFEST_NAME
+        is_legacy = resolved.is_file() and (resolved.suffix.lower() == ".slide" or resolved.name.endswith(".slide.json")) and resolved.name != MANIFEST_NAME
         if not resolved.is_file() or (resolved.name != MANIFEST_NAME and not is_legacy):
-            raise ValueError("请选择 project.hikari.json、.hikari 或旧版 .hikari.json 项目文件")
+            raise ValueError("请选择 project.slide.json、.slide 或旧版 .slide.json 项目文件")
         previous = self.project_path
         self.project_path = resolved
         try:
@@ -562,8 +562,8 @@ class ProjectStore:
             for language in manifest["locale"]["languages"]:
                 expected[root / "locales" / _language_file_name(language)] = _translation_table(translations_payload.get(language))
             expected[root / "settings" / "editor.json"] = payload.get("settings", {})
-            expected[root / "ui" / "theme.json"] = payload.get("ui", {"theme": "hikari-light", "dialogueStyle": "glass"})
-            expected[root / ".hikari" / "agent" / "memory.json"] = payload.get("productionMemory", default_production_memory())
+            expected[root / "ui" / "theme.json"] = payload.get("ui", {"theme": "slide-light", "dialogueStyle": "glass"})
+            expected[root / ".slide" / "agent" / "memory.json"] = payload.get("productionMemory", default_production_memory())
 
             for path, value in expected.items():
                 if path != self.project_path:
@@ -806,8 +806,8 @@ class ProjectStore:
             "settings": self._read_json(root / "settings" / "editor.json", default={"textSpeed": 35, "autoSave": True, "skipRead": True}),
             "locale": locale_config,
             "translations": translations,
-            "ui": self._read_json(root / "ui" / "theme.json", default={"theme": "hikari-light", "dialogueStyle": "glass"}),
-            "productionMemory": self._read_json(root / ".hikari" / "agent" / "memory.json", default=default_production_memory()),
+            "ui": self._read_json(root / "ui" / "theme.json", default={"theme": "slide-light", "dialogueStyle": "glass"}),
+            "productionMemory": self._read_json(root / ".slide" / "agent" / "memory.json", default=default_production_memory()),
         }
         return self._migrate(project, copy_project=False)
 
@@ -827,8 +827,8 @@ class ProjectStore:
         return self._load_v3()
 
     def _upgrade_destination(self, legacy_path: Path) -> Path:
-        stem = legacy_path.name.removesuffix(".hikari.json").removesuffix(".hikari")
-        return legacy_path.parent / _safe_name(stem, "hikari-project") / MANIFEST_NAME
+        stem = legacy_path.name.removesuffix(".slide.json").removesuffix(".slide")
+        return legacy_path.parent / _safe_name(stem, "slide-project") / MANIFEST_NAME
 
     @staticmethod
     def _backup_legacy(legacy_path: Path) -> Path | None:
@@ -858,7 +858,7 @@ class ProjectStore:
     def _write_json_atomic(path: Path, value: Any) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         encoded = json.dumps(value, ensure_ascii=False, indent=2)
-        fd, temporary_name = tempfile.mkstemp(prefix=".hikari-", suffix=".tmp", dir=path.parent)
+        fd, temporary_name = tempfile.mkstemp(prefix=".slide-", suffix=".tmp", dir=path.parent)
         try:
             with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as stream:
                 stream.write(encoded)
@@ -931,7 +931,7 @@ class ProjectStore:
             for language, table in (raw_translations.items() if isinstance(raw_translations, dict) else [])
             if isinstance(table, dict)
         }
-        result.setdefault("ui", {"theme": "hikari-light", "dialogueStyle": "glass"})
+        result.setdefault("ui", {"theme": "slide-light", "dialogueStyle": "glass"})
         memory = result.get("productionMemory")
         if not isinstance(memory, dict):
             memory = default_production_memory()

@@ -11,7 +11,7 @@ from typing import Any, Iterable
 
 
 LOGGER = logging.getLogger(__name__)
-WORKER_ENV = "HIKARI_ASSET_WORKER"
+WORKER_ENV = "SLIDE_ASSET_WORKER"
 WORKER_TIMEOUT_SECONDS = 300
 PROTOCOL_VERSION = 2
 MAX_INSPECT_PATHS = 100_000
@@ -52,7 +52,7 @@ class NativeAssetResult:
 
 
 def _worker_name() -> str:
-    return "hikari-asset-worker.exe" if os.name == "nt" else "hikari-asset-worker"
+    return "slide-asset-worker.exe" if os.name == "nt" else "slide-asset-worker"
 
 
 def find_asset_worker(resource_root: Path | None = None) -> Path | None:

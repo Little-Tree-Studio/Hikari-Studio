@@ -413,7 +413,7 @@ export interface BuildResult {
   error?: { code: string; message: string; diagnostics?: BuildPreflightIssue[] };
 }
 
-export type EditorThemeId = 'hikari-light' | 'graphite' | 'sakura-studio' | 'high-contrast';
+export type EditorThemeId = 'slide-light' | 'graphite' | 'sakura-studio' | 'high-contrast';
 export interface EditorAppearance {
   version: 1;
   mode: 'system' | 'fixed';
@@ -741,7 +741,7 @@ export interface AppNotification {
 
 export interface ScriptImportPreview {
   sourceName: string;
-  format: 'TXT' | 'Markdown' | 'Hikari JSON';
+  format: 'TXT' | 'Markdown' | 'Slide JSON';
   blocks: StoryBlock[];
   warnings: string[];
   matches?: ScriptImportMatch[];
@@ -942,12 +942,12 @@ export interface AgentResultComparison {
 
 declare global {
   interface Window {
-    __HIKARI_DESKTOP__?: boolean;
-    __HIKARI_BOOT_STARTED_AT__?: number;
-    __HIKARI_LAST_PROJECT_RELOAD__?: ProjectReloadPerformance;
-    __HIKARI_PREVIEW_SEEK_PERFORMANCE__?: import('./performance/previewSeekProfiler').PreviewSeekPerformanceReport;
-    __HIKARI_RPC__?: { baseUrl: string; token: string };
+    __SLIDE_DESKTOP__?: boolean;
+    __SLIDE_BOOT_STARTED_AT__?: number;
+    __SLIDE_LAST_PROJECT_RELOAD__?: ProjectReloadPerformance;
+    __SLIDE_PREVIEW_SEEK_PERFORMANCE__?: import('./performance/previewSeekProfiler').PreviewSeekPerformanceReport;
+    __SLIDE_RPC__?: { baseUrl: string; token: string };
     pywebview?: { api: DesktopApi };
-    __HIKARI_RUNTIME_SELF_TEST__?: () => { ok: boolean; engineVersion: number; current?: string; readCount: number; backlogCount: number; characterCount: number; diagnosticErrors: number; diagnosticWarnings: number };
+    __SLIDE_RUNTIME_SELF_TEST__?: () => { ok: boolean; engineVersion: number; current?: string; readCount: number; backlogCount: number; characterCount: number; diagnosticErrors: number; diagnosticWarnings: number };
   }
 }

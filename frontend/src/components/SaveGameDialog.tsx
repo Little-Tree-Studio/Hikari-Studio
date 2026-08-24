@@ -137,7 +137,7 @@ export function SaveGameDialog({ project, state, mode, playTimeSeconds, close, l
           <small><Clock3 />{formatDate(slot.save.savedAt)} · {formatDuration(slot.save.playTimeSeconds)}</small>
           {slot.warnings?.[0] && <small className="save-slot-warning"><AlertTriangle />{slot.warnings[0]}</small>}
         </> : slot.status === 'mismatch' ? <><span>其他项目的存档</span><small>{slot.error}</small></>
-          : slot.status === 'incompatible' ? <><span>需要更新 Hikari Studio</span><small>{slot.error}</small></>
+          : slot.status === 'incompatible' ? <><span>需要更新 Slide Studio</span><small>{slot.error}</small></>
           : slot.status === 'corrupt' ? <><span>存档无法读取</span><small>{slot.error}</small></>
           : <><span>空槽位</span><small>选择后创建新存档</small></>}
       </span>

@@ -30,14 +30,14 @@ class WindowsBuilderTests(unittest.TestCase):
             }), encoding="utf-8")
             cefsharp_dist = launcher_dist / "cefsharp"
             cefsharp_dist.mkdir()
-            (cefsharp_dist / "Hikari.GameLauncher.exe").write_bytes(b"launcher")
+            (cefsharp_dist / "Slide.GameLauncher.exe").write_bytes(b"launcher")
             (cefsharp_dist / "libcef.dll").write_bytes(b"cef")
             project = default_project("测试游戏")
 
             executable = build_windows_game(
                 project,
                 root / "output",
-                root / "project.hikari.json",
+                root / "project.slide.json",
                 builtin,
                 custom,
                 runtime,
@@ -56,7 +56,7 @@ class WindowsBuilderTests(unittest.TestCase):
             self.assertEqual(config["width"], 1280)
             self.assertEqual(config["browserMode"], "cefsharp")
 
-            build_web_game(project, root / "web-output", root / "project.hikari.json", builtin, custom, runtime)
+            build_web_game(project, root / "web-output", root / "project.slide.json", builtin, custom, runtime)
             for name in ("player.js", "player.css", "project.js", "runtime-contract.json"):
                 self.assertEqual(
                     (root / "output" / "game" / name).read_bytes(),
@@ -83,12 +83,12 @@ class WindowsBuilderTests(unittest.TestCase):
                 "engineVersion": 3,
                 "blockTypes": ["scene", "sound", "characterShow", "characterHide", "camera", "narration", "dialogue", "branch", "setVariable", "condition", "jump", "call", "return"],
             }), encoding="utf-8")
-            (launcher_dist / "system" / "Hikari.GameLauncher.exe").write_bytes(b"small-launcher")
-            (launcher_dist / "cefsharp" / "Hikari.GameLauncher.exe").write_bytes(b"cef-launcher")
+            (launcher_dist / "system" / "Slide.GameLauncher.exe").write_bytes(b"small-launcher")
+            (launcher_dist / "cefsharp" / "Slide.GameLauncher.exe").write_bytes(b"cef-launcher")
             (launcher_dist / "cefsharp" / "libcef.dll").write_bytes(b"large-cef-runtime")
 
             executable = build_windows_game(
-                default_project("轻量游戏"), root / "output", root / "project.hikari.json",
+                default_project("轻量游戏"), root / "output", root / "project.slide.json",
                 builtin, custom, runtime, root, root / "launcher.csproj", launcher_dist,
                 browser_mode="system",
             )

@@ -26,7 +26,7 @@ class JsonFormatter(logging.Formatter):
 
 
 def configure_logging(data_dir: Path) -> Path:
-    log_path = data_dir / "logs" / "hikari-studio.jsonl"
+    log_path = data_dir / "logs" / "slide-studio.jsonl"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     handler = RotatingFileHandler(log_path, maxBytes=2_000_000, backupCount=3, encoding="utf-8")
     handler.setFormatter(JsonFormatter())

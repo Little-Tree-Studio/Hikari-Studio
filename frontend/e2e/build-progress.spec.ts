@@ -5,7 +5,7 @@ test('build execution opens a unified progress window with operation steps', asy
   page.on('dialog', async (dialog) => { nativeDialogs.push(dialog.message()); await dialog.dismiss(); });
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.addInitScript(() => {
-    localStorage.setItem('hikari-project', JSON.stringify({
+    localStorage.setItem('slide-project', JSON.stringify({
       version: 3,
       meta: { id: 'build-progress-e2e', name: '构建进度测试', author: '', resolution: [1280, 720], updatedAt: '' },
       characters: [],
@@ -48,7 +48,7 @@ test('build output folder can be selected, reused, and restored to default', asy
   await page.evaluate(() => {
     const api = {
       load_project_session: async () => ({}),
-      select_export_location: async () => 'D:\\Hikari Exports',
+      select_export_location: async () => 'D:\\Slide Exports',
     } as unknown as NonNullable<Window['pywebview']>['api'];
     window.pywebview = { api };
   });
@@ -56,16 +56,16 @@ test('build output folder can be selected, reused, and restored to default', asy
   await page.getByRole('button', { name: '发布游戏' }).click();
   let publish = page.getByRole('dialog', { name: '构建与发布' });
   await publish.getByRole('button', { name: '选择文件夹' }).click();
-  await expect(publish.getByRole('textbox', { name: '导出路径' })).toHaveValue('D:\\Hikari Exports');
+  await expect(publish.getByRole('textbox', { name: '导出路径' })).toHaveValue('D:\\Slide Exports');
   await page.evaluate(() => { window.pywebview = undefined; });
   await publish.getByRole('button', { name: '关闭' }).click();
 
   await page.getByRole('button', { name: '发布游戏' }).click();
   publish = page.getByRole('dialog', { name: '构建与发布' });
-  await expect(publish.getByRole('textbox', { name: '导出路径' })).toHaveValue('D:\\Hikari Exports');
+  await expect(publish.getByRole('textbox', { name: '导出路径' })).toHaveValue('D:\\Slide Exports');
   await publish.getByRole('button', { name: '恢复默认导出位置' }).click();
   await expect(publish.getByRole('textbox', { name: '导出路径' })).toHaveValue('');
-  expect(await page.evaluate(() => localStorage.getItem('hikari-build-output-root'))).toBeNull();
+  expect(await page.evaluate(() => localStorage.getItem('slide-build-output-root'))).toBeNull();
 });
 
 test('Windows export persists browser mode and explains package size difference', async ({ page }) => {
@@ -78,7 +78,7 @@ test('Windows export persists browser mode and explains package size difference'
   await expect(publish.getByText('CefSharp Chromium，包体较大但运行环境固定')).toBeVisible();
   await expect(publish.getByText('不打包 Chromium，体积更小')).toBeVisible();
   await publish.getByRole('radio', { name: /系统默认浏览器/ }).check();
-  expect(await page.evaluate(() => localStorage.getItem('hikari-browser-mode'))).toBe('system');
+  expect(await page.evaluate(() => localStorage.getItem('slide-browser-mode'))).toBe('system');
   await publish.getByRole('button', { name: '关闭' }).click();
 
   await page.getByRole('button', { name: '发布游戏' }).click();
@@ -101,21 +101,21 @@ test('completed build exposes trusted open-folder and launch-game actions', asyn
     settings: { textSpeed: 35, autoSave: true, skipRead: true },
   };
   await page.addInitScript((desktopProject) => {
-    window.__HIKARI_DESKTOP__ = true;
+    window.__SLIDE_DESKTOP__ = true;
     const actions: string[] = [];
-    (window as Window & { __HIKARI_BUILD_ACTIONS__?: string[] }).__HIKARI_BUILD_ACTIONS__ = actions;
+    (window as Window & { __SLIDE_BUILD_ACTIONS__?: string[] }).__SLIDE_BUILD_ACTIONS__ = actions;
     const api = {
       get_editor_appearance: async () => null,
-      get_app_info: async () => ({ name: 'Hikari Studio', version: '0.4.0-beta.1', channel: 'beta', platform: 'Windows', projectPath: 'C:\\Projects\\BuildE2E\\project.hikari.json', dataPath: '', buildPath: 'C:\\Builds', startupProjectRequested: false }),
-      load_project_session: async () => ({ project: desktopProject, projectPath: 'C:\\Projects\\BuildE2E\\project.hikari.json', sessionToken: 'e2e-session' }),
+      get_app_info: async () => ({ name: 'Slide Studio', version: '0.4.0-beta.1', channel: 'beta', platform: 'Windows', projectPath: 'C:\\Projects\\BuildE2E\\project.slide.json', dataPath: '', buildPath: 'C:\\Builds', startupProjectRequested: false }),
+      load_project_session: async () => ({ project: desktopProject, projectPath: 'C:\\Projects\\BuildE2E\\project.slide.json', sessionToken: 'e2e-session' }),
       get_recovery_snapshot_status: async () => ({ available: false, recoveredDuringLoad: false }),
       load_command_history: async () => null,
       load_command_history_stats: async () => null,
       read_runtime_value: async () => null,
       write_runtime_value: async () => true,
       delete_runtime_value: async () => true,
-      save_project: async () => ({ ok: true, path: 'C:\\Projects\\BuildE2E\\project.hikari.json', bytes: 1 }),
-      save_command_history: async () => ({ ok: true, path: 'C:\\Projects\\BuildE2E\\.hikari\\history\\commands.json' }),
+      save_project: async () => ({ ok: true, path: 'C:\\Projects\\BuildE2E\\project.slide.json', bytes: 1 }),
+      save_command_history: async () => ({ ok: true, path: 'C:\\Projects\\BuildE2E\\.slide\\history\\commands.json' }),
       preflight_build: async (_project: unknown, _target: unknown, report: unknown) => report,
       build_web: async (_project: unknown, report: unknown) => ({ ok: true, path: 'C:\\Builds\\Completed-Build\\web\\index.html', preflight: report }),
       open_build_output: async (path: string) => { actions.push(`open:${path}`); return { ok: true, path: 'C:\\Builds\\Completed-Build\\web' }; },
@@ -135,7 +135,7 @@ test('completed build exposes trusted open-folder and launch-game actions', asyn
   await expect(completed.getByText('已打开输出目录', { exact: true })).toBeVisible();
   await completed.getByRole('button', { name: '立即运行游戏' }).click();
   await expect(completed.getByText('游戏已启动', { exact: true })).toBeVisible();
-  expect(await page.evaluate(() => (window as Window & { __HIKARI_BUILD_ACTIONS__?: string[] }).__HIKARI_BUILD_ACTIONS__)).toEqual([
+  expect(await page.evaluate(() => (window as Window & { __SLIDE_BUILD_ACTIONS__?: string[] }).__SLIDE_BUILD_ACTIONS__)).toEqual([
     'open:C:\\Builds\\Completed-Build\\web\\index.html',
     'launch:C:\\Builds\\Completed-Build\\web\\index.html',
   ]);

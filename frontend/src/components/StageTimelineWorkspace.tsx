@@ -332,11 +332,11 @@ export function StageTimelineWorkspace({ project, selectedBlock, commit, locateB
     const script = project.scripts[project.activeFragmentId] ?? [];
     const clips = timeline.tracks.flatMap((track) => track.clips.filter((clip) => selectedClipIds.has(clip.id)).map((clip) => ({ trackKind: track.kind, clip: structuredClone(clip), block: clip.blockId ? structuredClone(script.find((block) => block.id === clip.blockId)) : undefined })));
     const payload: TimelineClipboard = { version: 1, clips };
-    writeSmallValue('hikari-timeline-clipboard', JSON.stringify(payload));
+    writeSmallValue('slide-timeline-clipboard', JSON.stringify(payload));
     notify(`已复制 ${clips.length} 个时间轴片段`);
   };
   const pasteSelected = () => {
-    const encoded = readSmallValue('hikari-timeline-clipboard');
+    const encoded = readSmallValue('slide-timeline-clipboard');
     if (!encoded) { notify('时间轴剪贴板为空', 'error'); return; }
     let payload: TimelineClipboard;
     try { payload = JSON.parse(encoded) as TimelineClipboard; } catch { notify('时间轴剪贴板内容损坏', 'error'); return; }

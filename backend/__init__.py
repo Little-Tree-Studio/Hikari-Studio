@@ -1,1 +1,1 @@
-"""Hikari Studio desktop backend."""
+"""Slide Studio desktop backend."""

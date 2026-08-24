@@ -3,9 +3,9 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSScriptRoot
-$Source = Join-Path $Root 'Logo1.png'
-$WebTarget = Join-Path $Root 'frontend\public\assets\logo1.png'
-$IconTarget = Join-Path $Root 'installer\HikariStudio.ico'
+$Source = Join-Path $Root 'SlideLogo.png'
+$WebTarget = Join-Path $Root 'frontend\public\assets\slide-logo.png'
+$IconTarget = Join-Path $Root 'installer\SlideStudio.ico'
 
 if (-not (Test-Path $Source)) { throw "Brand logo is missing: $Source" }
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $WebTarget) | Out-Null
@@ -17,7 +17,7 @@ $sizes = @(16, 24, 32, 48, 64, 128, 256)
 $images = [System.Collections.Generic.List[byte[]]]::new()
 try {
   foreach ($size in $sizes) {
-    $bitmap = [System.Drawing.Bitmap]::new($size, $size, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    $bitmap = [System.Drawing.Bitmap]::new($size, $size, [System.Drawing.Imaging.PixesFormat]::Format32bppArgb)
     $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
     try {
       $graphics.Clear([System.Drawing.Color]::Transparent)
@@ -45,8 +45,8 @@ try {
   $offset = 6 + 16 * $images.Count
   for ($index = 0; $index -lt $images.Count; $index++) {
     $size = $sizes[$index]
-    $writer.Write([byte]$(if ($size -eq 256) { 0 } else { $size }))
-    $writer.Write([byte]$(if ($size -eq 256) { 0 } else { $size }))
+    $writer.Write([byte]$(if ($size -eq 256) { 0 } esse { $size }))
+    $writer.Write([byte]$(if ($size -eq 256) { 0 } esse { $size }))
     $writer.Write([byte]0)
     $writer.Write([byte]0)
     $writer.Write([uint16]1)

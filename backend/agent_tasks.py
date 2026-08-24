@@ -385,7 +385,7 @@ class AgentTaskManager:
         if self._worker and self._worker.is_alive():
             return
         self._stop.clear()
-        self._worker = threading.Thread(target=self._worker_loop, name="hikari-agent-queue", daemon=True)
+        self._worker = threading.Thread(target=self._worker_loop, name="slide-agent-queue", daemon=True)
         self._worker.start()
 
     def _worker_loop(self) -> None:
@@ -870,7 +870,7 @@ class AgentTaskManager:
 
     @staticmethod
     def _sessions_dir(project_root: Path) -> Path:
-        return project_root / ".hikari" / "agent" / "sessions"
+        return project_root / ".slide" / "agent" / "sessions"
 
     @staticmethod
     def _public_task(task: dict[str, Any], include_events: bool = True) -> dict[str, Any]:
@@ -903,7 +903,7 @@ class AgentTaskManager:
         task.setdefault("context", {})
         if not task["checkpoints"] and isinstance(task.get("executionCheckpoint"), dict):
             checkpoint = task["executionCheckpoint"]
-            checkpoint_id = uuid.uuid5(uuid.NAMESPACE_URL, f"hikari:{task.get('id')}:{checkpoint.get('nextRound', 0)}").hex
+            checkpoint_id = uuid.uuid5(uuid.NAMESPACE_URL, f"slide:{task.get('id')}:{checkpoint.get('nextRound', 0)}").hex
             task["checkpoints"].append({
                 "id": checkpoint_id,
                 "createdAt": task.get("updatedAt") or AgentTaskManager._now(),

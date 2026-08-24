@@ -22,7 +22,7 @@ from .ai_provider import AiProvider, OpenAiCompatibleProvider, ProviderAuthentic
 
 
 LOGGER = logging.getLogger(__name__)
-CREDENTIAL_TARGET = "HikariStudio/AiProvider"
+CREDENTIAL_TARGET = "SlideStudio/AiProvider"
 
 BUILTIN_MODELS: tuple[dict[str, Any], ...] = (
     {"id": "gpt-5", "name": "GPT-5", "category": "reasoning", "supportsTools": True, "supportsVision": True, "supportsStructuredOutput": True, "contextWindow": 400000},
@@ -80,7 +80,7 @@ class WindowsCredentialStore:
         credential.CredentialBlobSize = len(encoded)
         credential.CredentialBlob = ctypes.cast(blob, ctypes.POINTER(ctypes.c_ubyte))
         credential.Persist = 2
-        credential.UserName = "Hikari Studio"
+        credential.UserName = "Slide Studio"
         if not self.advapi32.CredWriteW(ctypes.byref(credential), 0):
             raise ctypes.WinError()
 
@@ -204,7 +204,7 @@ class AiService:
         checkpoint = checkpoint or (lambda: None)
         progress = progress or (lambda _kind, _message, _data=None: None)
         system = (
-            "你是 Hikari Studio 的全栈 Galgame 制作 Agent。先使用工具读取需要的项目上下文，不要猜测 ID。"
+            "你是 Slide Studio 的全栈 Galgame 制作 Agent。先使用工具读取需要的项目上下文，不要猜测 ID。"
             "查询和诊断工具可直接执行；编辑工具只创建待用户确认的结构化差异；构建工具只创建单独确认请求。"
             "完成工具调用后只输出 JSON：{summary:string,assumptions:string[],operations:array}。"
             "operations 通常留空，因为编辑工具产生的提案会自动合并；禁止声称已经写入或构建。"
@@ -518,7 +518,7 @@ class AiService:
         if self._monitor_thread and self._monitor_thread.is_alive():
             return
         self._monitor_stop.clear()
-        self._monitor_thread = threading.Thread(target=self._health_monitor_loop, args=(max(10, interval_seconds),), name="hikari-ai-health", daemon=True)
+        self._monitor_thread = threading.Thread(target=self._health_monitor_loop, args=(max(10, interval_seconds),), name="slide-ai-health", daemon=True)
         self._monitor_thread.start()
 
     def stop_health_monitor(self) -> None:

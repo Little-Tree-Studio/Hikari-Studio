@@ -147,7 +147,7 @@ class UpdateService:
             raise ValueError("No update is available to download")
         manifest = normalize_manifest(manifest)
         installer = manifest["installer"]
-        destination = self.download_dir / f"Hikari-Studio-Setup-{manifest['version']}.exe"
+        destination = self.download_dir / f"Slide-Studio-Setup-{manifest['version']}.exe"
         destination.parent.mkdir(parents=True, exist_ok=True)
         partial = destination.with_suffix(".exe.partial")
         partial.unlink(missing_ok=True)
@@ -199,8 +199,8 @@ class UpdateService:
         if not self.download_dir.is_dir():
             return []
         result: list[dict[str, Any]] = []
-        for path in self.download_dir.glob("Hikari-Studio-Setup-*.exe"):
-            version = path.stem.removeprefix("Hikari-Studio-Setup-")
+        for path in self.download_dir.glob("Slide-Studio-Setup-*.exe"):
+            version = path.stem.removeprefix("Slide-Studio-Setup-")
             try:
                 stat = path.stat()
                 metadata_path = path.with_suffix(".exe.json")
@@ -279,7 +279,7 @@ class UpdateService:
 
     @staticmethod
     def _fetch_json(url: str) -> Any:
-        request = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": f"Hikari-Studio/{APP_VERSION}"})
+        request = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": f"Slide-Studio/{APP_VERSION}"})
         with urllib.request.urlopen(request, timeout=15) as response:
             if int(response.headers.get("Content-Length") or 0) > 2_000_000:
                 raise ValueError("Update metadata is too large")
@@ -287,7 +287,7 @@ class UpdateService:
 
     @staticmethod
     def _download(url: str, destination: Path, expected_size: int) -> None:
-        request = urllib.request.Request(url, headers={"Accept": "application/octet-stream", "User-Agent": f"Hikari-Studio/{APP_VERSION}"})
+        request = urllib.request.Request(url, headers={"Accept": "application/octet-stream", "User-Agent": f"Slide-Studio/{APP_VERSION}"})
         written = 0
         with urllib.request.urlopen(request, timeout=30) as response, destination.open("wb") as handle:
             while True:
@@ -315,7 +315,7 @@ class UpdateService:
         subprocess.Popen([str(path), "/SILENT", "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS"], close_fds=True)
 
     def _retain_recent_installers(self, count: int) -> None:
-        paths = sorted(self.download_dir.glob("Hikari-Studio-Setup-*.exe"), key=lambda path: path.stat().st_mtime, reverse=True)
+        paths = sorted(self.download_dir.glob("Slide-Studio-Setup-*.exe"), key=lambda path: path.stat().st_mtime, reverse=True)
         for path in paths[count:]:
             try:
                 path.unlink()

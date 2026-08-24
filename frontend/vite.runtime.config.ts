@@ -13,7 +13,7 @@ export default defineConfig({
     cssCodeSplit: false,
     lib: {
       entry: fileURLToPath(new URL('./src/runtime/main.tsx', import.meta.url)),
-      name: 'HikariGameRuntime',
+      name: 'SlideGameRuntime',
       formats: ['iife'],
       fileName: () => 'player.js',
     },

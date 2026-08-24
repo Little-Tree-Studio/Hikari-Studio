@@ -1,5 +1,5 @@
 [package]
-name = "hikari-asset-worker"
+name = "slide-asset-worker"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -227,7 +227,7 @@ class DesktopRuntimeTests(unittest.TestCase):
     def test_standard_paths_support_overrides_and_keep_state_outside_projects(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            environment = {"HIKARI_APP_DATA": str(root / "state"), "HIKARI_PROJECTS_DIR": str(root / "workspace" / "Projects")}
+            environment = {"SLIDE_APP_DATA": str(root / "state"), "SLIDE_PROJECTS_DIR": str(root / "workspace" / "Projects")}
             with patch.dict(os.environ, environment, clear=False):
                 paths = resolve_desktop_paths(root=root / "resources")
             self.assertEqual(paths.app_data_dir, (root / "state").resolve())
@@ -245,15 +245,15 @@ class DesktopRuntimeTests(unittest.TestCase):
             root = Path(directory)
             resources = root / "resources"
             source = resources / "data" / "demo"
-            (source / ".hikari" / "agent").mkdir(parents=True)
-            (source / "project.hikari.json").write_text('{"version":3}', encoding="utf-8")
-            (source / ".hikari" / "agent" / "memory.json").write_text('{"world":"kept"}', encoding="utf-8")
-            environment = {"HIKARI_APP_DATA": str(root / "state"), "HIKARI_PROJECTS_DIR": str(root / "documents" / "Projects")}
+            (source / ".slide" / "agent").mkdir(parents=True)
+            (source / "project.slide.json").write_text('{"version":3}', encoding="utf-8")
+            (source / ".slide" / "agent" / "memory.json").write_text('{"world":"kept"}', encoding="utf-8")
+            environment = {"SLIDE_APP_DATA": str(root / "state"), "SLIDE_PROJECTS_DIR": str(root / "documents" / "Projects")}
             with patch.dict(os.environ, environment, clear=False):
                 paths = resolve_desktop_paths(root=resources)
             migrated = migrate_legacy_desktop_data(paths)
             self.assertEqual(migrated, [paths.projects_dir / "demo"])
-            self.assertTrue((paths.projects_dir / "demo" / ".hikari" / "agent" / "memory.json").is_file())
+            self.assertTrue((paths.projects_dir / "demo" / ".slide" / "agent" / "memory.json").is_file())
             self.assertTrue(source.is_dir())
             self.assertEqual(migrate_legacy_desktop_data(paths), [])
 
@@ -315,13 +315,13 @@ class DesktopRuntimeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             received: list[dict[str, str]] = []
             delivered = threading.Event()
-            first = SingleInstance(Path(directory), lambda payload: (received.append(payload), delivered.set()), app_id="HikariStudioTest")
-            second = SingleInstance(Path(directory), lambda _: None, app_id="HikariStudioTest")
+            first = SingleInstance(Path(directory), lambda payload: (received.append(payload), delivered.set()), app_id="SlideStudioTest")
+            second = SingleInstance(Path(directory), lambda _: None, app_id="SlideStudioTest")
             try:
                 self.assertTrue(first.acquire())
-                self.assertFalse(second.acquire({"projectPath": "C:/story/project.hikari.json"}))
+                self.assertFalse(second.acquire({"projectPath": "C:/story/project.slide.json"}))
                 self.assertTrue(delivered.wait(2))
-                self.assertEqual(received, [{"projectPath": "C:/story/project.hikari.json"}])
+                self.assertEqual(received, [{"projectPath": "C:/story/project.slide.json"}])
             finally:
                 second.close()
                 first.close()

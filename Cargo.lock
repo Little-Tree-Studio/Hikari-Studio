@@ -88,17 +88,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hikari-asset-worker"
-version = "0.1.0"
-dependencies = [
- "rayon",
- "serde",
- "serde_json",
- "sha2",
- "walkdir",
-]
-
-[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -215,6 +204,17 @@ dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest",
+]
+
+[[package]]
+name = "slide-asset-worker"
+version = "0.1.0"
+dependencies = [
+ "rayon",
+ "serde",
+ "serde_json",
+ "sha2",
+ "walkdir",
 ]
 
 [[package]]

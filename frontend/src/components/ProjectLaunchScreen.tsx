@@ -49,7 +49,7 @@ export function ProjectLaunchScreen({ startInWizard = false, onOpen, onOpenRecen
   if (view === 'wizard') return <ProjectCreationWizard onBack={() => setView('home')} onCreate={onCreate} onCreated={onCreated} />;
   return <main className="project-launch-screen">
     <section className="launch-home">
-      <header className="launch-brand"><div className="launch-logo"><img src="./assets/logo1.png" alt="" /></div><h1>Hikari Studio</h1><p>让灵感变成可以游玩的故事</p></header>
+      <header className="launch-brand"><div className="launch-logo"><img src="./assets/slide-logo.png" alt="" /></div><h1>Slide Studio</h1><p>让灵感变成可以游玩的故事</p></header>
       <div className="launch-primary-actions">
         <button className="launch-create" disabled={!ready} onClick={() => setView('wizard')}>{ready ? <FilePlus2 /> : <LoaderCircle className="spin" />}<span>{ready ? '创建新项目' : '正在准备项目服务'}</span></button>
         <button className="launch-open" disabled={!ready} onClick={() => void onOpen()}><FolderOpen /><span>打开本地项目</span></button>
@@ -65,7 +65,7 @@ export function ProjectLaunchScreen({ startInWizard = false, onOpen, onOpenRecen
         </div>
       </section>
       {error && <div className="launch-error">{error}</div>}
-      <footer>Hikari Studio · v0.4.0 Beta</footer>
+      <footer>Slide Studio · v0.4.0 Beta</footer>
     </section>
   </main>;
 }
@@ -113,7 +113,7 @@ function ProjectCreationWizard({ onBack, onCreate, onCreated }: { onBack: () => 
   return <main className="project-launch-screen creation-mode">
     <aside className="creation-sidebar">
       <button className="creation-back" onClick={onBack}><ArrowLeft />返回启动页</button>
-      <div className="creation-brand"><div className="launch-logo small"><img src="./assets/logo1.png" alt="" /></div><span><strong>创建新项目</strong><small>Hikari Studio</small></span></div>
+      <div className="creation-brand"><div className="launch-logo small"><img src="./assets/slide-logo.png" alt="" /></div><span><strong>创建新项目</strong><small>Slide Studio</small></span></div>
       <ol>{STEPS.map(([title, detail], index) => <li className={`${step === index ? 'active' : ''} ${step > index ? 'complete' : ''}`} key={title}><span>{step > index ? <Check /> : index + 1}</span><div><strong>{title}</strong><small>{detail}</small></div></li>)}</ol>
     </aside>
     <section className="creation-content">

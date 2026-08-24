@@ -1,4 +1,4 @@
-# Hikari Studio Large Project Benchmark
+# Slide Studio Large Project Benchmark
 
 The release benchmark is generated in memory and does not touch user projects.
 
@@ -43,7 +43,7 @@ The Windows editor records one correlated reload profile from Python project
 loading through the first stable React paint. Open **Application Maintenance >
 Reload Performance** to inspect the latest result. The same report is written as
 structured `details` in the standard Windows application log at
-`logs/hikari-studio.jsonl`.
+`logs/slide-studio.jsonl`.
 
 The report separates Python project reads, Python JSON serialization, Qt WebEngine
 bridge transfer, frontend JSON parsing, recovery/history loading, React commit,

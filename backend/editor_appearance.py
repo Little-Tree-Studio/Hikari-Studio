@@ -10,11 +10,11 @@ from typing import Any
 
 LOGGER = logging.getLogger(__name__)
 
-THEME_IDS = {"hikari-light", "graphite", "sakura-studio", "high-contrast"}
+THEME_IDS = {"slide-light", "graphite", "sakura-studio", "high-contrast"}
 DEFAULT_EDITOR_APPEARANCE: dict[str, Any] = {
     "version": 1,
     "mode": "system",
-    "themeId": "hikari-light",
+    "themeId": "slide-light",
     "motion": "system",
 }
 

@@ -1,4 +1,4 @@
-const DATABASE_NAME = 'hikari-studio';
+const DATABASE_NAME = 'slide-studio';
 const STORE_NAME = 'large-values';
 const DATABASE_VERSION = 1;
 
@@ -15,7 +15,7 @@ function currentDesktopApi() {
 async function waitForDesktopStorageApi() {
   const current = currentDesktopApi();
   if (typeof current?.read_runtime_value === 'function') return current;
-  if (window.__HIKARI_DESKTOP__ !== true) return undefined;
+  if (window.__SLIDE_DESKTOP__ !== true) return undefined;
   return new Promise<ReturnType<typeof currentDesktopApi>>((resolve) => {
     let settled = false;
     const finish = () => {
@@ -95,7 +95,7 @@ export async function readLargeValue(key: string): Promise<string | null> {
 
 export async function writeLargeValue(key: string, value: string): Promise<void> {
   const desktopApi = await waitForDesktopStorageApi();
-  if (window.__HIKARI_DESKTOP__ === true) {
+  if (window.__SLIDE_DESKTOP__ === true) {
     if (!desktopApi) throw new Error('桌面存储服务尚未就绪，请稍后重试');
     const persisted = await desktopApi.write_runtime_value(key, value);
     if (!persisted) throw new Error('桌面存储服务未能写入数据');

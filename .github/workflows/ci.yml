@@ -17,7 +17,7 @@ jobs:
         working-directory: services/crash-collector
       - run: go vet ./...
         working-directory: services/crash-collector
-      - run: docker build -t hikari-crash-collector:test .
+      - run: docker build -t slide-crash-collector:test .
         working-directory: services/crash-collector
   verify:
     runs-on: windows-latest
@@ -57,24 +57,24 @@ jobs:
         working-directory: frontend
       - run: pnpm run build
         working-directory: frontend
-      - run: dotnet publish launcher/Hikari.GameLauncher/Hikari.GameLauncher.csproj --configuration Release --runtime win-x64 --self-contained true -p:DebugType=None -p:DebugSymbols=false -p:HikariBrowserMode=system --output launcher/dist/win-x64/system
-      - run: dotnet publish launcher/Hikari.GameLauncher/Hikari.GameLauncher.csproj --configuration Release --runtime win-x64 --self-contained true -p:DebugType=None -p:DebugSymbols=false -p:HikariBrowserMode=cefsharp --output launcher/dist/win-x64/cefsharp
+      - run: dotnet publish launcher/Slide.GameLauncher/Slide.GameLauncher.csproj --configuration Release --runtime win-x64 --self-contained true -p:DebugType=None -p:DebugSymbols=false -p:SlideBrowserMode=system --output launcher/dist/win-x64/system
+      - run: dotnet publish launcher/Slide.GameLauncher/Slide.GameLauncher.csproj --configuration Release --runtime win-x64 --self-contained true -p:DebugType=None -p:DebugSymbols=false -p:SlideBrowserMode=cefsharp --output launcher/dist/win-x64/cefsharp
       - uses: actions/cache@v4
         with:
-          path: ${{ runner.temp }}\HikariStudioNuitkaCache
+          path: ${{ runner.temp }}\SlideStudioNuitkaCache
           key: nuitka-${{ runner.os }}-${{ hashFiles('uv.lock', 'scripts/build-editor.ps1') }}
       - run: powershell -ExecutionPolicy Bypass -File scripts/build-editor.ps1 -SkipInstall -SkipLauncher
         env:
-          HIKARI_NUITKA_CACHE: ${{ runner.temp }}\HikariStudioNuitkaCache
+          SLIDE_NUITKA_CACHE: ${{ runner.temp }}\SlideStudioNuitkaCache
       - run: choco install innosetup --no-progress -y
       - run: powershell -ExecutionPolicy Bypass -File scripts/build-installer.ps1 -SkipEditor
       - uses: actions/upload-artifact@v4
         with:
-          name: HikariStudio-windows-preview
-          path: dist/HikariStudio/
+          name: SlideStudio-windows-preview
+          path: dist/SlideStudio/
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
-          name: HikariStudio-windows-installer
-          path: dist/installer/Hikari-Studio-Setup-*.exe
+          name: SlideStudio-windows-installer
+          path: dist/installer/Slide-Studio-Setup-*.exe
           if-no-files-found: error

@@ -197,7 +197,7 @@ class QtWebHost:
         application: QApplication,
         *,
         parent: "QtWebHost | None" = None,
-        title: str = "Hikari Studio",
+        title: str = "Slide Studio",
         rpc_server: Any = None,
     ) -> None:
         self.application = application
@@ -207,6 +207,8 @@ class QtWebHost:
         self.rpc_server = rpc_server
         self.window = QtMainWindow()
         self.window.setWindowTitle(title)
+        if not application.windowIcon().isNull():
+            self.window.setWindowIcon(application.windowIcon())
         self.window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         # Use the native Windows titlebar so DWM owns dragging, resizing,
         # maximize bounds, system buttons, and Win11 rounded corners.
@@ -221,11 +223,11 @@ class QtWebHost:
             self.interceptor = RpcRequestInterceptor(rpc_server)
             self.page.profile().setUrlRequestInterceptor(self.interceptor)
             script = QWebEngineScript()
-            script.setName("hikari-rpc-config")
+            script.setName("slide-rpc-config")
             script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
             script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
             script.setSourceCode(
-                "window.__HIKARI_RPC__ = "
+                "window.__SLIDE_RPC__ = "
                 f"{{baseUrl: {json.dumps(rpc_server.base_url)}, "
                 f"token: {json.dumps(rpc_server.token)}}};"
             )
@@ -250,7 +252,7 @@ class QtWebHost:
             None,
             self.application,
             parent=self,
-            title="Hikari Studio Preview",
+            title="Slide Studio Preview",
             rpc_server=self.rpc_server,
         )
         self.children.append(popup)

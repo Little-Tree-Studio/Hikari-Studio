@@ -1,4 +1,4 @@
-module hikari-studio/crash-collector
+module slide-studio/crash-collector
 
 go 1.26
 

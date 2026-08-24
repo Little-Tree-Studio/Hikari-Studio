@@ -89,7 +89,7 @@ export function runEngineSelfTest() {
   assert(!portraitlessState.stage.characters.hero.assetId, 'portraitless placeholders should not invent an asset reference');
   const referenceProject = structuredClone(project);
   referenceProject.characters[0].overlays = [{ id: 'overlay', name: 'Overlay', assetId: 'missing-overlay', opacity: 1, layer: 1 }];
-  referenceProject.ui = { theme: 'hikari-light', dialogueStyle: 'glass', title: { backgroundAssetId: 'missing-title', logoAssetId: 'hero-smile' } };
+  referenceProject.ui = { theme: 'slide-light', dialogueStyle: 'glass', title: { backgroundAssetId: 'missing-title', logoAssetId: 'hero-smile' } };
   const referenceReport = analyzeAssetReferences(referenceProject);
   assert(referenceReport.missing.some((item) => item.assetId === 'missing-overlay'), 'character overlay assets should participate in missing-reference diagnostics');
   assert(referenceReport.missing.some((item) => item.assetId === 'missing-title'), 'game UI images should participate in missing-reference diagnostics');

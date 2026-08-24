@@ -11,7 +11,7 @@ test('runtime settings and desktop maintenance keep separate application routes'
   await page.getByRole('button', { name: '取消' }).click();
 
   await moduleActions.getByRole('button', { name: '应用维护' }).click();
-  await expect(page.getByRole('dialog', { name: 'Hikari Studio 维护中心' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Slide Studio 维护中心' })).toBeVisible();
   await expect(page.getByRole('button', { name: '软件更新' })).toBeVisible();
   await page.getByRole('button', { name: '重载性能' }).click();
   await expect(page.getByText('暂无完整重载报告')).toBeVisible();

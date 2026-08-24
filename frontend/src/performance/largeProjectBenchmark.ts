@@ -146,7 +146,7 @@ export function createLargeProjectBenchmarkFixture(): Project {
 
   return {
     version: 3,
-    meta: { id: 'large-project-benchmark', name: 'Large Project Benchmark', author: 'Hikari Studio', resolution: [1920, 1080], updatedAt: '2026-08-02T00:00:00.000Z' },
+    meta: { id: 'large-project-benchmark', name: 'Large Project Benchmark', author: 'Slide Studio', resolution: [1920, 1080], updatedAt: '2026-08-02T00:00:00.000Z' },
     characters: [{ id: 'benchmark-hero', name: 'Benchmark Hero', color: '#d65b4a', expressions: ['default', 'smile'], portraits: { default: 'asset-0', smile: 'asset-1' }, defaultPosition: 'center', defaultScale: 1, defaultLayer: 1 }],
     scenes: Array.from({ length: 100 }, (_, index) => ({ id: `scene-${index}`, name: `Scene ${index}`, layers: [{ id: `scene-layer-${index}`, name: 'Background', assetId: `asset-${index}`, opacity: 1, blendMode: 'normal' as const, offsetX: 0, offsetY: 0, scale: 1, distance: 1 }] })),
     chapters,
@@ -158,7 +158,7 @@ export function createLargeProjectBenchmarkFixture(): Project {
     variableDefinitions,
     settings: { textSpeed: 35, autoSave: true, skipRead: true, editorSession: { openFragmentIds: ['fragment-0'], selectedBlockByFragment: { 'fragment-0': 5 }, scrollTopByFragment: { 'fragment-0': 0 }, inspectorDock: 'preview', scriptView: 'cards' } },
     locale: { default: 'zh-CN', languages: ['zh-CN'] },
-    ui: { theme: 'hikari-light', dialogueStyle: 'glass' },
+    ui: { theme: 'slide-light', dialogueStyle: 'glass' },
   };
 }
 

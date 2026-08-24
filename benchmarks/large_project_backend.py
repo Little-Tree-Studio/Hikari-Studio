@@ -86,7 +86,7 @@ def create_large_project() -> dict[str, Any]:
     variables = {f"flag-{index}": 0 for index in range(50)}
     return {
         "version": 3,
-        "meta": {"id": "large-project-benchmark", "name": "Large Project Benchmark", "author": "Hikari Studio", "resolution": [1920, 1080], "updatedAt": "2026-08-02T00:00:00.000Z"},
+        "meta": {"id": "large-project-benchmark", "name": "Large Project Benchmark", "author": "Slide Studio", "resolution": [1920, 1080], "updatedAt": "2026-08-02T00:00:00.000Z"},
         "characters": [{"id": "benchmark-hero", "name": "Benchmark Hero", "color": "#d65b4a", "expressions": ["default", "smile"], "portraits": {"default": "asset-0", "smile": "asset-1"}}],
         "scenes": [{"id": f"scene-{index}", "name": f"Scene {index}", "layers": [{"id": f"scene-layer-{index}", "name": "Background", "assetId": f"asset-{index}", "opacity": 1, "blendMode": "normal", "offsetX": 0, "offsetY": 0, "scale": 1, "distance": 1}]} for index in range(100)],
         "sceneGroups": [],
@@ -99,7 +99,7 @@ def create_large_project() -> dict[str, Any]:
         "variableDefinitions": {name: {"type": "number", "scope": "project", "persistence": "slot"} for name in variables},
         "settings": {"textSpeed": 35, "autoSave": True, "skipRead": True, "editorSession": {"openFragmentIds": ["fragment-0"], "selectedBlockByFragment": {"fragment-0": 5}, "scrollTopByFragment": {"fragment-0": 0}, "inspectorDock": "preview", "scriptView": "cards"}},
         "locale": {"default": "zh-CN", "languages": ["zh-CN"]},
-        "ui": {"theme": "hikari-light", "dialogueStyle": "glass"},
+        "ui": {"theme": "slide-light", "dialogueStyle": "glass"},
     }
 
 
@@ -119,7 +119,7 @@ def _directory_bytes(path: Path) -> int:
 
 def run_backend_benchmark() -> dict[str, Any]:
     project = create_large_project()
-    with tempfile.TemporaryDirectory(prefix="hikari-large-project-") as directory:
+    with tempfile.TemporaryDirectory(prefix="slide-large-project-") as directory:
         root = Path(directory)
         store = ProjectStore(root / "data", root / "state")
         started = time.perf_counter()
@@ -150,7 +150,7 @@ def run_backend_benchmark() -> dict[str, Any]:
 
 def main() -> int:
     report = run_backend_benchmark()
-    print("HIKARI_DESKTOP_LARGE_PROJECT_BENCHMARK=" + json.dumps(report, ensure_ascii=False))
+    print("SLIDE_DESKTOP_LARGE_PROJECT_BENCHMARK=" + json.dumps(report, ensure_ascii=False))
     if report["shape"] != PROFILE:
         print(f"Unexpected benchmark shape: {report['shape']}")
         return 1

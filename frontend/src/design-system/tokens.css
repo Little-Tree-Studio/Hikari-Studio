@@ -18,7 +18,7 @@
   --motion-ease: cubic-bezier(.2, .8, .2, 1);
 }
 
-html[data-editor-theme="hikari-light"] {
+html[data-editor-theme="slide-light"] {
   --bg: #eef2f4;
   --panel: #ffffff;
   --panel-2: #f6f8f9;

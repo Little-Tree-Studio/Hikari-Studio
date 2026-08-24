@@ -7,12 +7,12 @@ import { Preview } from './Preview';
 export function StandalonePreviewApp() {
   const [project, setProject] = useState<Project | null>();
   useEffect(() => {
-    void readLargeValue('hikari-preview-project')
+    void readLargeValue('slide-preview-project')
       .then((encoded) => setProject(encoded ? JSON.parse(encoded) as Project : null))
       .catch(() => setProject(null));
   }, []);
   if (project === undefined) return <div className="preview-load-error"><LoaderCircle className="spinning" /><strong>正在载入预览</strong><span>正在读取本地项目数据…</span></div>;
-  if (!project) return <div className="preview-load-error"><TriangleAlert /><strong>无法载入预览</strong><span>请从 Hikari Studio 编辑器重新打开独立预览。</span></div>;
+  if (!project) return <div className="preview-load-error"><TriangleAlert /><strong>无法载入预览</strong><span>请从 Slide Studio 编辑器重新打开独立预览。</span></div>;
   const parameters = new URLSearchParams(window.location.search);
   const fragmentId = parameters.get('fragment');
   const language = parameters.get('lang') ?? undefined;

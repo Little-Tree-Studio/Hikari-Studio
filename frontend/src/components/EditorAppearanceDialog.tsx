@@ -28,6 +28,6 @@ export function EditorAppearanceDialog({ open, close, openGameTheme }: Props) {
       <section className="appearance-section appearance-options"><header><div><strong>界面动效</strong><small>拖拽、画布缩放和连续输入始终保持即时响应</small></div></header><div className="appearance-segmented">{([['system', MonitorCog, '跟随系统'], ['full', Sparkles, '完整动效'], ['reduced', SunMedium, '减少动效']] as const).map(([value, Icon, label]) => <button type="button" key={value} className={draft.motion === value ? 'active' : ''} onClick={() => setDraft({ ...draft, motion: value })}><Icon />{label}</button>)}</div></section>
       <button className="game-theme-entry" onClick={() => { close(); openGameTheme(); }}><Gamepad2 /><span><strong>游戏 UI 主题</strong><small>配置玩家看到的对白、菜单和存档界面</small></span><span>打开编辑器</span></button>
     </div>
-    <footer className="modal-footer"><span className="appearance-footnote">主题切换无需重启 Hikari Studio</span><button className="button ghost" onClick={close}>取消</button><button className="button primary" disabled={saving} onClick={() => void apply()}><Check />{saving ? '保存中...' : '应用外观'}</button></footer>
+    <footer className="modal-footer"><span className="appearance-footnote">主题切换无需重启 Slide Studio</span><button className="button ghost" onClick={close}>取消</button><button className="button primary" disabled={saving} onClick={() => void apply()}><Check />{saving ? '保存中...' : '应用外观'}</button></footer>
   </AnimatedModal>;
 }

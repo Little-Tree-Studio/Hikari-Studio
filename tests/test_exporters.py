@@ -36,13 +36,13 @@ class ExporterTests(unittest.TestCase):
             builtin.mkdir()
             (builtin / "lake.jpg").write_bytes(b"lake")
             (builtin / "mountain.jpg").write_bytes(b"mountain")
-            project_file = root / "game.hikari.json"
+            project_file = root / "game.slide.json"
             project_file.write_text("{}", encoding="utf-8")
             index = build_web_game(default_project(), root / "build", project_file, builtin, runtime_dist=self.runtime(root))
             self.assertTrue(index.exists())
             self.assertTrue((root / "build" / "player.js").exists())
             self.assertIn("engine-core shared runtime", (root / "build" / "player.js").read_text(encoding="utf-8"))
-            self.assertIn("HIKARI_PROJECT", (root / "build" / "project.js").read_text(encoding="utf-8"))
+            self.assertIn("SLIDE_PROJECT", (root / "build" / "project.js").read_text(encoding="utf-8"))
             contract = json.loads((root / "build" / "runtime-contract.json").read_text(encoding="utf-8"))
             self.assertEqual(contract["matrixVersion"], "2026.08.02.1")
             self.assertEqual(len(contract["blockTypes"]), 13)
@@ -60,7 +60,7 @@ class ExporterTests(unittest.TestCase):
             (builtin / "mountain.jpg").write_bytes(b"mountain")
             project = default_project()
             next(asset for asset in project["assets"] if asset["id"] == "mountain")["forceBundle"] = True
-            project_file = root / "game.hikari.json"
+            project_file = root / "game.slide.json"
             project_file.write_text("{}", encoding="utf-8")
             build_web_game(project, root / "build", project_file, builtin, runtime_dist=self.runtime(root))
             self.assertTrue((root / "build" / "assets" / "mountain.jpg").exists())
@@ -73,8 +73,8 @@ class ExporterTests(unittest.TestCase):
             (builtin / "lake.jpg").write_bytes(b"lake")
             (builtin / "mountain.jpg").write_bytes(b"mountain")
             project = default_project()
-            project["ui"] = {"theme": "hikari-light", "dialogueStyle": "glass", "title": {"backgroundAssetId": "mountain", "logoAssetId": "mountain"}}
-            project_file = root / "game.hikari.json"
+            project["ui"] = {"theme": "slide-light", "dialogueStyle": "glass", "title": {"backgroundAssetId": "mountain", "logoAssetId": "mountain"}}
+            project_file = root / "game.slide.json"
             project_file.write_text("{}", encoding="utf-8")
             build_web_game(project, root / "build", project_file, builtin, runtime_dist=self.runtime(root))
             self.assertTrue((root / "build" / "assets" / "mountain.jpg").exists())
@@ -94,7 +94,7 @@ class ExporterTests(unittest.TestCase):
                 "dialogueHeight": 13,
                 "accentColor": "#8fd8c9",
             }
-            project_file = root / "game.hikari.json"
+            project_file = root / "game.slide.json"
             project_file.write_text("{}", encoding="utf-8")
             build_web_game(project, root / "build", project_file, builtin, runtime_dist=self.runtime(root))
             web_project = (root / "build" / "project.js").read_text(encoding="utf-8")
@@ -114,8 +114,8 @@ class ExporterTests(unittest.TestCase):
             (custom / "dialogue.woff2").write_bytes(b"font")
             project = default_project()
             project["assets"].append({"id": "font-dialogue", "kind": "font", "name": "对白字体", "path": "assets/files/dialogue.woff2"})
-            project["ui"]["runtimeTheme"] = {"preset": "modern", "fontAssetId": "font-dialogue", "fontFamily": '"Hikari Project Font", sans-serif'}
-            project_file = root / "game.hikari.json"
+            project["ui"]["runtimeTheme"] = {"preset": "modern", "fontAssetId": "font-dialogue", "fontFamily": '"Slide Project Font", sans-serif'}
+            project_file = root / "game.slide.json"
             project_file.write_text("{}", encoding="utf-8")
             build_web_game(project, root / "build", project_file, builtin, custom, self.runtime(root))
             self.assertTrue((root / "build" / "assets" / "dialogue.woff2").exists())
@@ -130,7 +130,7 @@ class ExporterTests(unittest.TestCase):
             (builtin / "mountain.jpg").write_bytes(b"mountain")
             project = default_project()
             project["scripts"]["lake-meeting"][0]["layers"] = [{"id": "mist", "name": "雾层", "assetId": "mountain", "opacity": 0.4, "layer": 1}]
-            project_file = root / "game.hikari.json"
+            project_file = root / "game.slide.json"
             project_file.write_text("{}", encoding="utf-8")
             build_web_game(project, root / "build", project_file, builtin, runtime_dist=self.runtime(root))
             self.assertTrue((root / "build" / "assets" / "mountain.jpg").exists())
@@ -145,7 +145,7 @@ class ExporterTests(unittest.TestCase):
             (builtin / "mountain.jpg").write_bytes(b"mountain")
             project = default_project()
             project["characters"][0]["overlays"] = [{"id": "coat", "name": "外套", "assetId": "mountain", "opacity": 1, "layer": 2}]
-            project_file = root / "game.hikari.json"
+            project_file = root / "game.slide.json"
             project_file.write_text("{}", encoding="utf-8")
             build_web_game(project, root / "build", project_file, builtin, runtime_dist=self.runtime(root))
             self.assertTrue((root / "build" / "assets" / "mountain.jpg").exists())
@@ -169,7 +169,7 @@ class ExporterTests(unittest.TestCase):
                 "loopRegion": {"start": 1, "end": 3, "enabled": True},
                 "tracks": [{"id": "scene", "name": "场景", "kind": "scene", "groupId": "visuals", "clips": [{"id": "clip", "name": "远景", "start": 0, "duration": 2, "assetId": "mountain", "keyframes": [{"id": "fade", "time": 0, "property": "opacity", "value": 0, "easing": "linear"}]}]}],
             }
-            project_file = root / "game.hikari.json"
+            project_file = root / "game.slide.json"
             project_file.write_text("{}", encoding="utf-8")
             build_web_game(project, root / "build", project_file, builtin, runtime_dist=self.runtime(root))
             web_project = (root / "build" / "project.js").read_text(encoding="utf-8")
@@ -191,7 +191,7 @@ class ExporterTests(unittest.TestCase):
             project["assets"].append({"id": "voice-001", "kind": "audio", "name": "cv-001", "path": "cv-001.ogg", "audioCategory": "voice"})
             dialogue = next(block for block in project["scripts"]["lake-meeting"] if block["type"] == "dialogue")
             dialogue["voice"] = "voice-001"
-            project_file = root / "game.hikari.json"
+            project_file = root / "game.slide.json"
             project_file.write_text("{}", encoding="utf-8")
             build_web_game(project, root / "build", project_file, builtin, custom, self.runtime(root))
             self.assertTrue((root / "build" / "assets" / "cv-001.ogg").exists())
@@ -207,7 +207,7 @@ class ExporterTests(unittest.TestCase):
             project = default_project()
             project["chapters"][1]["disabled"] = True
             project["timelines"]["lake-meeting"] = {"version": 1, "fragmentId": "lake-meeting", "duration": 8, "fps": 30, "tracks": []}
-            project_file = root / "game.hikari.json"
+            project_file = root / "game.slide.json"
             project_file.write_text("{}", encoding="utf-8")
             build_web_game(project, root / "build", project_file, builtin, runtime_dist=self.runtime(root))
             web_project = (root / "build" / "project.js").read_text(encoding="utf-8")
@@ -220,7 +220,7 @@ class ExporterTests(unittest.TestCase):
             root = Path(directory)
             builtin = root / "builtin"
             builtin.mkdir()
-            project_file = root / "game.hikari.json"
+            project_file = root / "game.slide.json"
             project_file.write_text("{}", encoding="utf-8")
             with self.assertRaises(FileNotFoundError):
                 build_web_game(default_project(), root / "build", project_file, builtin, runtime_dist=root / "missing-runtime")
@@ -234,7 +234,7 @@ class ExporterTests(unittest.TestCase):
             (builtin / "mountain.jpg").write_bytes(b"mountain")
             project = default_project()
             project["productionMemory"] = {"version": 1, "world": "SECRET_STORY_BIBLE", "characterRules": [], "styleRules": [], "facts": [], "restrictions": [], "updatedAt": ""}
-            project_file = root / "game.hikari.json"
+            project_file = root / "game.slide.json"
             project_file.write_text("{}", encoding="utf-8")
             build_web_game(project, root / "build", project_file, builtin, runtime_dist=self.runtime(root))
             web_project = (root / "build" / "project.js").read_text(encoding="utf-8")

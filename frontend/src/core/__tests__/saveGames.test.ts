@@ -13,7 +13,7 @@ vi.mock('../storage', () => ({
 import { acknowledgeSaveSlotNotice, decodeSaveData, encodeSaveData, listSaveSlots, readSaveSlotWithRecovery, writeSaveSlot } from '../saveGames';
 
 const project = () => testProject({ start: [{ id: 'line', type: 'narration', text: 'hello' }] });
-const key = (slotId: string) => `hikari-save:vitest-project:${slotId}`;
+const key = (slotId: string) => `slide-save:vitest-project:${slotId}`;
 
 describe('save storage recovery', () => {
   beforeEach(() => storage.clear());

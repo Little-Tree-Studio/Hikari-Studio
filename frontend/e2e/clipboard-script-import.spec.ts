@@ -9,7 +9,7 @@ test('clipboard text is parsed by the Python bridge before becoming Blocks', asy
   const nativeDialogs: string[] = [];
   page.on('dialog', async (dialog) => { nativeDialogs.push(dialog.message()); await dialog.dismiss(); });
   await page.addInitScript(() => {
-    localStorage.setItem('hikari-project', JSON.stringify({
+    localStorage.setItem('slide-project', JSON.stringify({
       version: 3,
       meta: { id: 'clipboard-e2e', name: '剪贴板测试', author: '', resolution: [1280, 720], updatedAt: '' },
       characters: [{ id: 'lin', name: '林澄', color: '#397d70', expressions: ['默认', '微笑'], portraits: {}, displayNameSchemes: [{ id: 'shop', name: '店长', kind: 'fixed', value: '店长' }] }],
@@ -24,7 +24,7 @@ test('clipboard text is parsed by the Python bridge before becoming Blocks', asy
   await page.goto('/?editor=1');
   await page.evaluate(() => {
     const calls: Array<{ characters: unknown[]; rules: Record<string, unknown> }> = [];
-    (window as Window & { __HIKARI_CLIPBOARD_CALLS__?: typeof calls }).__HIKARI_CLIPBOARD_CALLS__ = calls;
+    (window as Window & { __SLIDE_CLIPBOARD_CALLS__?: typeof calls }).__SLIDE_CLIPBOARD_CALLS__ = calls;
     const api = {
       load_project_session: async () => ({}),
       preview_clipboard_script: async (_fallback: string, characters: unknown[], rules: Record<string, unknown>) => {
@@ -55,7 +55,7 @@ test('clipboard text is parsed by the Python bridge before becoming Blocks', asy
   await expect(importer.getByText('显示名匹配 · 店长 → 林澄', { exact: true })).toBeVisible();
   await expect(importer.getByText('表情精确匹配 · 微笑', { exact: true })).toBeVisible();
   expect(await page.evaluate(() => {
-    const calls = (window as Window & { __HIKARI_CLIPBOARD_CALLS__?: Array<{ characters: Array<{ name?: string }>; rules: Record<string, unknown> }> }).__HIKARI_CLIPBOARD_CALLS__;
+    const calls = (window as Window & { __SLIDE_CLIPBOARD_CALLS__?: Array<{ characters: Array<{ name?: string }>; rules: Record<string, unknown> }> }).__SLIDE_CLIPBOARD_CALLS__;
     return { character: calls?.[0]?.characters[0]?.name, syntax: calls?.[0]?.rules.expressionSyntax };
   })).toEqual({ character: '林澄', syntax: 'brackets' });
   await importer.getByRole('button', { name: /追加 1 个 Block/ }).click();
@@ -63,13 +63,13 @@ test('clipboard text is parsed by the Python bridge before becoming Blocks', asy
 
   await page.locator('.blocks-area').focus();
   await page.keyboard.press('Control+V');
-  await expect.poll(() => page.evaluate(() => (window as Window & { __HIKARI_CLIPBOARD_CALLS__?: unknown[] }).__HIKARI_CLIPBOARD_CALLS__?.length)).toBe(2);
+  await expect.poll(() => page.evaluate(() => (window as Window & { __SLIDE_CLIPBOARD_CALLS__?: unknown[] }).__SLIDE_CLIPBOARD_CALLS__?.length)).toBe(2);
   expect(nativeDialogs).toEqual([]);
 });
 
 test('import preview supports row correction and grouped character and expression mapping', async ({ page }) => {
   await page.addInitScript(() => {
-    localStorage.setItem('hikari-project', JSON.stringify({
+    localStorage.setItem('slide-project', JSON.stringify({
       version: 3,
       meta: { id: 'import-resolver-e2e', name: '映射测试', author: '', resolution: [1280, 720], updatedAt: '' },
       characters: [{ id: 'lin', name: '林澄', color: '#397d70', expressions: ['默认', '微笑'], portraits: {} }],

@@ -175,7 +175,7 @@ export function CharacterManager({ project, commit, notify, requestText, request
   };
   const chooseImages = async (mode: 'new' | 'expressions') => {
     fileModeRef.current = mode;
-    if (!window.__HIKARI_DESKTOP__) { fileInputRef.current?.click(); return; }
+    if (!window.__SLIDE_DESKTOP__) { fileInputRef.current?.click(); return; }
     try { const assets = await importAssets(); if (mode === 'new') openBatchDraft(assets); else addPortraitsToSelected(assets); } catch (error) { notify(String(error), 'error'); }
   };
   const handleFiles = async (files: FileList | File[], mode: 'new' | 'expressions') => {

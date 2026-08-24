@@ -1,5 +1,5 @@
 (() => {
-  const config = window.__HIKARI_RPC__;
+  const config = window.__SLIDE_RPC__;
   if (!config?.baseUrl || !config?.token) return;
 
   const pending = new Map();
@@ -41,7 +41,7 @@
     },
   });
 
-  window.__HIKARI_DESKTOP__ = true;
+  window.__SLIDE_DESKTOP__ = true;
   window.pywebview = { api };
   window.dispatchEvent(new Event('pywebviewready'));
 })();

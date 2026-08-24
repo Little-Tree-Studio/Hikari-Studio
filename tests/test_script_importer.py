@@ -15,7 +15,7 @@ class ScriptImporterTests(unittest.TestCase):
             self.assertEqual(preview["format"], "Markdown")
             self.assertEqual([block["type"] for block in preview["blocks"]], ["narration", "scene", "dialogue", "narration"])
 
-    def test_hikari_project_json_uses_active_fragment(self) -> None:
+    def test_slide_project_json_uses_active_fragment(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "project.json"
             path.write_text(json.dumps({"activeFragmentId": "start", "scripts": {"start": [{"id": "old", "type": "narration", "text": "开始"}]}}), encoding="utf-8")
@@ -37,9 +37,9 @@ class ScriptImporterTests(unittest.TestCase):
         self.assertEqual([block["type"] for block in preview["blocks"]], ["dialogue", "narration"])
         self.assertEqual(preview["blocks"][0]["speaker"], "林澄")
 
-    def test_clipboard_hikari_blocks_are_validated_and_receive_new_ids(self) -> None:
-        preview = preview_script_text('HIKARI_BLOCKS_V1\n[{"id":"old","type":"narration","text":"测试"}]')
-        self.assertEqual(preview["format"], "Hikari JSON")
+    def test_clipboard_slide_blocks_are_validated_and_receive_new_ids(self) -> None:
+        preview = preview_script_text('SLIDE_BLOCKS_V1\n[{"id":"old","type":"narration","text":"测试"}]')
+        self.assertEqual(preview["format"], "Slide JSON")
         self.assertEqual(preview["blocks"][0]["text"], "测试")
         self.assertNotEqual(preview["blocks"][0]["id"], "old")
 

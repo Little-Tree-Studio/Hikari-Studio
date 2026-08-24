@@ -26,15 +26,15 @@ test('measured Block rows share one ResizeObserver instance', async ({ page }) =
       disconnect() { this.native.disconnect(); }
     }
     window.ResizeObserver = TrackingResizeObserver as unknown as typeof ResizeObserver;
-    (window as unknown as { __HIKARI_RESIZE_OBSERVER_STATS__: typeof stats }).__HIKARI_RESIZE_OBSERVER_STATS__ = stats;
+    (window as unknown as { __SLIDE_RESIZE_OBSERVER_STATS__: typeof stats }).__SLIDE_RESIZE_OBSERVER_STATS__ = stats;
   });
   await page.goto('/?editor=1');
   await expect(page.locator('.save-state')).toContainText('已保存');
   await expect(page.locator('.virtual-block-row').first()).toBeVisible();
 
   const stats = await page.evaluate(() => (
-    window as unknown as { __HIKARI_RESIZE_OBSERVER_STATS__: { rowObserverIds: number[]; containerObserverIds: number[] } }
-  ).__HIKARI_RESIZE_OBSERVER_STATS__);
+    window as unknown as { __SLIDE_RESIZE_OBSERVER_STATS__: { rowObserverIds: number[]; containerObserverIds: number[] } }
+  ).__SLIDE_RESIZE_OBSERVER_STATS__);
   expect(stats.rowObserverIds).toHaveLength(1);
   expect(stats.containerObserverIds).toEqual(stats.rowObserverIds);
 });
@@ -191,7 +191,7 @@ test('chapter tree mounts only visible rows and can reach a distant Fragment', a
   await page.evaluate((count) => {
     const fragments = Array.from({ length: count }, (_, index) => ({ id: `virtual-fragment-${index}`, name: `Virtual Fragment ${index}` }));
     const scripts = Object.fromEntries(fragments.map((fragment) => [fragment.id, []]));
-    localStorage.setItem('hikari-structure-clipboard', `HIKARI_STRUCTURE_V1\n${JSON.stringify({ kind: 'chapter', chapter: { id: 'virtual-chapter', name: 'Virtual Chapter', fragments }, scripts, timelines: {} })}`);
+    localStorage.setItem('slide-structure-clipboard', `SLIDE_STRUCTURE_V1\n${JSON.stringify({ kind: 'chapter', chapter: { id: 'virtual-chapter', name: 'Virtual Chapter', fragments }, scripts, timelines: {} })}`);
   }, fragmentCount);
 
   await page.locator('.chapter-row').nth(1).click({ button: 'right' });
@@ -211,7 +211,7 @@ test('card and plain Block views virtualize measured rows across selection bound
   const insertedBlocks = 250;
   await page.evaluate((count) => {
     const blocks = Array.from({ length: count }, (_, index) => ({ id: `clipboard-block-${index}`, type: 'narration', text: `Virtualized narration ${index}` }));
-    localStorage.setItem('hikari-block-clipboard', `HIKARI_BLOCKS_V1\n${JSON.stringify(blocks)}`);
+    localStorage.setItem('slide-block-clipboard', `SLIDE_BLOCKS_V1\n${JSON.stringify(blocks)}`);
   }, insertedBlocks);
   await page.locator('.blocks-area').focus();
   await page.keyboard.press('Control+V');

@@ -11,7 +11,7 @@ from typing import Any, Callable
 
 
 class SingleInstance:
-    def __init__(self, state_dir: Path, on_message: Callable[[dict[str, Any]], None], app_id: str = "HikariStudio") -> None:
+    def __init__(self, state_dir: Path, on_message: Callable[[dict[str, Any]], None], app_id: str = "SlideStudio") -> None:
         self.state_dir = state_dir
         self.on_message = on_message
         self.app_id = app_id
@@ -49,7 +49,7 @@ class SingleInstance:
             self._lock_file = None
             raise
         self._socket = listener
-        self._thread = threading.Thread(target=self._serve, name="hikari-single-instance", daemon=True)
+        self._thread = threading.Thread(target=self._serve, name="slide-single-instance", daemon=True)
         self._thread.start()
         return True
 

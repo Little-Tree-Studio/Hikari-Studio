@@ -47,7 +47,7 @@ func settingsFromEnv() (settings, error) {
 	}
 	result.s3Bucket = os.Getenv("S3_BUCKET")
 	if result.s3Bucket == "" {
-		result.s3Bucket = "hikari-crash-reports"
+		result.s3Bucket = "slide-crash-reports"
 	}
 	result.s3SSE = os.Getenv("S3_SERVER_SIDE_ENCRYPTION")
 	if result.s3SSE == "" {

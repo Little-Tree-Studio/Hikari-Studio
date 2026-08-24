@@ -58,7 +58,7 @@ class DesktopApiTests(unittest.TestCase):
             }
             result = api.save_command_history(history)
             self.assertTrue(result["ok"])
-            self.assertIn(str(Path(".hikari") / "history" / "commands.json"), result["path"])
+            self.assertIn(str(Path(".slide") / "history" / "commands.json"), result["path"])
             self.assertEqual(json.loads(json.dumps(api.load_command_history(), ensure_ascii=False)), history)
             stats = api.load_command_history_stats()
             self.assertEqual(stats["version"], 1)
@@ -211,7 +211,7 @@ class DesktopApiTests(unittest.TestCase):
             copy_root = root / "copied-project"
             shutil.copytree(original_path.parent, copy_root)
 
-            copied_session = api.open_project_path_session(str(copy_root / "project.hikari.json"))
+            copied_session = api.open_project_path_session(str(copy_root / "project.slide.json"))
             self.assertEqual(copied_session["project"]["meta"]["id"], original_session["project"]["meta"]["id"])
             with self.assertRaisesRegex(ValueError, "Project session changed"):
                 api.save_project(
@@ -236,11 +236,11 @@ class DesktopApiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             first = DesktopApi(ProjectStore(root / "data"), root)
-            self.assertTrue(first.write_runtime_value("hikari-save:test:quick", '{"op":4}'))
+            self.assertTrue(first.write_runtime_value("slide-save:test:quick", '{"op":4}'))
             second = DesktopApi(ProjectStore(root / "data"), root)
-            self.assertEqual(second.read_runtime_value("hikari-save:test:quick"), '{"op":4}')
-            self.assertTrue(second.delete_runtime_value("hikari-save:test:quick"))
-            self.assertIsNone(first.read_runtime_value("hikari-save:test:quick"))
+            self.assertEqual(second.read_runtime_value("slide-save:test:quick"), '{"op":4}')
+            self.assertTrue(second.delete_runtime_value("slide-save:test:quick"))
+            self.assertIsNone(first.read_runtime_value("slide-save:test:quick"))
 
     def test_recent_projects_can_be_opened_and_pinned(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -265,14 +265,14 @@ class DesktopApiTests(unittest.TestCase):
                 "name": "夜航",
                 "projectDirectory": str(target),
                 "resolution": [1920, 1080],
-                "author": "Hikari Team",
+                "author": "Slide Team",
                 "description": "一段夜间航行的故事",
                 "windowTitle": "夜航 - Demo",
                 "backgroundColor": "#112233",
             })
             project = session["project"]
-            self.assertEqual(Path(session["projectPath"]).resolve(), (target / "project.hikari.json").resolve())
-            self.assertTrue((target / "project.hikari.json").is_file())
+            self.assertEqual(Path(session["projectPath"]).resolve(), (target / "project.slide.json").resolve())
+            self.assertTrue((target / "project.slide.json").is_file())
             self.assertEqual(project["meta"]["resolution"], [1920, 1080])
             self.assertEqual(project["meta"]["windowTitle"], "夜航 - Demo")
             self.assertEqual(project["ui"]["title"]["backgroundColor"], "#112233")
@@ -333,7 +333,7 @@ class DesktopApiTests(unittest.TestCase):
                 retry = api.retry_ai_task_operations(started["id"], [0], project)
                 self.assertEqual(retry["parentTaskId"], started["id"])
                 self.assertEqual(retry["remainingOperationIndexes"], [0])
-                session = api._store.project_root / ".hikari" / "agent" / "sessions" / f"{started['id']}.json"
+                session = api._store.project_root / ".slide" / "agent" / "sessions" / f"{started['id']}.json"
                 self.assertTrue(session.exists())
             api.stop_background_services()
 

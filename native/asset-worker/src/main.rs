@@ -441,7 +441,7 @@ fn run() -> Result<(), String> {
     let mut args = env::args().skip(1);
     let command = args.next();
     if args.next().is_some() {
-        return Err("usage: hikari-asset-worker <scan|inspect>".to_owned());
+        return Err("usage: slide-asset-worker <scan|inspect>".to_owned());
     }
     let response = match command.as_deref() {
         Some("scan") => {
@@ -454,7 +454,7 @@ fn run() -> Result<(), String> {
                 .map_err(|error| format!("invalid inspect request: {error}"))?;
             inspect(request)?
         }
-        _ => return Err("usage: hikari-asset-worker <scan|inspect>".to_owned()),
+        _ => return Err("usage: slide-asset-worker <scan|inspect>".to_owned()),
     };
     serde_json::to_writer(io::stdout().lock(), &response)
         .map_err(|error| format!("failed to write worker response: {error}"))?;
@@ -480,7 +480,7 @@ mod tests {
 
     fn test_directory(name: &str) -> PathBuf {
         let path = env::temp_dir().join(format!(
-            "hikari-asset-worker-{name}-{}-{}",
+            "slide-asset-worker-{name}-{}-{}",
             std::process::id(),
             TEST_SEQUENCE.fetch_add(1, Ordering::Relaxed)
         ));
@@ -500,12 +500,12 @@ mod tests {
     fn hashes_known_content() {
         let root = test_directory("hash");
         let path = root.join("fixture.txt");
-        fs::write(&path, b"hikari").expect("write fixture");
+        fs::write(&path, b"slide").expect("write fixture");
         let result = sha256(&path).expect("hash fixture");
         fs::remove_dir_all(root).expect("remove fixture");
         assert_eq!(
             result,
-            "720e8c5da0dafa670f09d4be23ec8484491a6a7763103079a4d2e98500dfef84"
+            "b8a7e24e95497806eafbe1b4a897b70ecf6e57f4bfca8c770091e1f075304006"
         );
     }
 

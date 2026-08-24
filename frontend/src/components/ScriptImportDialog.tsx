@@ -4,7 +4,7 @@ import { Checkbox } from './ui/Checkbox';
 import { Select } from './ui/Select';
 import type { Character, ScriptImportMatch, ScriptImportPreview, ScriptImportRules, StoryBlock } from '../types';
 
-const RULES_STORAGE_KEY = 'hikari-script-import-rules';
+const RULES_STORAGE_KEY = 'slide-script-import-rules';
 export const DEFAULT_SCRIPT_IMPORT_RULES: ScriptImportRules = {
   dialogueSeparator: 'auto',
   expressionSyntax: 'auto',
@@ -172,7 +172,7 @@ export function ScriptImportDialog({ open, busy, preview, characters, close, sel
       <label className="script-rule-check"><Checkbox checked={rules.mergeNarrationLines} onChange={(checked) => updateRule('mergeNarrationLines', checked)} /><span>合并连续旁白<small>相邻旁白行合并到同一个 Block</small></span></label>
       {preview && <p><TriangleAlert />规则修改后，请点击“重新粘贴”或重新选择文件以刷新预览。</p>}
     </section>}
-    {!preview ? <div className="import-picker"><FileText /><strong>TXT、Markdown、Hikari JSON 或剪贴板文本</strong><span>Python 会结合项目角色和上述规则生成 Block，确认前不会修改项目。</span><div className="import-picker-actions"><button className="button primary" disabled={busy} onClick={() => selectFile(rules)}>{busy ? <LoaderCircle className="spin" /> : <FileUp />}{busy ? '正在解析' : '选择剧本文件'}</button><button className="button ghost" disabled={busy} onClick={() => pasteText(rules)}><ClipboardPaste />粘贴文本</button></div></div> : <>
+    {!preview ? <div className="import-picker"><FileText /><strong>TXT、Markdown、Slide JSON 或剪贴板文本</strong><span>Python 会结合项目角色和上述规则生成 Block，确认前不会修改项目。</span><div className="import-picker-actions"><button className="button primary" disabled={busy} onClick={() => selectFile(rules)}>{busy ? <LoaderCircle className="spin" /> : <FileUp />}{busy ? '正在解析' : '选择剧本文件'}</button><button className="button ghost" disabled={busy} onClick={() => pasteText(rules)}><ClipboardPaste />粘贴文本</button></div></div> : <>
       <div className="import-summary"><span><strong>{preview.sourceName}</strong><small>{preview.format} · {preview.blocks.length} Blocks</small></span>{matches.length > 0 && <div className="script-match-summary"><span className="success"><CheckCircle2 />{matchedCharacters} 个角色已匹配</span>{unmatchedCharacters > 0 && <span className="warning"><TriangleAlert />{unmatchedCharacters} 个未匹配</span>}{fallbackExpressions > 0 && <span className="warning"><Smile />{fallbackExpressions} 个表情需检查</span>}</div>}<button className="button ghost" disabled={busy} onClick={() => pasteText(rules)}><ClipboardPaste />重新粘贴</button><button className="button ghost" disabled={busy} onClick={() => selectFile(rules)}><FileUp />选择文件</button></div>
       {(unmatchedGroups.length > 0 || expressionGroups.length > 0) && <section className="script-import-resolver" aria-label="批量映射">
         <div className="script-resolver-heading"><span><strong>批量解决匹配问题</strong><small>同一来源的修正会应用到所有相关行</small></span><span>{unmatchedCharacters + fallbackExpressions} 项待处理</span></div>

@@ -1,7 +1,7 @@
 [project]
-name = "hikari-studio"
+name = "slide-studio"
 version = "0.4.0-beta.1"
-description = "Hikari Studio Visual Novel Editor"
+description = "Slide Studio Visual Novel Editor"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [

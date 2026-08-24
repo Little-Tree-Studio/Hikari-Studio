@@ -41,7 +41,7 @@ if ($LASTEXITCODE -ne 0 -or $PythonVersionParts.Count -ne 2) {
 if ([int]$PythonVersionParts[0] -ne 3 -or [int]$PythonVersionParts[1] -ge 14) {
   throw "Nuitka desktop builds require Python 3.12 or 3.13; found Python $PythonVersion. Pass -Python with a supported interpreter."
 }
-Write-Host "Hikari Studio build Python: $PythonVersion"
+Write-Host "Slide Studio build Python: $PythonVersion"
 
 & $Python -c "import sys; raise SystemExit(0 if str(sys.base_prefix).isascii() else 86)"
 $PythonPathCheck = $LASTEXITCODE
@@ -80,11 +80,11 @@ foreach ($FrontendOutput in @((Join-Path $FrontendRoot 'dist'), (Join-Path $Fron
 Push-Location frontend
 try { pnpm run build } finally { Pop-Location }
 
-cargo build --release --locked --package hikari-asset-worker
+cargo build --release --locked --package slide-asset-worker
 if ($LASTEXITCODE -ne 0) {
   throw "Rust asset worker build failed with exit code $LASTEXITCODE"
 }
-$AssetWorker = Join-Path $Root 'target\release\hikari-asset-worker.exe'
+$AssetWorker = Join-Path $Root 'target\release\slide-asset-worker.exe'
 if (-not (Test-Path $AssetWorker)) {
   throw "Rust asset worker build completed without producing $AssetWorker"
 }
@@ -96,19 +96,19 @@ if (-not $SkipLauncher) {
   }
   foreach ($BrowserMode in @('system', 'cefsharp')) {
     $LauncherOutput = "launcher/dist/win-x64/$BrowserMode"
-    dotnet publish launcher/Hikari.GameLauncher/Hikari.GameLauncher.csproj `
+    dotnet publish launcher/Slide.GameLauncher/Slide.GameLauncher.csproj `
       --configuration Release `
       --runtime win-x64 `
       --self-contained true `
       -p:DebugType=None `
       -p:DebugSymbols=false `
-      -p:HikariBrowserMode=$BrowserMode `
+      -p:SlideBrowserMode=$BrowserMode `
       --output $LauncherOutput
     if ($LASTEXITCODE -ne 0) {
       throw "Windows $BrowserMode game launcher build failed with exit code $LASTEXITCODE"
     }
-    if (-not (Test-Path (Join-Path $Root "$LauncherOutput\Hikari.GameLauncher.exe"))) {
-      throw "Windows $BrowserMode game launcher build completed without producing Hikari.GameLauncher.exe"
+    if (-not (Test-Path (Join-Path $Root "$LauncherOutput\Slide.GameLauncher.exe"))) {
+      throw "Windows $BrowserMode game launcher build completed without producing Slide.GameLauncher.exe"
     }
   }
 }
@@ -118,19 +118,19 @@ $EditorDist = if ($OutputDirectory) {
   if ([IO.Path]::IsPathRooted($OutputDirectory)) { [IO.Path]::GetFullPath($OutputDirectory) }
   else { [IO.Path]::GetFullPath((Join-Path $Root $OutputDirectory)) }
 } else {
-  Join-Path $DistRoot 'HikariStudio'
+  Join-Path $DistRoot 'SlideStudio'
 }
 if (-not $EditorDist.StartsWith($DistRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
   throw "Editor output must stay inside the repository dist directory: $EditorDist"
 }
-$StagingParent = if ($env:HIKARI_NUITKA_STAGING) { $env:HIKARI_NUITKA_STAGING } else { $env:TEMP }
+$StagingParent = if ($env:SLIDE_NUITKA_STAGING) { $env:SLIDE_NUITKA_STAGING } else { $env:TEMP }
 if (-not $StagingParent -or $StagingParent -match '[^\x00-\x7F]') {
-  throw 'Nuitka requires an ASCII staging path. Set HIKARI_NUITKA_STAGING to a writable ASCII-only directory.'
+  throw 'Nuitka requires an ASCII staging path. Set SLIDE_NUITKA_STAGING to a writable ASCII-only directory.'
 }
-$StagingRoot = Join-Path $StagingParent 'HikariStudioNuitkaBuild'
-$NuitkaCache = if ($env:HIKARI_NUITKA_CACHE) { $env:HIKARI_NUITKA_CACHE } else { Join-Path $env:LOCALAPPDATA 'HikariStudioNuitkaCache' }
+$StagingRoot = Join-Path $StagingParent 'SlideStudioNuitkaBuild'
+$NuitkaCache = if ($env:SLIDE_NUITKA_CACHE) { $env:SLIDE_NUITKA_CACHE } else { Join-Path $env:LOCALAPPDATA 'SlideStudioNuitkaCache' }
 if (-not $NuitkaCache -or $NuitkaCache -match '[^\x00-\x7F]') {
-  throw 'Nuitka requires an ASCII cache path. Set HIKARI_NUITKA_CACHE to a writable ASCII-only directory.'
+  throw 'Nuitka requires an ASCII cache path. Set SLIDE_NUITKA_CACHE to a writable ASCII-only directory.'
 }
 $NuitkaRoot = Join-Path $StagingRoot 'build\nuitka'
 $NuitkaDist = Join-Path $NuitkaRoot 'run.dist'
@@ -154,8 +154,8 @@ Copy-Item -LiteralPath (Join-Path $Root 'frontend\dist') -Destination (Join-Path
 Copy-Item -LiteralPath (Join-Path $Root 'frontend\runtime-dist') -Destination (Join-Path $StagingRoot 'frontend\runtime-dist') -Recurse
 Copy-Item -LiteralPath (Join-Path $Root 'assets') -Destination (Join-Path $StagingRoot 'assets') -Recurse
 New-Item -ItemType Directory -Force -Path (Join-Path $StagingRoot 'native') | Out-Null
-Copy-Item -LiteralPath $AssetWorker -Destination (Join-Path $StagingRoot 'native\hikari-asset-worker.exe')
-Copy-Item -LiteralPath (Join-Path $Root 'installer\HikariStudio.ico') -Destination (Join-Path $StagingRoot 'HikariStudio.ico')
+Copy-Item -LiteralPath $AssetWorker -Destination (Join-Path $StagingRoot 'native\slide-asset-worker.exe')
+Copy-Item -LiteralPath (Join-Path $Root 'installer\SlideStudio.ico') -Destination (Join-Path $StagingRoot 'SlideStudio.ico')
 
 # MSVC receives the Python import library as a bare filename from Nuitka. Let
 # Python copy it into the ASCII-only staging tree without round-tripping a
@@ -177,14 +177,14 @@ $NuitkaArgs = @(
    '--windows-console-mode=disable',
    '--enable-plugin=pyside6',
    '--include-qt-plugins=all',
-   '--windows-icon-from-ico=HikariStudio.ico',
-  '--company-name=Hikari Studio',
-  '--product-name=Hikari Studio',
-  '--file-description=Hikari Studio Visual Novel Editor',
+   '--windows-icon-from-ico=SlideStudio.ico',
+  '--company-name=Slide Studio',
+  '--product-name=Slide Studio',
+  '--file-description=Slide Studio Visual Novel Editor',
   "--file-version=$NumericAppVersion",
   "--product-version=$NumericAppVersion",
   '--output-dir=build/nuitka',
-  '--output-filename=HikariStudio.exe',
+  '--output-filename=SlideStudio.exe',
   '--include-package=pythonnet',
   '--include-package=clr_loader',
   '--include-data-dir=frontend/dist=frontend/dist',
@@ -205,7 +205,7 @@ try {
   $env:LIB = $PreviousLib
 }
 if ($LASTEXITCODE -ne 0) { throw "Nuitka failed with exit code $LASTEXITCODE" }
-if (-not (Test-Path (Join-Path $NuitkaDist 'HikariStudio.exe'))) {
+if (-not (Test-Path (Join-Path $NuitkaDist 'SlideStudio.exe'))) {
   throw "Nuitka standalone build is missing: $NuitkaDist"
 }
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $EditorDist) | Out-Null
@@ -217,6 +217,6 @@ if (Test-Path (Join-Path $Root 'launcher\dist\win-x64')) {
 }
 try { Remove-Item -LiteralPath $StagingRoot -Recurse -Force } catch { Write-Warning "Unable to remove Nuitka staging directory: $_" }
 
-$Executable = Join-Path $EditorDist 'HikariStudio.exe'
+$Executable = Join-Path $EditorDist 'SlideStudio.exe'
 if (-not (Test-Path $Executable)) { throw "Editor build did not produce $Executable" }
-Write-Host "Hikari Studio desktop build: $Executable"
+Write-Host "Slide Studio desktop build: $Executable"

@@ -211,7 +211,7 @@ class RpcServer:
             assert self._server is not None
             self._server.run()
 
-        self._thread = threading.Thread(target=run, name="hikari-fastapi-rpc", daemon=True)
+        self._thread = threading.Thread(target=run, name="slide-fastapi-rpc", daemon=True)
         self._thread.start()
         for _ in range(200):
             if self._server.started:

@@ -167,7 +167,7 @@ class AgentTaskManagerTests(unittest.TestCase):
         self.assertEqual(completed["plan"]["summary"], "检查剧情")
         incremental = manager.get_task(started["id"], self.root, after_seq=1)
         self.assertTrue(all(event["seq"] > 1 for event in incremental["events"]))
-        session = self.root / ".hikari" / "agent" / "sessions" / f"{started['id']}.json"
+        session = self.root / ".slide" / "agent" / "sessions" / f"{started['id']}.json"
         saved = session.read_text(encoding="utf-8")
         self.assertNotIn('"scripts"', saved)
         self.assertNotIn("apiKey", saved)
@@ -400,7 +400,7 @@ class AgentTaskManagerTests(unittest.TestCase):
         project = sample_project()
         project["scripts"]["opening"].append({"id": "choice", "type": "branch", "title": "旧选择", "options": [{"text": "继续", "target": "opening"}]})
         operations = [
-            {"type": "update_project", "name": "Agent 项目", "author": "Hikari"},
+            {"type": "update_project", "name": "Agent 项目", "author": "Slide"},
             {"type": "add_blocks", "fragmentId": "opening", "blocks": [{"type": "narration", "text": "新增文本"}]},
             {"type": "create_fragment", "chapterId": "start", "name": "新片段", "blocks": [{"type": "narration", "text": "片段文本"}]},
             {"type": "upsert_character", "characterId": "hero", "name": "林澄", "color": "#123456", "portraits": {"默认": "lake"}},
@@ -410,7 +410,7 @@ class AgentTaskManagerTests(unittest.TestCase):
         ]
         updated = AgentTaskManager._apply_operations(project, operations)
         self.assertEqual(project["meta"]["name"], "测试项目")
-        self.assertEqual(updated["meta"], {"name": "Agent 项目", "author": "Hikari"})
+        self.assertEqual(updated["meta"], {"name": "Agent 项目", "author": "Slide"})
         self.assertEqual(updated["scripts"]["opening"][-1]["text"], "新增文本")
         self.assertTrue(updated["scripts"]["opening"][-1]["id"].startswith("block-"))
         created = next(fragment for fragment in updated["chapters"][0]["fragments"] if fragment["name"] == "新片段")

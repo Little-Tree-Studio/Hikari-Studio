@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-APP_DIRECTORY_NAME = "Hikari Studio"
+APP_DIRECTORY_NAME = "Slide Studio"
 
 
 def _known_folder(folder_id: str, fallback: Path) -> Path:
@@ -61,10 +61,10 @@ class DesktopPaths:
 def resolve_desktop_paths(*, portable: bool = False, root: Path | None = None) -> DesktopPaths:
     resources = (root or resource_root()).resolve()
     executable_dir = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else resources
-    env_app_data = os.getenv("HIKARI_APP_DATA")
-    env_projects = os.getenv("HIKARI_PROJECTS_DIR")
-    env_exports = os.getenv("HIKARI_EXPORTS_DIR")
-    if portable or os.getenv("HIKARI_PORTABLE") == "1":
+    env_app_data = os.getenv("SLIDE_APP_DATA")
+    env_projects = os.getenv("SLIDE_PROJECTS_DIR")
+    env_exports = os.getenv("SLIDE_EXPORTS_DIR")
+    if portable or os.getenv("SLIDE_PORTABLE") == "1":
         app_data = executable_dir / "user-data"
         projects = executable_dir / "projects"
         exports = executable_dir / "exports"
@@ -94,19 +94,19 @@ def migrate_legacy_desktop_data(paths: DesktopPaths) -> list[Path]:
         return []
     migrated: list[Path] = []
     for project_dir in source.iterdir():
-        if not project_dir.is_dir() or not (project_dir / "project.hikari.json").is_file():
+        if not project_dir.is_dir() or not (project_dir / "project.slide.json").is_file():
             continue
         destination = paths.projects_dir / project_dir.name
         if destination.exists():
             continue
         shutil.copytree(project_dir, destination)
         migrated.append(destination)
-    for legacy_project in source.glob("*.hikari.json"):
+    for legacy_project in source.glob("*.slide.json"):
         destination = paths.projects_dir / legacy_project.name
         if not destination.exists():
             shutil.copy2(legacy_project, destination)
             migrated.append(destination)
-    legacy_state = source / ".hikari-studio"
+    legacy_state = source / ".slide-studio"
     if legacy_state.is_dir():
         for item in legacy_state.iterdir():
             destination = paths.app_data_dir / item.name

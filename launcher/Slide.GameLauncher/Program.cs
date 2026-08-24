@@ -1,12 +1,12 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-#if HIKARI_CEFSHARP
+#if SLIDE_CEFSHARP
 using CefSharp;
 using CefSharp.WinForms;
 #endif
 
-namespace Hikari.GameLauncher;
+namespace Slide.GameLauncher;
 
 internal sealed record LauncherConfig(
     string ProjectId,
@@ -26,7 +26,7 @@ internal static class Program
         var entry = Path.Combine(AppContext.BaseDirectory, "game", "index.html");
         if (!File.Exists(entry)) return ShowStartupError(config.Name, "游戏入口文件不存在。", entry);
 
-#if HIKARI_CEFSHARP
+#if SLIDE_CEFSHARP
         var subprocessExitCode = CefSharp.BrowserSubprocess.SelfHost.Main(args);
         if (subprocessExitCode >= 0) return subprocessExitCode;
         try
@@ -35,7 +35,7 @@ internal static class Program
             {
                 CachePath = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "HikariGames",
+                    "SlideGames",
                     SafeFolderName(config.ProjectId),
                     "cef-cache"),
                 BrowserSubprocessPath = Environment.ProcessPath,
@@ -70,22 +70,22 @@ internal static class Program
     private static LauncherConfig LoadConfig()
     {
         var path = Path.Combine(AppContext.BaseDirectory, "launcher.json");
-        if (!File.Exists(path)) return new LauncherConfig("hikari-game", "Hikari Game");
+        if (!File.Exists(path)) return new LauncherConfig("slide-game", "Slide Game");
         try
         {
             return JsonSerializer.Deserialize(File.ReadAllText(path), LauncherJsonContext.Default.LauncherConfig)
-                ?? new LauncherConfig("hikari-game", "Hikari Game");
+                ?? new LauncherConfig("slide-game", "Slide Game");
         }
         catch
         {
-            return new LauncherConfig("hikari-game", "Hikari Game");
+            return new LauncherConfig("slide-game", "Slide Game");
         }
     }
 
     private static int ShowStartupError(string title, string message, string details)
     {
         var text = $"{message}\n\n{details}";
-#if HIKARI_CEFSHARP
+#if SLIDE_CEFSHARP
         MessageBox.Show(text, title, MessageBoxButtons.OK, MessageBoxIcon.Error);
 #else
         try { Process.Start(new ProcessStartInfo("msg.exe", $"* /TIME:30 {JsonSerializer.Serialize(text)}") { UseShellExecute = false }); }
@@ -98,7 +98,7 @@ internal static class Program
     {
         var invalid = Path.GetInvalidFileNameChars();
         var normalized = new string(value.Select(character => invalid.Contains(character) ? '-' : character).ToArray()).Trim();
-        return string.IsNullOrWhiteSpace(normalized) ? "hikari-game" : normalized;
+        return string.IsNullOrWhiteSpace(normalized) ? "slide-game" : normalized;
     }
 }
 
@@ -106,7 +106,7 @@ internal static class Program
 [JsonSerializable(typeof(LauncherConfig))]
 internal partial class LauncherJsonContext : JsonSerializerContext;
 
-#if HIKARI_CEFSHARP
+#if SLIDE_CEFSHARP
 internal sealed class GameWindow : Form
 {
     private readonly ChromiumWebBrowser _browser;

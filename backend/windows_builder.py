@@ -36,7 +36,7 @@ def find_dotnet_sdk(workspace_root: Path, explicit: Path | None = None) -> Path:
     if explicit is not None:
         candidates.append(explicit)
     else:
-        configured = os.getenv("HIKARI_DOTNET")
+        configured = os.getenv("SLIDE_DOTNET")
         if configured:
             candidates.append(Path(configured))
         candidates.append(workspace_root / ".tools" / "dotnet" / "dotnet.exe")
@@ -48,7 +48,7 @@ def find_dotnet_sdk(workspace_root: Path, explicit: Path | None = None) -> Path:
         if resolved.is_file() and _dotnet_has_sdk(resolved):
             return resolved
     raise WindowsBuildPrerequisiteError(
-        "未找到 .NET 8 SDK，且没有可用的预编译 Windows 启动器。请安装 .NET 8 SDK 或配置 HIKARI_DOTNET。"
+        "未找到 .NET 8 SDK，且没有可用的预编译 Windows 启动器。请安装 .NET 8 SDK 或配置 SLIDE_DOTNET。"
     )
 
 
@@ -63,7 +63,7 @@ def build_launcher_distribution(
         raise ValueError("不支持的浏览器运行方式")
     dotnet = find_dotnet_sdk(workspace_root, dotnet_path)
     launcher_dist.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="hikari-launcher-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="slide-launcher-") as temporary:
         publish_dir = Path(temporary) / "publish"
         command = [
             str(dotnet),
@@ -75,13 +75,13 @@ def build_launcher_distribution(
             "--output", str(publish_dir),
             "-p:DebugType=None",
             "-p:DebugSymbols=false",
-            f"-p:HikariBrowserMode={browser_mode}",
+            f"-p:SlideBrowserMode={browser_mode}",
         ]
         result = subprocess.run(command, cwd=workspace_root, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
         if result.returncode != 0:
             details = (result.stderr or result.stdout).strip()[-4000:]
             raise RuntimeError(f"Windows 启动器编译失败：{details}")
-        executable = publish_dir / "Hikari.GameLauncher.exe"
+        executable = publish_dir / "Slide.GameLauncher.exe"
         if not executable.is_file():
             raise RuntimeError("Windows 启动器编译完成，但没有生成可执行文件")
         if launcher_dist.exists():
@@ -110,7 +110,7 @@ def build_windows_game(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     selected_launcher_dist = launcher_dist / browser_mode
-    if not (selected_launcher_dist / "Hikari.GameLauncher.exe").is_file():
+    if not (selected_launcher_dist / "Slide.GameLauncher.exe").is_file():
         build_launcher_distribution(workspace_root, launcher_project, selected_launcher_dist, dotnet_path, browser_mode)
 
     game_dir = output_dir / "game"
@@ -124,8 +124,8 @@ def build_windows_game(
             shutil.copy2(source, destination)
 
     launcher_config = {
-        "projectId": str(project.get("meta", {}).get("id") or "hikari-game"),
-        "name": str(project.get("meta", {}).get("name") or "Hikari Game"),
+        "projectId": str(project.get("meta", {}).get("id") or "slide-game"),
+        "name": str(project.get("meta", {}).get("name") or "Slide Game"),
         "width": int(project.get("meta", {}).get("resolution", [1280, 720])[0]),
         "height": int(project.get("meta", {}).get("resolution", [1280, 720])[1]),
         "version": str(project.get("meta", {}).get("gameVersion") or "1.0.0"),
@@ -133,7 +133,7 @@ def build_windows_game(
     }
     (output_dir / "launcher.json").write_text(json.dumps(launcher_config, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    original = output_dir / "Hikari.GameLauncher.exe"
+    original = output_dir / "Slide.GameLauncher.exe"
     named_executable = output_dir / f"{safe_slug(launcher_config['name'])}.exe"
     if named_executable != original:
         original.replace(named_executable)

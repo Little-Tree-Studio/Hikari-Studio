@@ -57,39 +57,39 @@ jobs:
         working-directory: frontend
       - run: pnpm run build
         working-directory: frontend
-      - run: dotnet publish launcher/Hikari.GameLauncher/Hikari.GameLauncher.csproj --configuration Release --runtime win-x64 --self-contained true -p:DebugType=None -p:DebugSymbols=false -p:HikariBrowserMode=system --output launcher/dist/win-x64/system
-      - run: dotnet publish launcher/Hikari.GameLauncher/Hikari.GameLauncher.csproj --configuration Release --runtime win-x64 --self-contained true -p:DebugType=None -p:DebugSymbols=false -p:HikariBrowserMode=cefsharp --output launcher/dist/win-x64/cefsharp
+      - run: dotnet publish launcher/Slide.GameLauncher/Slide.GameLauncher.csproj --configuration Release --runtime win-x64 --self-contained true -p:DebugType=None -p:DebugSymbols=false -p:SlideBrowserMode=system --output launcher/dist/win-x64/system
+      - run: dotnet publish launcher/Slide.GameLauncher/Slide.GameLauncher.csproj --configuration Release --runtime win-x64 --self-contained true -p:DebugType=None -p:DebugSymbols=false -p:SlideBrowserMode=cefsharp --output launcher/dist/win-x64/cefsharp
       - uses: actions/cache@v4
         with:
-          path: ${{ runner.temp }}\HikariStudioNuitkaCache
+          path: ${{ runner.temp }}\SlideStudioNuitkaCache
           key: nuitka-${{ runner.os }}-${{ hashFiles('uv.lock', 'scripts/build-editor.ps1') }}
       - run: powershell -ExecutionPolicy Bypass -File scripts/build-editor.ps1 -SkipInstall -SkipLauncher
         env:
-          HIKARI_NUITKA_CACHE: ${{ runner.temp }}\HikariStudioNuitkaCache
+          SLIDE_NUITKA_CACHE: ${{ runner.temp }}\SlideStudioNuitkaCache
       - run: choco install innosetup --no-progress -y
       - name: Build installer and portable archive
         shell: pwsh
         run: |
           $version = '${{ github.ref_name }}'.TrimStart('v')
           ./scripts/build-installer.ps1 -Version $version -SkipEditor
-          Compress-Archive -Path 'dist/HikariStudio/*' -DestinationPath "dist/Hikari-Studio-Portable-$version.zip" -CompressionLevel Optimal
+          Compress-Archive -Path 'dist/SlideStudio/*' -DestinationPath "dist/Slide-Studio-Portable-$version.zip" -CompressionLevel Optimal
       - name: Generate update manifest and checksums
         shell: pwsh
         run: |
           $version = '${{ github.ref_name }}'.TrimStart('v')
-          uv run --no-sync python scripts/release_manifest.py --version $version --installer "dist/installer/Hikari-Studio-Setup-$version.exe" --portable "dist/Hikari-Studio-Portable-$version.zip" --repository '${{ github.repository }}' --tag '${{ github.ref_name }}' --output dist/release
+          uv run --no-sync python scripts/release_manifest.py --version $version --installer "dist/installer/Slide-Studio-Setup-$version.exe" --portable "dist/Slide-Studio-Portable-$version.zip" --repository '${{ github.repository }}' --tag '${{ github.ref_name }}' --output dist/release
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: Hikari Studio ${{ github.ref_name }}
+          name: Slide Studio ${{ github.ref_name }}
           prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
           body: |
             Windows preview build. The installer is currently unsigned; verify `SHA256SUMS.txt` before installation.
 
-            Microsoft Edge WebView2 Runtime is required. Ren'Py export remains best-effort and does not reproduce every Hikari runtime feature. Full content-level installed-build regression continues during the Beta cycle.
+            Microsoft Edge WebView2 Runtime is required. Ren'Py export remains best-effort and does not reproduce every Slide runtime feature. Full content-level installed-build regression continues during the Beta cycle.
           files: |
-            dist/installer/Hikari-Studio-Setup-*.exe
-            dist/Hikari-Studio-Portable-*.zip
+            dist/installer/Slide-Studio-Setup-*.exe
+            dist/Slide-Studio-Portable-*.zip
             dist/release/SHA256SUMS.txt
             dist/release/latest.json

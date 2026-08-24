@@ -3,23 +3,23 @@ import { BLOCK_CONFORMANCE_MATRIX, BLOCK_CONFORMANCE_MATRIX_VERSION, type BlockC
 
 async function waitForHarness(page: Page, caseId: string, surface: 'editor-preview' | 'web-runtime') {
   await page.waitForFunction(([expectedCase, expectedSurface]) => {
-    const harness = window.__HIKARI_BLOCK_CONFORMANCE__;
+    const harness = window.__SLIDE_BLOCK_CONFORMANCE__;
     return harness?.caseId === expectedCase && harness.surface === expectedSurface;
   }, [caseId, surface]);
 }
 
 async function observe(page: Page): Promise<BlockConformanceObservation> {
-  return page.evaluate(() => window.__HIKARI_BLOCK_CONFORMANCE__!.getObservation());
+  return page.evaluate(() => window.__SLIDE_BLOCK_CONFORMANCE__!.getObservation());
 }
 
 async function applyAction(page: Page, action: BlockConformanceAction) {
   const before = JSON.stringify(await observe(page));
   await page.evaluate((nextAction) => {
-    const harness = window.__HIKARI_BLOCK_CONFORMANCE__!;
+    const harness = window.__SLIDE_BLOCK_CONFORMANCE__!;
     if (nextAction.type === 'choose') harness.choose(nextAction.target);
     else harness.advance();
   }, action);
-  await page.waitForFunction((previous) => JSON.stringify(window.__HIKARI_BLOCK_CONFORMANCE__?.getObservation()) !== previous, before);
+  await page.waitForFunction((previous) => JSON.stringify(window.__SLIDE_BLOCK_CONFORMANCE__?.getObservation()) !== previous, before);
 }
 
 async function runSurface(page: Page, url: string, caseId: string, surface: 'editor-preview' | 'web-runtime', actions: BlockConformanceAction[]) {
@@ -62,5 +62,5 @@ test('conformance harness renders the main visible Block effects', async ({ page
 
   await page.goto('/?block-conformance=branch');
   await expect(page.locator('.preview-choices button')).toHaveText('Continue');
-  expect((await page.evaluate(() => window.__HIKARI_BLOCK_CONFORMANCE__?.matrixVersion))).toBe(BLOCK_CONFORMANCE_MATRIX_VERSION);
+  expect((await page.evaluate(() => window.__SLIDE_BLOCK_CONFORMANCE__?.matrixVersion))).toBe(BLOCK_CONFORMANCE_MATRIX_VERSION);
 });

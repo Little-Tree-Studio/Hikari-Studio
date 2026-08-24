@@ -1,1 +1,1 @@
-"""Repeatable release benchmarks for Hikari Studio."""
+"""Repeatable release benchmarks for Slide Studio."""

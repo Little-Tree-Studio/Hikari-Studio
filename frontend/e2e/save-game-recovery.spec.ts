@@ -5,7 +5,7 @@ import { createEngineState, createSaveGame } from '../src/engine-core/runtime';
 import type { SaveGame } from '../src/engine-core/types';
 
 const project = getBlockConformanceCase('narration')!.project;
-const primaryKey = (slotId: string) => `hikari-save:${project.meta.id}:${slotId}`;
+const primaryKey = (slotId: string) => `slide-save:${project.meta.id}:${slotId}`;
 
 async function seedRuntimeStorage(page: Page, values: Record<string, string>) {
   await page.addInitScript((entries) => {

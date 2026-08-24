@@ -12,7 +12,7 @@ from .project_store import new_id
 
 SUPPORTED_BLOCK_TYPES = {"scene", "sound", "characterShow", "characterHide", "camera", "narration", "dialogue", "branch", "setVariable", "condition", "jump", "call", "return"}
 SCENE_PATTERN = re.compile(r"^\[?(?:场景|scene)\s*[：:]\s*(.+?)\]?$", re.IGNORECASE)
-HIKARI_BLOCK_PREFIX = "HIKARI_BLOCKS_V1\n"
+SLIDE_BLOCK_PREFIX = "SLIDE_BLOCKS_V1\n"
 MAX_SCRIPT_TEXT_BYTES = 4 * 1024 * 1024
 DEFAULT_RULES: dict[str, Any] = {
     "dialogueSeparator": "auto",
@@ -238,7 +238,7 @@ def _json_blocks(payload: Any) -> tuple[list[dict[str, Any]], list[str]]:
     elif isinstance(payload, dict) and isinstance(payload.get("blocks"), list):
         source = payload["blocks"]
     if not isinstance(source, list):
-        raise ValueError("Hikari JSON 必须是 Block 数组、含 blocks 的对象或完整项目")
+        raise ValueError("Slide JSON 必须是 Block 数组、含 blocks 的对象或完整项目")
     blocks = []
     for index, item in enumerate(source):
         if not isinstance(item, dict) or item.get("type") not in SUPPORTED_BLOCK_TYPES:
@@ -270,10 +270,10 @@ def preview_script_text(
     if not stripped:
         return _preview(source_name, "TXT", [], ["剪贴板中没有文本"], [], normalized_rules)
 
-    if stripped.startswith(HIKARI_BLOCK_PREFIX.strip()):
-        payload_text = stripped[len(HIKARI_BLOCK_PREFIX.strip()):].lstrip("\r\n")
+    if stripped.startswith(SLIDE_BLOCK_PREFIX.strip()):
+        payload_text = stripped[len(SLIDE_BLOCK_PREFIX.strip()):].lstrip("\r\n")
         blocks, warnings = _json_blocks(json.loads(payload_text))
-        return _preview(source_name, "Hikari JSON", blocks, warnings, [], normalized_rules)
+        return _preview(source_name, "Slide JSON", blocks, warnings, [], normalized_rules)
 
     if stripped[0] in "[{":
         try:
@@ -282,7 +282,7 @@ def preview_script_text(
             payload = None
         if payload is not None:
             blocks, warnings = _json_blocks(payload)
-            return _preview(source_name, "Hikari JSON", blocks, warnings, [], normalized_rules)
+            return _preview(source_name, "Slide JSON", blocks, warnings, [], normalized_rules)
 
     markdown = bool(re.search(r"(?m)^\s*(?:#{1,6}\s|>\s|---\s*$|\*\*\*)", text))
     blocks, warnings, matches, normalized_rules = _text_blocks(text, markdown, characters, normalized_rules)
@@ -299,11 +299,11 @@ def preview_script_import(
         raise ValueError("剧本文件不存在")
     extension = source.suffix.lower()
     if extension not in {".txt", ".md", ".markdown", ".json"}:
-        raise ValueError("仅支持 TXT、Markdown 和 Hikari JSON")
+        raise ValueError("仅支持 TXT、Markdown 和 Slide JSON")
     text = source.read_text(encoding="utf-8-sig")
     if extension == ".json":
         blocks, warnings = _json_blocks(json.loads(text))
-        return _preview(source.name, "Hikari JSON", blocks, warnings, [], normalize_script_import_rules(rules))
+        return _preview(source.name, "Slide JSON", blocks, warnings, [], normalize_script_import_rules(rules))
     markdown = extension in {".md", ".markdown"}
     blocks, warnings, matches, normalized_rules = _text_blocks(text, markdown, characters, rules)
     return _preview(source.name, "Markdown" if markdown else "TXT", blocks, warnings, matches, normalized_rules)

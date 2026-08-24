@@ -743,14 +743,14 @@ function ScriptPage({ project, commit, selected, setSelected, view, setView, ope
   };
   const writeBlockClipboard = async (cut = false) => {
     const indexes = orderedSelection(); if (!indexes.length) return;
-    const payload = `HIKARI_BLOCKS_V1\n${JSON.stringify(indexes.map((index) => blocks[index]))}`;
-    writeSmallValue('hikari-block-clipboard', payload);
+    const payload = `SLIDE_BLOCKS_V1\n${JSON.stringify(indexes.map((index) => blocks[index]))}`;
+    writeSmallValue('slide-block-clipboard', payload);
     await writeClipboardText(payload);
     if (cut) await deleteSelected(); else setContextMenu(null);
   };
   const pasteBlocks = async () => {
     try {
-      const preview = await previewClipboardScript(readSmallValue('hikari-block-clipboard') ?? '', project.characters, loadScriptImportRules());
+      const preview = await previewClipboardScript(readSmallValue('slide-block-clipboard') ?? '', project.characters, loadScriptImportRules());
       if (!preview.blocks.length) { notify(preview.warnings[0] ?? '剪贴板中没有可粘贴文本', 'error'); return; }
       const copies = preview.blocks.map((block) => ({ ...clone(block), id: makeId('block') } as StoryBlock));
       const insertion = selectedIndexes.size ? Math.max(...selectedIndexes) + 1 : blocks.length;
@@ -1042,11 +1042,11 @@ function HistoryPage({ project, entries, recovery, recoveryLoading, storage, und
   const toggle = (id: string) => setExpanded((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   const recoveryDiff = recovery ? diffProjects(recovery.project, project) : null;
   if (recoveryLoading) return <div className="dashboard-page history-page"><PageHeader title="编辑历史" sub="保留最近 50 个普通 Command；固定快照额外保护，所有恢复操作仍可撤销"><button className="button ghost" disabled={!undoCount} onClick={undo}><Undo2 />撤销</button><button className="button ghost" disabled={!redoCount} onClick={redo}><Redo2 />重做</button></PageHeader><div className="content-pad"><section className="recovery-card recovery-loading"><div className="recovery-summary"><div className="recovery-icon"><LoaderCircle className="spin" /></div><div><strong>正在读取恢复快照</strong><small>仅在打开历史面板时按需载入，不会拖慢编辑器启动。</small></div></div></section></div></div>;
-  return <div className="dashboard-page history-page"><PageHeader title="编辑历史" sub="保留最近 50 个普通 Command；固定快照额外保护，所有恢复操作仍可撤销"><button className="button ghost" disabled={!undoCount} onClick={undo}><Undo2 />撤销</button><button className="button ghost" disabled={!redoCount} onClick={redo}><Redo2 />重做</button></PageHeader><div className="content-pad"><section className={`recovery-card ${recovery?.recoveredDuringLoad ? 'recovered' : ''}`}><div className="recovery-summary"><div className="recovery-icon"><HardDrive /></div><div><strong>{recovery?.recoveredDuringLoad ? '本次启动已执行崩溃恢复' : '崩溃恢复快照'}</strong><small>{recovery ? `${new Date(recovery.updatedAt).toLocaleString()} · ${recoveryDiff?.total ?? 0} 项与当前项目不同` : '当前项目还没有可用的恢复快照'}</small></div><div className="recovery-actions"><button className="button ghost" onClick={refreshRecovery}>刷新</button><button className="button ghost" disabled={!recovery} onClick={() => setRecoveryExpanded((value) => !value)}>{recoveryExpanded ? '收起比较' : '比较快照'}<ChevronDown className={recoveryExpanded ? 'expanded' : ''} /></button><button className="button primary" disabled={!recovery || !recoveryDiff?.total} onClick={restoreRecovery}><Undo2 />恢复此快照</button></div></div>{recovery && recoveryExpanded && <div className="snapshot-detail"><div className="snapshot-stats"><SnapshotStats label="恢复快照" project={recovery.project} /><ArrowRight /><SnapshotStats label="当前项目" project={project} /></div><SnapshotDiff diff={recoveryDiff!} /></div>}</section><section className="history-storage-card"><header><div><PackageCheck /><span><strong>历史存储与清理</strong><small>增量快照 v{storage?.version ?? 2} · .hikari/history/commands.json</small></span></div><div><button className="button ghost" onClick={refreshStorage}>刷新统计</button><button className="button danger" disabled={!entries.some((entry) => !entry.pinned)} onClick={clearOrdinaryHistory}><Trash2 />清理普通历史</button></div></header><div className="history-storage-stats"><div><span>磁盘占用</span><strong>{formatBytes(storage?.bytes ?? 0)}</strong></div><div><span>完整快照估算</span><strong>{formatBytes(storage?.uncompressedBytes ?? 0)}</strong></div><div><span>节省空间</span><strong>{Math.round((storage?.compressionRate ?? 0) * 100)}%</strong></div><div><span>历史记录</span><strong>{storage?.commandCount ?? entries.length}</strong><small>{storage?.pinnedCount ?? entries.filter((entry) => entry.pinned).length} 个固定</small></div></div><div className="compression-meter"><span style={{ width: `${Math.round((storage?.compressionRate ?? 0) * 100)}%` }} /><small>已压缩 {formatBytes(Math.max(0, (storage?.uncompressedBytes ?? 0) - (storage?.bytes ?? 0)))}</small></div></section><div className="history-list">{[...entries].reverse().map((entry) => {
+  return <div className="dashboard-page history-page"><PageHeader title="编辑历史" sub="保留最近 50 个普通 Command；固定快照额外保护，所有恢复操作仍可撤销"><button className="button ghost" disabled={!undoCount} onClick={undo}><Undo2 />撤销</button><button className="button ghost" disabled={!redoCount} onClick={redo}><Redo2 />重做</button></PageHeader><div className="content-pad"><section className={`recovery-card ${recovery?.recoveredDuringLoad ? 'recovered' : ''}`}><div className="recovery-summary"><div className="recovery-icon"><HardDrive /></div><div><strong>{recovery?.recoveredDuringLoad ? '本次启动已执行崩溃恢复' : '崩溃恢复快照'}</strong><small>{recovery ? `${new Date(recovery.updatedAt).toLocaleString()} · ${recoveryDiff?.total ?? 0} 项与当前项目不同` : '当前项目还没有可用的恢复快照'}</small></div><div className="recovery-actions"><button className="button ghost" onClick={refreshRecovery}>刷新</button><button className="button ghost" disabled={!recovery} onClick={() => setRecoveryExpanded((value) => !value)}>{recoveryExpanded ? '收起比较' : '比较快照'}<ChevronDown className={recoveryExpanded ? 'expanded' : ''} /></button><button className="button primary" disabled={!recovery || !recoveryDiff?.total} onClick={restoreRecovery}><Undo2 />恢复此快照</button></div></div>{recovery && recoveryExpanded && <div className="snapshot-detail"><div className="snapshot-stats"><SnapshotStats label="恢复快照" project={recovery.project} /><ArrowRight /><SnapshotStats label="当前项目" project={project} /></div><SnapshotDiff diff={recoveryDiff!} /></div>}</section><section className="history-storage-card"><header><div><PackageCheck /><span><strong>历史存储与清理</strong><small>增量快照 v{storage?.version ?? 2} · .slide/history/commands.json</small></span></div><div><button className="button ghost" onClick={refreshStorage}>刷新统计</button><button className="button danger" disabled={!entries.some((entry) => !entry.pinned)} onClick={clearOrdinaryHistory}><Trash2 />清理普通历史</button></div></header><div className="history-storage-stats"><div><span>磁盘占用</span><strong>{formatBytes(storage?.bytes ?? 0)}</strong></div><div><span>完整快照估算</span><strong>{formatBytes(storage?.uncompressedBytes ?? 0)}</strong></div><div><span>节省空间</span><strong>{Math.round((storage?.compressionRate ?? 0) * 100)}%</strong></div><div><span>历史记录</span><strong>{storage?.commandCount ?? entries.length}</strong><small>{storage?.pinnedCount ?? entries.filter((entry) => entry.pinned).length} 个固定</small></div></div><div className="compression-meter"><span style={{ width: `${Math.round((storage?.compressionRate ?? 0) * 100)}%` }} /><small>已压缩 {formatBytes(Math.max(0, (storage?.uncompressedBytes ?? 0) - (storage?.bytes ?? 0)))}</small></div></section><div className="history-list">{[...entries].reverse().map((entry) => {
     const isExpanded = expanded.has(entry.id);
     const diff = isExpanded ? diffProjects(entry.before, entry.after) : null;
     return <section className={`history-entry ${entry.categories?.length ? 'semantic' : ''} ${entry.state} ${entry.pinned ? 'pinned' : ''}`} key={entry.id}><button type="button" className="history-item" onClick={() => toggle(entry.id)}><div className="history-icon">{entry.label.startsWith('AI Agent') ? <Sparkles /> : <History />}</div><div><strong>{entry.name ?? entry.label}</strong><small>{entry.name ? `${entry.label} · ` : ''}{entry.state === 'undone' ? '当前位于重做栈 · ' : entry.state === 'archived' ? '固定归档 · ' : ''}{entry.categories?.length ? `${entry.categories.length} 类语义修改` : '完整项目快照'} · 点击比较</small></div><div className="history-badges">{entry.pinned && <span className="history-pin"><Pin />固定</span>}<span className={`history-state ${entry.state}`}>{entry.state === 'applied' ? '已应用' : entry.state === 'undone' ? '已撤销' : '已归档'}</span></div><time>{new Date(entry.timestamp).toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</time><ChevronDown className={isExpanded ? 'expanded' : ''} /></button>{isExpanded && <div className="command-snapshot-detail"><div className="snapshot-toolbar"><div className="snapshot-stats"><SnapshotStats label="修改前" project={entry.before} /><ArrowRight /><SnapshotStats label="修改后" project={entry.after} /></div><div className="snapshot-actions"><button className="button ghost" onClick={() => renameCommand(entry)}><FileText />{entry.name ? '修改名称' : '命名快照'}</button><button className={`button ghost ${entry.pinned ? 'active' : ''}`} onClick={() => toggleCommandPinned(entry)}><Pin />{entry.pinned ? '取消固定' : '固定保护'}</button><button className="button ghost" onClick={() => restoreCommand(entry, 'before')}><Undo2 />恢复修改前</button><button className="button ghost" onClick={() => restoreCommand(entry, 'after')}><Redo2 />恢复修改后</button></div></div><SnapshotDiff diff={diff!} />{entry.categories?.length && <div className="history-category-list">{entry.categories.map((category) => <article className={category.undone ? 'undone' : ''} key={category.id}><header><div><strong>{category.label}</strong><span>{category.count} 项</span></div><button className="button ghost" disabled={entry.state !== 'applied' || category.undone} onClick={() => undoCategory(entry.id, category.id)}>{category.undone ? <CheckCircle2 /> : <Undo2 />}{category.undone ? '已撤销' : '恢复此类别到修改前'}</button></header><ul>{category.items.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}</ul></article>)}</div>}</div>}</section>;
-  })}{!entries.length && <div className="empty-state large"><History /><strong>还没有编辑记录</strong><span>修改项目后会在这里出现，关闭软件也不会清空</span></div>}<div className="history-item static"><div className="history-icon"><Save /></div><div><strong>自动保存与历史持久化</strong><small>项目写入 v3 目录，Command 快照写入 .hikari/history</small></div><time>450 ms</time></div></div></div></div>;
+  })}{!entries.length && <div className="empty-state large"><History /><strong>还没有编辑记录</strong><span>修改项目后会在这里出现，关闭软件也不会清空</span></div>}<div className="history-item static"><div className="history-icon"><Save /></div><div><strong>自动保存与历史持久化</strong><small>项目写入 v3 目录，Command 快照写入 .slide/history</small></div><time>450 ms</time></div></div></div></div>;
 }
 
 interface ModalLayerProps {
@@ -1094,7 +1094,7 @@ export default function App() {
   const [debugRunning, setDebugRunning] = useState(false);
   const [openFragmentIds, setOpenFragmentIds] = useState<string[]>(() => [fallbackProject.activeFragmentId]);
   const [inspectorDock, setInspectorDock] = useState<InspectorDock>(() => fallbackProject.settings.editorSession?.inspectorDock ?? 'preview');
-  const [creatorName, setCreatorName] = useState(() => readSmallValue('hikari-creator-name') ?? '');
+  const [creatorName, setCreatorName] = useState(() => readSmallValue('slide-creator-name') ?? '');
   const [saveState, setSaveState] = useState('正在载入');
   const [startupReady, setStartupReady] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -1112,13 +1112,13 @@ export default function App() {
   const [recoverySnapshotState, setRecoverySnapshotState] = useState<'idle' | 'loading' | 'loaded' | 'error'>('idle');
   const [historyStorage, setHistoryStorage] = useState<CommandHistoryStorageStats | null>(null);
   const [buildProgress, setBuildProgress] = useState<BuildProgressTask | null>(null);
-  const [buildOutputRoot, setBuildOutputRoot] = useState(() => readSmallValue('hikari-build-output-root') ?? '');
-  const [browserMode, setBrowserMode] = useState<BrowserMode>(() => readSmallValue('hikari-browser-mode') === 'system' ? 'system' : 'cefsharp');
-  const [previewLanguageChoice, setPreviewLanguageChoice] = useState(() => readSmallValue('hikari-preview-language') ?? '');
+  const [buildOutputRoot, setBuildOutputRoot] = useState(() => readSmallValue('slide-build-output-root') ?? '');
+  const [browserMode, setBrowserMode] = useState<BrowserMode>(() => readSmallValue('slide-browser-mode') === 'system' ? 'system' : 'cefsharp');
+  const [previewLanguageChoice, setPreviewLanguageChoice] = useState(() => readSmallValue('slide-preview-language') ?? '');
   const previewLanguage = projectLanguages(project).includes(previewLanguageChoice) ? previewLanguageChoice : defaultLanguage(project);
   const changePreviewLanguage = (language: string) => {
     setPreviewLanguageChoice(language);
-    writeSmallValue('hikari-preview-language', language);
+    writeSmallValue('slide-preview-language', language);
   };
   const hydrated = useRef(false);
   const autoSaveTimerRef = useRef<number | null>(null);
@@ -1152,12 +1152,12 @@ export default function App() {
   };
   const updateBuildOutputRoot = (path: string) => {
     setBuildOutputRoot(path);
-    if (path.trim()) writeSmallValue('hikari-build-output-root', path);
-    else removeSmallValue('hikari-build-output-root');
+    if (path.trim()) writeSmallValue('slide-build-output-root', path);
+    else removeSmallValue('slide-build-output-root');
   };
   const updateBrowserMode = (mode: BrowserMode) => {
     setBrowserMode(mode);
-    writeSmallValue('hikari-browser-mode', mode);
+    writeSmallValue('slide-browser-mode', mode);
   };
 
   const persistCommandHistory = () => {
@@ -1250,14 +1250,14 @@ export default function App() {
     pending.finalizing = true;
     const reloadId = pending.load.reloadId;
     const commitAt = performance.now();
-    performance.mark(`hikari.reload.${reloadId}.react-committed`);
+    performance.mark(`slide.reload.${reloadId}.react-committed`);
     let firstFrame = 0;
     let secondFrame = 0;
     firstFrame = window.requestAnimationFrame(() => {
       secondFrame = window.requestAnimationFrame(() => {
         const stablePaintAt = performance.now();
-        performance.mark(`hikari.reload.${reloadId}.stable-paint`);
-        try { performance.measure(`hikari.reload.${reloadId}.total`, `hikari.reload.${reloadId}.frontend-start`, `hikari.reload.${reloadId}.stable-paint`); }
+        performance.mark(`slide.reload.${reloadId}.stable-paint`);
+        try { performance.measure(`slide.reload.${reloadId}.total`, `slide.reload.${reloadId}.frontend-start`, `slide.reload.${reloadId}.stable-paint`); }
         catch { /* Marks can be unavailable after a browser performance buffer reset. */ }
         const frontend: ProjectReloadFrontendPerformance = {
           apiWaitMs: pending.load.apiWaitMs,
@@ -1274,7 +1274,7 @@ export default function App() {
           reactCommitMs: commitAt - pending.restore!.stateDispatchStartedAt,
           stablePaintMs: stablePaintAt - commitAt,
           totalReloadMs: stablePaintAt - pending.load.startedAt,
-          bootToStablePaintMs: stablePaintAt - (window.__HIKARI_BOOT_STARTED_AT__ ?? pending.load.startedAt),
+          bootToStablePaintMs: stablePaintAt - (window.__SLIDE_BOOT_STARTED_AT__ ?? pending.load.startedAt),
           componentRenders: finishComponentRenderProfile(reloadId),
         };
         const localReport: ProjectReloadPerformance = {
@@ -1285,11 +1285,11 @@ export default function App() {
           backend: pending.load.backend,
           frontend,
         };
-        window.__HIKARI_LAST_PROJECT_RELOAD__ = localReport;
+        window.__SLIDE_LAST_PROJECT_RELOAD__ = localReport;
         pendingProjectReloadRef.current = null;
         log('info', 'performance', '桌面项目完整重载性能', localReport);
         void reportProjectReloadPerformance(reloadId, localReport.surface ?? 'editor', frontend)
-          .then((reported) => { if (reported) window.__HIKARI_LAST_PROJECT_RELOAD__ = reported; })
+          .then((reported) => { if (reported) window.__SLIDE_LAST_PROJECT_RELOAD__ = reported; })
           .catch((error) => log('warn', 'performance', '无法写入桌面重载性能日志', error));
       });
     });
@@ -1316,8 +1316,8 @@ export default function App() {
         }
       })();
     };
-    window.addEventListener('hikari-open-project-request', handler);
-    return () => window.removeEventListener('hikari-open-project-request', handler);
+    window.addEventListener('slide-open-project-request', handler);
+    return () => window.removeEventListener('slide-open-project-request', handler);
   }, [project, dirty, historyVersion]);
   useEffect(() => { if (!historyReadyRef.current) return; void persistCommandHistory().catch((error) => log('error', 'history', 'Command 历史持久化失败', error)); }, [historyVersion]);
   useEffect(() => {
@@ -1378,14 +1378,14 @@ export default function App() {
       ? { kind: 'fragment', sourceId: fragmentId, fragment: clone(chapter.fragments.find((item) => item.id === fragmentId)), blocks: clone(project.scripts[fragmentId] ?? []), timeline: clone(project.timelines?.[fragmentId]) }
       : { kind: 'chapter', chapter: clone(chapter), scripts: Object.fromEntries(chapter.fragments.map((fragment) => [fragment.id, clone(project.scripts[fragment.id] ?? [])])), timelines: Object.fromEntries(chapter.fragments.flatMap((fragment) => project.timelines?.[fragment.id] ? [[fragment.id, clone(project.timelines[fragment.id])]] : [])) };
     const writePayload = async (value: unknown) => {
-      const encoded = `HIKARI_STRUCTURE_V1\n${JSON.stringify(value)}`;
-      writeSmallValue('hikari-structure-clipboard', encoded);
+      const encoded = `SLIDE_STRUCTURE_V1\n${JSON.stringify(value)}`;
+      writeSmallValue('slide-structure-clipboard', encoded);
       await writeClipboardText(encoded);
     };
     const readPayload = async () => {
-      const encoded = await readClipboardText(readSmallValue('hikari-structure-clipboard') ?? '');
-      if (!encoded.startsWith('HIKARI_STRUCTURE_V1\n')) return null;
-      try { return JSON.parse(encoded.slice('HIKARI_STRUCTURE_V1\n'.length)) as typeof payload; } catch { return null; }
+      const encoded = await readClipboardText(readSmallValue('slide-structure-clipboard') ?? '');
+      if (!encoded.startsWith('SLIDE_STRUCTURE_V1\n')) return null;
+      try { return JSON.parse(encoded.slice('SLIDE_STRUCTURE_V1\n'.length)) as typeof payload; } catch { return null; }
     };
     const referenced = (targetIds: Set<string>) => Object.values(project.scripts).flat().some((block) => block.type === 'branch' ? block.options?.some((option) => targetIds.has(option.target)) : block.type === 'condition' ? Boolean(block.trueTarget && targetIds.has(block.trueTarget)) || Boolean(block.falseTarget && targetIds.has(block.falseTarget)) : (block.type === 'jump' || block.type === 'call') ? Boolean(block.target && targetIds.has(block.target)) : false);
     const pastePayload = (source: any) => {
@@ -1488,8 +1488,8 @@ export default function App() {
     catch (error) { log('error', 'history', '退出前保存 Command 历史失败', error); }
     await callWindow('close_window');
   };
-  const loginCreator = async () => { const name = await requestText({ title: creatorName ? '账号设置' : '创作者账号', message: '输入创作者显示名。', initialValue: creatorName, placeholder: '创作者名称', confirmText: creatorName ? '保存' : '登录' }); if (!name) return; writeSmallValue('hikari-creator-name', name); setCreatorName(name); setAccountMenuOpen(false); };
-  const logoutCreator = () => { removeSmallValue('hikari-creator-name'); setCreatorName(''); setAccountMenuOpen(false); };
+  const loginCreator = async () => { const name = await requestText({ title: creatorName ? '账号设置' : '创作者账号', message: '输入创作者显示名。', initialValue: creatorName, placeholder: '创作者名称', confirmText: creatorName ? '保存' : '登录' }); if (!name) return; writeSmallValue('slide-creator-name', name); setCreatorName(name); setAccountMenuOpen(false); };
+  const logoutCreator = () => { removeSmallValue('slide-creator-name'); setCreatorName(''); setAccountMenuOpen(false); };
   const runBuild = async (kind: BuildTarget | 'renpy', _displayedReport?: BuildPreflightReport, requestedOutputRoot?: string, requestedBrowserMode?: BrowserMode) => {
     if (buildInProgressRef.current) { show('已有构建任务正在运行', 'error'); return; }
     buildInProgressRef.current = true;
@@ -1670,9 +1670,9 @@ export default function App() {
 
    if (projectClosed) return <Profiler id="app-shell" onRender={recordComponentRender}><ProjectLaunchScreen key={createWizardRequested ? 'create' : 'home'} startInWizard={createWizardRequested} ready={startupReady} onOpen={() => doOpen(true)} onOpenRecent={doOpenRecent} onCreate={doCreateProject} onCreated={() => { setCreateWizardRequested(false); setProjectClosed(false); }} /></Profiler>;
 
-  return <Profiler id="app-shell" onRender={recordComponentRender}><div className={`app-shell desktop-app ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}><header className="topbar"><div className="brand-lockup"><div className="brand-mark">H</div><div><strong>Hikari Studio</strong><span>{projectClosed ? '未打开项目' : project.meta.name}</span></div></div><div className="navigation-controls"><button className="icon-button" disabled={!backPages.length} title="后退" onClick={navigateBack}><ArrowLeft /></button><button className="icon-button" disabled={!forwardPages.length} title="前进" onClick={navigateForward}><ArrowRight /></button></div><div className="top-project-menu"><button className="project-menu-trigger" aria-expanded={projectMenuOpen} onClick={() => setProjectMenuOpen((value) => !value)}><Menu /><span>{project.meta.name}</span><ChevronDown /></button>{projectMenuOpen && <div className="top-dropdown project-actions-menu"><button onClick={() => { setProjectMenuOpen(false); void doOpen(); }}><FolderOpen />打开项目</button><button onClick={() => { setProjectMenuOpen(false); void renameProject(); }}><FileText />重命名</button><button onClick={() => { setProjectMenuOpen(false); void doSaveAs(); }}><SaveAs />另存为</button><button onClick={() => { setProjectMenuOpen(false); navigatePage('history'); }}><History />项目历史</button><button onClick={() => void closeProject()}><X />关闭项目</button><button onClick={() => void exitApplication()}><LogOut />退出应用</button></div>}</div><button className="search-trigger" onClick={() => setModal('search')}><Search /><span>搜索台词、指令和资源...</span><kbd>Ctrl K</kbd></button><div className="top-actions"><div className="save-state"><span />{saveState}</div><button className="icon-button notification-trigger" title="通知" onClick={() => setNotificationsOpen((value) => !value)}><Bell />{notifications.some((item) => !item.read) && <span />}</button><div className="account-entry"><button className="avatar-button" title="创作者账号" onClick={() => setAccountMenuOpen((value) => !value)}>{creatorName ? creatorName.slice(0, 1).toUpperCase() : <UserRound />}</button>{accountMenuOpen && <div className="top-dropdown account-menu">{creatorName ? <><strong>{creatorName}</strong><button onClick={() => void loginCreator()}><Settings2 />账号设置</button><button onClick={logoutCreator}><LogOut />退出账号</button></> : <button onClick={() => void loginCreator()}><UserRound />登录创作者账号</button>}</div>}</div></div></header>
+  return <Profiler id="app-shell" onRender={recordComponentRender}><div className={`app-shell desktop-app ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}><header className="topbar"><div className="brand-lockup"><div className="brand-mark">S</div><div><strong>Slide Studio</strong><span>{projectClosed ? '未打开项目' : project.meta.name}</span></div></div><div className="navigation-controls"><button className="icon-button" disabled={!backPages.length} title="后退" onClick={navigateBack}><ArrowLeft /></button><button className="icon-button" disabled={!forwardPages.length} title="前进" onClick={navigateForward}><ArrowRight /></button></div><div className="top-project-menu"><button className="project-menu-trigger" aria-expanded={projectMenuOpen} onClick={() => setProjectMenuOpen((value) => !value)}><Menu /><span>{project.meta.name}</span><ChevronDown /></button>{projectMenuOpen && <div className="top-dropdown project-actions-menu"><button onClick={() => { setProjectMenuOpen(false); void doOpen(); }}><FolderOpen />打开项目</button><button onClick={() => { setProjectMenuOpen(false); void renameProject(); }}><FileText />重命名</button><button onClick={() => { setProjectMenuOpen(false); void doSaveAs(); }}><SaveAs />另存为</button><button onClick={() => { setProjectMenuOpen(false); navigatePage('history'); }}><History />项目历史</button><button onClick={() => void closeProject()}><X />关闭项目</button><button onClick={() => void exitApplication()}><LogOut />退出应用</button></div>}</div><button className="search-trigger" onClick={() => setModal('search')}><Search /><span>搜索台词、指令和资源...</span><kbd>Ctrl K</kbd></button><div className="top-actions"><div className="save-state"><span />{saveState}</div><button className="icon-button notification-trigger" title="通知" onClick={() => setNotificationsOpen((value) => !value)}><Bell />{notifications.some((item) => !item.read) && <span />}</button><div className="account-entry"><button className="avatar-button" title="创作者账号" onClick={() => setAccountMenuOpen((value) => !value)}>{creatorName ? creatorName.slice(0, 1).toUpperCase() : <UserRound />}</button>{accountMenuOpen && <div className="top-dropdown account-menu">{creatorName ? <><strong>{creatorName}</strong><button onClick={() => void loginCreator()}><Settings2 />账号设置</button><button onClick={logoutCreator}><LogOut />退出账号</button></> : <button onClick={() => void loginCreator()}><UserRound />登录创作者账号</button>}</div>}</div></div></header>
     <nav className="module-nav"><div className="module-links"><button className={`module-link ${page === 'script' ? 'active' : ''}`} onClick={() => navigatePage('script')}><NotebookPen />{debugRunning ? '调试' : '剧本'}</button><button className={`module-link ${page === 'stage' ? 'active' : ''}`} onClick={() => navigatePage('stage')}><Clapperboard />演出</button><button className={`module-link ${page === 'texts' ? 'active' : ''}`} onClick={() => navigatePage('texts')}><Languages />文本&语言</button><div className="asset-nav-menu"><button className={`module-link ${page === 'assets' || page === 'characters' || page === 'scenes' || page === 'audio' ? 'active' : ''}`} aria-expanded={assetMenuOpen} onClick={() => setAssetMenuOpen((value) => !value)}><FolderOpen />资产<ChevronDown /></button>{assetMenuOpen && <div className="top-dropdown asset-submenu"><button onClick={() => openAssetSection('全部')}><PackageCheck />资源总览</button><button onClick={() => openAssetSection('全部', 'characters')}><Users />角色</button><button onClick={() => openAssetSection('全部', 'scenes')}><Image />场景</button><button onClick={() => openAudioSection('bgm')}><Music2 />BGM</button><button onClick={() => openAudioSection('sfx')}><AudioLines />SE</button><button onClick={() => openAudioSection('voice')}><MessageSquareText />语音</button></div>}</div><button className={`module-link ${page === 'map' ? 'active' : ''}`} onClick={() => navigatePage('map')}><GitBranch />叙事地图</button><button className={`module-link ${themeOpen ? 'active' : ''}`} onClick={() => setThemeOpen(true)}><Palette />个性化</button><button className={`module-link ${page === 'ai' ? 'active' : ''}`} onClick={() => navigatePage('ai')}><Sparkles />AI Agent</button></div><div className="module-actions"><button className={`button ghost ${debugRunning ? 'active' : ''}`} onClick={() => { setDebugRunning((value) => !value); navigatePage('script'); setSelected(0); show(debugRunning ? '已退出调试运行' : '已进入调试运行'); }}><BugPlay />{debugRunning ? '停止调试' : '调试运行'}</button><button className="button primary" onClick={() => setModal('publish')}><Rocket />发布游戏</button><button className="icon-button" title="运行设置" aria-label="运行设置" onClick={() => setSettingsOpen(true)}><Settings2 /></button><button className="icon-button" title="应用维护" aria-label="应用维护" onClick={() => setMaintenanceOpen(true)}><ShieldCheck /></button></div></nav>
-    <main className={`workspace ${page === 'map' || page === 'stage' || page === 'texts' || page === 'characters' || page === 'scenes' || page === 'audio' ? 'map-workspace' : ''}`}>{!projectClosed && !['map', 'stage', 'texts', 'characters', 'scenes', 'audio'].includes(page) && !sidebarCollapsed && <Profiler id="chapter-tree" onRender={recordComponentRender}><Sidebar project={project} activate={activate} addChapter={addChapter} addFragment={addFragment} removeFragment={removeFragment} openSettings={() => setChapterSettingsOpen(true)} toggleChapterDisabled={toggleChapterDisabled} collapseSidebar={() => setSidebarCollapsed(true)} structureAction={(action, chapterId, fragmentId) => void structureAction(action, chapterId, fragmentId)} /></Profiler>}{!projectClosed && !['map', 'stage', 'texts', 'characters', 'scenes', 'audio'].includes(page) && sidebarCollapsed && <button className="sidebar-expand" title="展开章节列表" onClick={() => setSidebarCollapsed(false)}><ArrowRight /></button>}<section className="page-content"><AnimatePresence mode="wait" initial={false}><motion.div className="page-transition" key={projectClosed ? 'closed' : page} initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 9 }} animate={{ opacity: 1, y: 0 }} exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -7 }} transition={{ duration: reducedMotion ? .08 : .22, ease: [.2, .8, .2, 1] }}>{projectClosed ? <div className="closed-project"><FolderOpen /><strong>没有打开的项目</strong><span>新建项目或打开本地 Hikari v3 项目继续创作。</span><div><button className="button primary" onClick={() => void doNew()}><FilePlus2 />新建项目</button><button className="button ghost" onClick={() => void doOpen()}><FolderOpen />打开项目</button></div></div> : pages[page]}</motion.div></AnimatePresence></section></main>
+    <main className={`workspace ${page === 'map' || page === 'stage' || page === 'texts' || page === 'characters' || page === 'scenes' || page === 'audio' ? 'map-workspace' : ''}`}>{!projectClosed && !['map', 'stage', 'texts', 'characters', 'scenes', 'audio'].includes(page) && !sidebarCollapsed && <Profiler id="chapter-tree" onRender={recordComponentRender}><Sidebar project={project} activate={activate} addChapter={addChapter} addFragment={addFragment} removeFragment={removeFragment} openSettings={() => setChapterSettingsOpen(true)} toggleChapterDisabled={toggleChapterDisabled} collapseSidebar={() => setSidebarCollapsed(true)} structureAction={(action, chapterId, fragmentId) => void structureAction(action, chapterId, fragmentId)} /></Profiler>}{!projectClosed && !['map', 'stage', 'texts', 'characters', 'scenes', 'audio'].includes(page) && sidebarCollapsed && <button className="sidebar-expand" title="展开章节列表" onClick={() => setSidebarCollapsed(false)}><ArrowRight /></button>}<section className="page-content"><AnimatePresence mode="wait" initial={false}><motion.div className="page-transition" key={projectClosed ? 'closed' : page} initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 9 }} animate={{ opacity: 1, y: 0 }} exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -7 }} transition={{ duration: reducedMotion ? .08 : .22, ease: [.2, .8, .2, 1] }}>{projectClosed ? <div className="closed-project"><FolderOpen /><strong>没有打开的项目</strong><span>新建项目或打开本地 Slide v3 项目继续创作。</span><div><button className="button primary" onClick={() => void doNew()}><FilePlus2 />新建项目</button><button className="button ghost" onClick={() => void doOpen()}><FolderOpen />打开项目</button></div></div> : pages[page]}</motion.div></AnimatePresence></section></main>
      <ModalLayer modal={modal} project={project} close={() => { setModal(null); setBlockInsertIndex(null); }} addBlock={addBlock} runBuild={(kind, report, outputRoot, selectedBrowserMode) => void runBuild(kind, report, outputRoot, selectedBrowserMode)} locate={activate} buildOutputRoot={buildOutputRoot} updateBuildOutputRoot={updateBuildOutputRoot} browserMode={browserMode} updateBrowserMode={updateBrowserMode} />
     {buildProgress && <BuildProgressDialog task={buildProgress} close={() => { if (buildProgress.status !== 'running') setBuildProgress(null); }} />}
     {modal === 'search' && <SearchPalette project={project} close={() => setModal(null)} locate={locateSearchResult} replaceText={replaceProjectText} />}

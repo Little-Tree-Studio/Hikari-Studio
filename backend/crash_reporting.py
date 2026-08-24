@@ -72,7 +72,7 @@ class CrashReporter:
         self.root = state_dir.resolve() / "crash-reports"
         self.pending_dir = self.root / "pending"
         self.sent_dir = self.root / "sent"
-        self.endpoint = (endpoint if endpoint is not None else os.getenv("HIKARI_CRASH_REPORT_URL", "")).strip()
+        self.endpoint = (endpoint if endpoint is not None else os.getenv("SLIDE_CRASH_REPORT_URL", "")).strip()
         self.clock = clock
         self._uploader = uploader or self._upload
         self._previous_sys_hook: Any = None
@@ -188,7 +188,7 @@ class CrashReporter:
             "fingerprint": fingerprint,
             "createdAt": _iso(now),
             "createdAtEpoch": now,
-            "app": {"name": "Hikari Studio", "version": APP_VERSION},
+            "app": {"name": "Slide Studio", "version": APP_VERSION},
             "system": {"platform": platform.system(), "release": platform.release(), "architecture": platform.machine()},
             **sanitized,
         }
@@ -227,7 +227,7 @@ class CrashReporter:
 
     @staticmethod
     def _upload(endpoint: str, encoded: bytes) -> dict[str, Any]:
-        request = urllib.request.Request(endpoint, data=encoded, method="POST", headers={"Content-Type": "application/json", "User-Agent": f"Hikari-Studio/{APP_VERSION}"})
+        request = urllib.request.Request(endpoint, data=encoded, method="POST", headers={"Content-Type": "application/json", "User-Agent": f"Slide-Studio/{APP_VERSION}"})
         with urllib.request.urlopen(request, timeout=15) as response:
             payload = response.read(MAX_REPORT_BYTES + 1)
             return json.loads(payload.decode("utf-8")) if payload else {}

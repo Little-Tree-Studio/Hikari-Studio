@@ -186,7 +186,7 @@ wheels = [
 ]
 
 [[package]]
-name = "hikari-studio"
+name = "slide-studio"
 version = "0.4.0b1"
 source = { virtual = "." }
 dependencies = [

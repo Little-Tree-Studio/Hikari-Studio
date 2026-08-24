@@ -9,7 +9,7 @@ test('startup center opens a complete four-step project wizard', async ({ page }
   await page.setViewportSize({ width: 960, height: 600 });
   await page.goto('/');
 
-  await expect(page.getByRole('heading', { name: 'Hikari Studio' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Slide Studio' })).toBeVisible();
   await expect(page.getByRole('button', { name: /创建新项目/ })).toBeEnabled();
   await expect(page.getByText('最近项目', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: /创建新项目/ }).click();
@@ -31,7 +31,7 @@ test('startup center opens a complete four-step project wizard', async ({ page }
   await selectResolution(page, 'custom');
   await page.getByText('宽度').locator('..').getByRole('spinbutton').fill('1600');
   await page.getByText('高度').locator('..').getByRole('spinbutton').fill('900');
-  await page.getByPlaceholder('创作者或团队名称').fill('Hikari Team');
+  await page.getByPlaceholder('创作者或团队名称').fill('Slide Team');
   await page.getByPlaceholder('一段简单的游戏介绍').fill('潮声与记忆交错的夏日故事。');
   await page.getByRole('button', { name: '高级设置' }).click();
   await page.getByPlaceholder('玻璃海岸').fill('玻璃海岸 - 开发版');
@@ -39,7 +39,7 @@ test('startup center opens a complete four-step project wizard', async ({ page }
 
   await expect(page.getByRole('heading', { name: '预览确认' })).toBeVisible();
   await expect(page.getByText('1600 × 900')).toHaveCount(2);
-  await expect(page.getByText('Hikari Team')).toBeVisible();
+  await expect(page.getByText('Slide Team')).toBeVisible();
   await expect(page.getByText('玻璃海岸 - 开发版')).toHaveCount(2);
   await expect(page.getByRole('button', { name: '创建项目' })).toBeVisible();
   const overflow = await page.evaluate(() => ({ width: document.documentElement.scrollWidth, viewport: document.documentElement.clientWidth, height: document.documentElement.scrollHeight, viewportHeight: document.documentElement.clientHeight }));

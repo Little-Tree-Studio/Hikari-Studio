@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { getEditorAppearance, saveEditorAppearance } from '../api';
 import type { EditorAppearance, EditorThemeId } from '../types';
 
-export const DEFAULT_EDITOR_APPEARANCE: EditorAppearance = { version: 1, mode: 'system', themeId: 'hikari-light', motion: 'system' };
+export const DEFAULT_EDITOR_APPEARANCE: EditorAppearance = { version: 1, mode: 'system', themeId: 'slide-light', motion: 'system' };
 
 export interface EditorThemeDefinition {
   id: EditorThemeId;
@@ -13,7 +13,7 @@ export interface EditorThemeDefinition {
 }
 
 export const EDITOR_THEMES: EditorThemeDefinition[] = [
-  { id: 'hikari-light', name: 'Hikari Light', description: '清晰明亮的默认创作环境', dark: false, preview: ['#f3f6f7', '#ffffff', '#187c6b'] },
+  { id: 'slide-light', name: 'Slide Light', description: '清晰明亮的默认创作环境', dark: false, preview: ['#f3f6f7', '#ffffff', '#187c6b'] },
   { id: 'graphite', name: 'Graphite', description: '专注预览与长时间工作的深色主题', dark: true, preview: ['#151a1d', '#20272b', '#45bda8'] },
   { id: 'sakura-studio', name: 'Sakura Studio', description: '柔和中性底色与珊瑚强调色', dark: false, preview: ['#f7f4f5', '#ffffff', '#c45f72'] },
   { id: 'high-contrast', name: 'High Contrast', description: '清晰边界与高可读性焦点状态', dark: true, preview: ['#080a0b', '#111416', '#5ee4c8'] },
@@ -26,14 +26,14 @@ export function normalizeEditorAppearance(value?: Partial<EditorAppearance> | nu
   return {
     version: 1,
     mode: value?.mode === 'fixed' ? 'fixed' : 'system',
-    themeId: value?.themeId && THEME_IDS.has(value.themeId) ? value.themeId : 'hikari-light',
+    themeId: value?.themeId && THEME_IDS.has(value.themeId) ? value.themeId : 'slide-light',
     motion: value?.motion === 'full' || value?.motion === 'reduced' ? value.motion : 'system',
     ...(accentColor ? { accentColor } : {}),
   };
 }
 
 export function resolveEditorTheme(appearance: EditorAppearance, systemDark: boolean): EditorThemeId {
-  return appearance.mode === 'system' ? (systemDark ? 'graphite' : 'hikari-light') : appearance.themeId;
+  return appearance.mode === 'system' ? (systemDark ? 'graphite' : 'slide-light') : appearance.themeId;
 }
 
 export function resolveReducedMotion(appearance: EditorAppearance, systemReduced: boolean): boolean {
@@ -77,8 +77,8 @@ export function EditorAppearanceProvider({ children }: { children: ReactNode }) 
   const reducedMotion = resolveReducedMotion(appearance, systemReduced);
 
   useEffect(() => {
-    const stored = localStorage.getItem('hikari-editor-appearance');
-    if (stored) try { setAppearance(normalizeEditorAppearance(JSON.parse(stored))); } catch { localStorage.removeItem('hikari-editor-appearance'); }
+    const stored = localStorage.getItem('slide-editor-appearance');
+    if (stored) try { setAppearance(normalizeEditorAppearance(JSON.parse(stored))); } catch { localStorage.removeItem('slide-editor-appearance'); }
     void getEditorAppearance().then((value) => value && setAppearance(normalizeEditorAppearance(value))).catch(() => undefined);
   }, []);
 
@@ -106,7 +106,7 @@ export function EditorAppearanceProvider({ children }: { children: ReactNode }) 
   const updateAppearance = useCallback(async (next: EditorAppearance) => {
     const normalized = normalizeEditorAppearance(next);
     setAppearance(normalized);
-    localStorage.setItem('hikari-editor-appearance', JSON.stringify(normalized));
+    localStorage.setItem('slide-editor-appearance', JSON.stringify(normalized));
     await saveEditorAppearance(normalized);
   }, []);
 

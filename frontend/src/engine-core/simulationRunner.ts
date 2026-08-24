@@ -37,7 +37,7 @@ const abortError = () => new DOMException('全分支模拟已取消', 'AbortErro
 
 export class BranchSimulationRunner {
   private readonly cache = new Map<string, CacheEntry>();
-  constructor(private readonly workerFactory: WorkerFactory = () => new Worker(new URL('./simulation.worker.ts', import.meta.url), { type: 'module', name: 'hikari-branch-simulation' })) {}
+  constructor(private readonly workerFactory: WorkerFactory = () => new Worker(new URL('./simulation.worker.ts', import.meta.url), { type: 'module', name: 'slide-branch-simulation' })) {}
 
   clearCache() { this.cache.clear(); }
 

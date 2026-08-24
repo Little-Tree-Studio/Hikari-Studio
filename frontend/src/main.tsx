@@ -20,7 +20,7 @@ installGlobalErrorCapture();
 
 const engineTestRequested = new URLSearchParams(window.location.search).has('engine-test');
 const blockConformanceCase = getBlockConformanceCase(new URLSearchParams(window.location.search).get('block-conformance'));
-if (import.meta.env.DEV || engineTestRequested) window.__HIKARI_RUNTIME_SELF_TEST__ = runEngineSelfTest;
+if (import.meta.env.DEV || engineTestRequested) window.__SLIDE_RUNTIME_SELF_TEST__ = runEngineSelfTest;
 if (engineTestRequested) document.documentElement.dataset.engineSelfTest = JSON.stringify(runEngineSelfTest());
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

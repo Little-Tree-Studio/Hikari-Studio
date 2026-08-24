@@ -21,12 +21,12 @@ $EditorDirectory = if ($EditorDirectory) {
   if ([IO.Path]::IsPathRooted($EditorDirectory)) { [IO.Path]::GetFullPath($EditorDirectory) }
   else { [IO.Path]::GetFullPath((Join-Path $Root $EditorDirectory)) }
 } else {
-  Join-Path $DistRoot 'HikariStudio'
+  Join-Path $DistRoot 'SlideStudio'
 }
 if (-not $EditorDirectory.StartsWith($DistRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
   throw "Editor input must stay inside the repository dist directory: $EditorDirectory"
 }
-$Editor = Join-Path $EditorDirectory 'HikariStudio.exe'
+$Editor = Join-Path $EditorDirectory 'SlideStudio.exe'
 if (-not (Test-Path $Editor)) { throw "Editor build is missing: $Editor" }
 
 if (-not $IsccPath) {
@@ -53,9 +53,9 @@ if ($Version -notmatch '^(\d+)\.(\d+)\.(\d+)(?:-[^.]+\.(\d+))?$') {
 }
 $Revision = if ($Matches[4]) { $Matches[4] } else { '0' }
 $NumericVersion = "$($Matches[1]).$($Matches[2]).$($Matches[3]).$Revision"
-& $IsccPath "/DMyAppVersion=$Version" "/DMyAppNumericVersion=$NumericVersion" "/DMyAppSourceDir=$EditorDirectory" (Join-Path $Root 'installer\HikariStudio.iss')
+& $IsccPath "/DMyAppVersion=$Version" "/DMyAppNumericVersion=$NumericVersion" "/DMyAppSourceDir=$EditorDirectory" (Join-Path $Root 'installer\SlideStudio.iss')
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE" }
 
-$Installer = Join-Path $Root "dist\installer\Hikari-Studio-Setup-$Version.exe"
+$Installer = Join-Path $Root "dist\installer\Slide-Studio-Setup-$Version.exe"
 if (-not (Test-Path $Installer)) { throw "Installer build did not produce $Installer" }
-Write-Host "Hikari Studio installer: $Installer"
+Write-Host "Slide Studio installer: $Installer"

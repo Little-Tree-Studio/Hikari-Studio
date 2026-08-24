@@ -23,8 +23,8 @@ nuitka-crash-report.xml
 .env.*
 !.env.example
 data/logs/
-data/.hikari-studio/
+data/.slide-studio/
 data/settings/
-data/**/.hikari/
+data/**/.slide/
 data/*.v2-backup-*
 data/**/*.v2-backup-*

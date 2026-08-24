@@ -18,7 +18,7 @@ def manifest(version: str, payload: bytes, channel: str = "beta") -> dict[str, o
         "notes": "Beta stability update",
         "releaseUrl": f"https://github.com/example/releases/tag/v{version}",
         "installer": {
-            "url": f"https://example.com/Hikari-Studio-Setup-{version}.exe",
+            "url": f"https://example.com/Slide-Studio-Setup-{version}.exe",
             "sha256": hashlib.sha256(payload).hexdigest(),
             "size": len(payload),
         },

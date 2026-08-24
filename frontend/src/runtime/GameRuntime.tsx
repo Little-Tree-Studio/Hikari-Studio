@@ -27,14 +27,14 @@ interface RuntimePreferences {
 export function GameRuntime({ project: baseProject, conformanceCaseId }: { project: Project; conformanceCaseId?: BlockType }) {
   const runtimeLanguages = baseProject.locale?.languages ?? [];
   const [language, setLanguage] = useState(() => {
-    const stored = readSmallValue(`hikari-runtime-language:${baseProject.meta.id}`);
+    const stored = readSmallValue(`slide-runtime-language:${baseProject.meta.id}`);
     return runtimeLanguages.includes(stored ?? '') ? stored! : baseProject.locale?.default ?? runtimeLanguages[0] ?? 'zh-CN';
   });
   const project = useMemo(() => applyLanguage(baseProject, language), [baseProject, language]);
   const updateLanguage = (next: string) => {
     if (!runtimeLanguages.includes(next) || next === language) return;
     setLanguage(next);
-    writeSmallValue(`hikari-runtime-language:${baseProject.meta.id}`, next);
+    writeSmallValue(`slide-runtime-language:${baseProject.meta.id}`, next);
     setNotice(`Language: ${languageLabel(next)}`);
   };
   const entry = project.chapters.find((chapter) => chapter.entry)?.fragments[0]?.id ?? project.chapters[0]?.fragments[0]?.id ?? project.activeFragmentId;
@@ -54,7 +54,7 @@ export function GameRuntime({ project: baseProject, conformanceCaseId }: { proje
   const [saveMode, setSaveMode] = useState<'save' | 'load' | null>(null);
   const [notice, setNotice] = useState('');
   const [timelineTime, setTimelineTime] = useState(0);
-  const settingsKey = `hikari-runtime-settings:${project.meta.id}`;
+  const settingsKey = `slide-runtime-settings:${project.meta.id}`;
   const [preferences, setPreferences] = useState<RuntimePreferences>(() => {
     const defaults: RuntimePreferences = {
       masterVolume: 1,
@@ -94,7 +94,7 @@ export function GameRuntime({ project: baseProject, conformanceCaseId }: { proje
   const cameraFilter = camera.filter === 'monochrome' ? 'grayscale(1)' : camera.filter === 'sepia' ? 'sepia(.85)' : camera.filter === 'blur' ? 'blur(3px)' : 'none';
   const titleBackground = assetUri(project.ui?.title?.backgroundAssetId ?? project.scenes?.[0]?.layers.at(-1)?.assetId ?? project.assets.find((asset) => asset.kind === 'scene' || asset.kind === 'image')?.id);
   const titleLogo = assetUri(project.ui?.title?.logoAssetId);
-  const readHistoryKey = `hikari-read-blocks:${project.meta.id}`;
+  const readHistoryKey = `slide-read-blocks:${project.meta.id}`;
   const fastForwardActive = skipMode || controlFastForward;
   const runtimeTheme = normalizeGameUiTheme(project.ui?.runtimeTheme);
   const runtimeFontUri = assetUri(runtimeTheme.fontAssetId);
@@ -110,9 +110,9 @@ export function GameRuntime({ project: baseProject, conformanceCaseId }: { proje
       choose: (target: string) => setState((value) => chooseBranch(project, value, target)),
       reset: () => setState(createEngineState(project)),
     };
-    window.__HIKARI_BLOCK_CONFORMANCE__ = harness;
+    window.__SLIDE_BLOCK_CONFORMANCE__ = harness;
     return () => {
-      if (window.__HIKARI_BLOCK_CONFORMANCE__ === harness) delete window.__HIKARI_BLOCK_CONFORMANCE__;
+      if (window.__SLIDE_BLOCK_CONFORMANCE__ === harness) delete window.__SLIDE_BLOCK_CONFORMANCE__;
     };
   }, [conformanceCaseId, project, state]);
 
@@ -496,7 +496,7 @@ export function GameRuntime({ project: baseProject, conformanceCaseId }: { proje
   };
 
   return <main className={`game-runtime ${camera.shake > 0 ? 'camera-shake' : ''} ${camera.filter === 'vignette' ? 'camera-vignette' : ''}`} style={{ ...gameUiThemeCssVariables(runtimeTheme), '--game-aspect': `${project.meta.resolution[0]} / ${project.meta.resolution[1]}` } as CSSProperties} onContextMenu={(event) => { event.preventDefault(); if (screen === 'playing' && !saveMode && !settingsOpen && !backlogOpen && !systemMenuOpen) setUiHidden((value) => !value); }} onWheel={(event) => { if (screen === 'playing' && event.deltaY < 0 && !saveMode && !settingsOpen && !systemMenuOpen) { setAutoPlay(false); setSkipMode(false); setBacklogOpen(true); } }}>
-    {runtimeFontUri && <style>{`@font-face{font-family:"Hikari Project Font";src:url(${JSON.stringify(runtimeFontUri)})}`}</style>}
+    {runtimeFontUri && <style>{`@font-face{font-family:"Slide Project Font";src:url(${JSON.stringify(runtimeFontUri)})}`}</style>}
     <section className="game-stage" onClick={() => { if (screen === 'playing' && !systemMenuOpen) advance(); }}>
       <div className="game-camera" style={{ transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.zoom}) rotate(${camera.rotation}deg)`, filter: cameraFilter, transitionDuration: `${camera.duration}s` }}>
         {background && <img className="game-background" src={background} alt="" style={{ opacity: timelinePreview.sceneOpacity ?? 1 }} />}
@@ -525,7 +525,7 @@ export function GameRuntime({ project: baseProject, conformanceCaseId }: { proje
       <div className="game-title-shade" />
       <div className="game-title-content">
         {titleLogo ? <img className="game-title-logo" src={titleLogo} alt={project.meta.name} /> : <h1>{project.meta.name}</h1>}
-        <p>{project.ui?.title?.subtitle || project.meta.author || 'Hikari Studio'}</p>
+        <p>{project.ui?.title?.subtitle || project.meta.author || 'Slide Studio'}</p>
         <nav className="game-title-actions" aria-label="标题菜单">
           <button className="primary" onClick={requestNewGame}><Play />开始游戏</button>
           <button disabled={!continueSlot || continueLoading} onClick={() => void continueGame()}><RotateCcw />{continueLoading ? '检查存档…' : '继续游戏'}</button>
@@ -534,7 +534,7 @@ export function GameRuntime({ project: baseProject, conformanceCaseId }: { proje
           <button onClick={() => setConfirmation('exit')}><DoorOpen />退出游戏</button>
         </nav>
       </div>
-      <small className="game-title-version">{project.meta.author || 'Hikari Studio'} · v{project.meta.gameVersion || '1.0.0'}</small>
+      <small className="game-title-version">{project.meta.author || 'Slide Studio'} · v{project.meta.gameVersion || '1.0.0'}</small>
     </section>}
     {screen === 'playing' && !uiHidden && !state.finished && <section className={`game-dialogue-layer ${current?.type === 'branch' ? 'branch-active' : ''}`} onClick={(event) => event.stopPropagation()}>
       <div ref={dialogueCopyRef} className={`game-dialogue-copy speaker-${runtimeTheme.speakerStyle}`} onClick={advance}>

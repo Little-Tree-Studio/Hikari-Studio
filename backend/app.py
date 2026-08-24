@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import json
 import logging
+import os
 import queue
 import threading
 from pathlib import Path
@@ -21,6 +23,25 @@ from .window_state import WindowStateStore
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _configure_windows_app_identity() -> None:
+    if os.name != "nt":
+        return
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("SlideStudio.Editor")
+    except (AttributeError, OSError):
+        logging.getLogger(__name__).debug("Windows AppUserModelID is unavailable", exc_info=True)
+
+
+def _application_icon_path(resource_root: Path) -> Path | None:
+    candidates = (
+        resource_root / "SlideStudio.ico",
+        resource_root / "installer" / "SlideStudio.ico",
+        resource_root / "SlideLogo.png",
+        resource_root / "frontend" / "dist" / "assets" / "slide-logo.png",
+    )
+    return next((path for path in candidates if path.is_file()), None)
+
+
 def create_api(data_dir: Path | None = None, *, paths: DesktopPaths | None = None) -> DesktopApi:
     if paths is None:
         if data_dir is not None:
@@ -31,8 +52,8 @@ def create_api(data_dir: Path | None = None, *, paths: DesktopPaths | None = Non
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Hikari Studio desktop editor")
-    parser.add_argument("project", nargs="?", help="Open a Hikari project manifest")
+    parser = argparse.ArgumentParser(description="Slide Studio desktop editor")
+    parser.add_argument("project", nargs="?", help="Open a Slide project manifest")
     parser.add_argument("--debug", action="store_true", help="Enable Qt WebEngine developer tools")
     parser.add_argument("--portable", action="store_true", help="Store projects and settings beside the executable")
     args = parser.parse_args()
@@ -41,7 +62,7 @@ def main() -> None:
     migrated = migrate_legacy_desktop_data(paths)
     log_path = configure_logging(paths.app_data_dir)
     logger = logging.getLogger(__name__)
-    logger.info("Starting Hikari Studio; log=%s data=%s projects=%s portable=%s", log_path, paths.app_data_dir, paths.projects_dir, paths.portable)
+    logger.info("Starting Slide Studio; log=%s data=%s projects=%s portable=%s", log_path, paths.app_data_dir, paths.projects_dir, paths.portable)
     if migrated:
         logger.info("Migrated legacy projects: %s", [str(path) for path in migrated])
 
@@ -49,12 +70,19 @@ def main() -> None:
     if not frontend_dist.joinpath("desktop.html").exists():
         raise SystemExit("Frontend build is missing. Run: cd frontend && pnpm install && pnpm build")
 
-    from PySide6.QtWidgets import QApplication
     from PySide6.QtCore import QUrl
+    from PySide6.QtGui import QIcon
+    from PySide6.QtWidgets import QApplication
 
+    _configure_windows_app_identity()
     application = QApplication.instance() or QApplication([])
-    QApplication.setApplicationName("Hikari Studio")
-    QApplication.setOrganizationName("Hikari Studio")
+    QApplication.setApplicationName("Slide Studio")
+    QApplication.setOrganizationName("Slide Studio")
+    icon_path = _application_icon_path(paths.resource_root)
+    if icon_path is not None:
+        icon = QIcon(str(icon_path))
+        if not icon.isNull():
+            application.setWindowIcon(icon)
 
     pending_messages: queue.Queue[dict[str, Any]] = queue.Queue()
     editor_ready = threading.Event()
@@ -74,9 +102,9 @@ def main() -> None:
             project_path = str(payload.get("projectPath") or "").strip()
             if project_path:
                 encoded = json.dumps(project_path, ensure_ascii=False)
-                window.evaluate_js(f"window.dispatchEvent(new CustomEvent('hikari-open-project-request', {{ detail: {encoded} }}))")
+                window.evaluate_js(f"window.dispatchEvent(new CustomEvent('slide-open-project-request', {{ detail: {encoded} }}))")
         except Exception:
-            logger.exception("Failed to activate the primary Hikari Studio window")
+            logger.exception("Failed to activate the primary Slidr Studio window")
 
     def dispatch_instance_message(payload: dict[str, Any]) -> None:
         window = window_holder.get("window")

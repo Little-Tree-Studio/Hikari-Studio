@@ -77,7 +77,7 @@ class AsrService:
                 return {"assetId": asset_id, "status": "failed", "error": str(error)}
 
         results: list[dict[str, Any]] = []
-        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="hikari-asr") as executor:
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="slide-asr") as executor:
             futures = [executor.submit(run, asset_id, path) for asset_id, path in items]
             for future in as_completed(futures):
                 results.append(future.result())

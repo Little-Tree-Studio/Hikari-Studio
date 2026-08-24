@@ -13,17 +13,17 @@ afterEach(() => {
 describe('desktop project session', () => {
   it('keeps waiting after an early pywebviewready event and saves with the loaded session', async () => {
     const diskProject = { meta: { id: 'demo', name: '磁盘项目' } } as unknown as Project;
-    const saveProject = vi.fn().mockResolvedValue({ ok: true, path: 'C:/project/project.hikari.json', bytes: 10 });
+    const saveProject = vi.fn().mockResolvedValue({ ok: true, path: 'C:/project/project.slide.json', bytes: 10 });
     const api = {
       load_project_session: vi.fn().mockResolvedValue({
         project: diskProject,
-        projectPath: 'C:/project/project.hikari.json',
+        projectPath: 'C:/project/project.slide.json',
         sessionToken: 'session-token',
       }),
       save_project: saveProject,
     } as unknown as DesktopApi;
     const host = Object.assign(new EventTarget(), {
-      __HIKARI_DESKTOP__: true,
+      __SLIDE_DESKTOP__: true,
       pywebview: { api: {} as DesktopApi },
       setInterval,
       clearInterval,
@@ -44,7 +44,7 @@ describe('desktop project session', () => {
     expect(saveProject).toHaveBeenCalledWith(
       diskProject,
       'demo',
-      'C:/project/project.hikari.json',
+      'C:/project/project.slide.json',
       'session-token',
     );
   });
@@ -65,18 +65,18 @@ describe('desktop project session', () => {
     };
     const profiledLoad = vi.fn(async (reloadId: string) => ({
       projectJson: JSON.stringify(diskProject),
-      projectPath: 'C:/project/project.hikari.json',
+      projectPath: 'C:/project/project.slide.json',
       sessionToken: 'profiled-session',
       backend: { ...profile, reloadId },
     }));
-    const save = vi.fn().mockResolvedValue({ ok: true, path: 'C:/project/project.hikari.json', bytes: 100 });
+    const save = vi.fn().mockResolvedValue({ ok: true, path: 'C:/project/project.slide.json', bytes: 100 });
     const api = {
       load_project_session: vi.fn(),
       load_project_session_profiled: profiledLoad,
       save_project: save,
     } as unknown as DesktopApi;
     const host = Object.assign(new EventTarget(), {
-      __HIKARI_DESKTOP__: true,
+      __SLIDE_DESKTOP__: true,
       pywebview: { api },
       setInterval,
       clearInterval,
@@ -94,7 +94,7 @@ describe('desktop project session', () => {
     expect(result.performance?.jsonParseMs).toBeGreaterThanOrEqual(0);
     expect(profiledLoad).toHaveBeenCalledOnce();
     await saveProject(diskProject);
-    expect(save).toHaveBeenCalledWith(diskProject, 'profiled', 'C:/project/project.hikari.json', 'profiled-session');
+    expect(save).toHaveBeenCalledWith(diskProject, 'profiled', 'C:/project/project.slide.json', 'profiled-session');
   });
 
   it('decodes gzip project payloads before parsing the desktop project', async () => {
@@ -103,7 +103,7 @@ describe('desktop project session', () => {
       load_project_session_profiled: vi.fn(async (reloadId: string) => ({
         encoding: 'gzip-base64' as const,
         projectPayload: 'H4sIAAAAAAAE/6tWyk0tSVSyqlbKTFGyUkrOzy0oSi0uTk1R0lHKS8xNBYo97et+vmfly4U7n89ep1RbCwBgiMt7MgAAAA==',
-        projectPath: 'C:/project/project.hikari.json',
+        projectPath: 'C:/project/project.slide.json',
         sessionToken: 'compressed-session',
         backend: {
           version: 1 as const,
@@ -120,7 +120,7 @@ describe('desktop project session', () => {
       })),
     } as unknown as DesktopApi;
     const host = Object.assign(new EventTarget(), {
-      __HIKARI_DESKTOP__: true,
+      __SLIDE_DESKTOP__: true,
       pywebview: { api },
       setInterval,
       clearInterval,

@@ -188,9 +188,9 @@ export function Preview({
       choose: (target: string) => setState((value) => chooseBranch(project, value, target)),
       reset: () => setState(createEngineState(project)),
     };
-    window.__HIKARI_BLOCK_CONFORMANCE__ = harness;
+    window.__SLIDE_BLOCK_CONFORMANCE__ = harness;
     return () => {
-      if (window.__HIKARI_BLOCK_CONFORMANCE__ === harness) delete window.__HIKARI_BLOCK_CONFORMANCE__;
+      if (window.__SLIDE_BLOCK_CONFORMANCE__ === harness) delete window.__SLIDE_BLOCK_CONFORMANCE__;
     };
   }, [conformanceCaseId, project, state]);
 
@@ -428,7 +428,7 @@ export function Preview({
           previewSeekCacheRef.current!.stats(),
           traceRestoreCacheRef.current!.stats(),
         );
-        window.__HIKARI_PREVIEW_SEEK_PERFORMANCE__ = report;
+        window.__SLIDE_PREVIEW_SEEK_PERFORMANCE__ = report;
         void reportPreviewSeekPerformance(report).catch((error) => {
           console.warn('Preview seek performance report failed', error);
         });
@@ -453,7 +453,7 @@ export function Preview({
   const openStandalone = async () => {
     const previewWindow = window.open(
       "about:blank",
-      "hikari-game-preview",
+      "slide-game-preview",
       "popup,width=1280,height=760",
     );
     if (!previewWindow) {
@@ -462,7 +462,7 @@ export function Preview({
     }
     try {
       setRuntimeNotice("正在准备独立预览…");
-      await writeLargeValue("hikari-preview-project", JSON.stringify(baseProject));
+      await writeLargeValue("slide-preview-project", JSON.stringify(baseProject));
       const url = new URL(window.location.href);
       url.search = `?preview=1&fragment=${encodeURIComponent(state.fragmentId)}&index=${state.instructionPointer}${language && runtimeLanguages.length > 1 ? `&lang=${encodeURIComponent(language)}` : ''}`;
       previewWindow.location.replace(url.toString());

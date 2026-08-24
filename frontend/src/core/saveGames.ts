@@ -60,10 +60,10 @@ export const SAVE_SLOTS: Array<Pick<SaveSlotRecord, 'slotId' | 'slotType' | 'lab
   })),
 ];
 
-const saveKey = (projectId: string, slotId: string) => `hikari-save:${projectId}:${slotId}`;
+const saveKey = (projectId: string, slotId: string) => `slide-save:${projectId}:${slotId}`;
 const backupKey = (projectId: string, slotId: string) => `${saveKey(projectId, slotId)}:backup`;
-const legacyQuickKey = (projectId: string) => `hikari-save-${projectId}-quick`;
-const sharedKey = (projectId: string) => `hikari-shared:${projectId}`;
+const legacyQuickKey = (projectId: string) => `slide-save-${projectId}-quick`;
+const sharedKey = (projectId: string) => `slide-shared:${projectId}`;
 const noticeKey = (projectId: string, slotId: string) => `${projectId}:${slotId}`;
 
 function checksum(value: string) {

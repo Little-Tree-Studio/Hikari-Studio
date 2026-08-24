@@ -92,7 +92,7 @@ class ProjectStoreTests(unittest.TestCase):
             project = store.load()
             project["productionMemory"] = {"version": 1, "world": "测试世界", "characterRules": [], "styleRules": [], "facts": [{"id": "fact", "title": "事实", "content": "不会遗忘", "pinned": True, "references": [], "updatedAt": "now"}], "restrictions": [], "updatedAt": "now"}
             store.save(project)
-            memory_path = store.project_root / ".hikari" / "agent" / "memory.json"
+            memory_path = store.project_root / ".slide" / "agent" / "memory.json"
             self.assertTrue(memory_path.exists())
             self.assertEqual(ProjectStore(Path(directory)).load()["productionMemory"]["world"], "测试世界")
 
@@ -147,7 +147,7 @@ class ProjectStoreTests(unittest.TestCase):
 
             self.assertTrue(result["ok"])
             self.assertEqual(result["commandCount"], 1)
-            self.assertTrue((store.project_root / ".hikari" / "history" / "commands.json").exists())
+            self.assertTrue((store.project_root / ".slide" / "history" / "commands.json").exists())
             reopened = ProjectStore(root).load_command_history()
             self.assertEqual(reopened, history)
             json.loads(json.dumps(reopened, ensure_ascii=False))
@@ -416,7 +416,7 @@ class ProjectStoreTests(unittest.TestCase):
             store = ProjectStore(Path(directory))
             project = store.load()
             root = store.project_path.parent
-            self.assertEqual(store.project_path.name, "project.hikari.json")
+            self.assertEqual(store.project_path.name, "project.slide.json")
             self.assertTrue((root / "chapters" / "start.json").exists())
             self.assertTrue((root / "scripts" / "lake-meeting.json").exists())
             self.assertTrue((root / "characters" / "lin-cheng.json").exists())
@@ -428,7 +428,7 @@ class ProjectStoreTests(unittest.TestCase):
     def test_opening_legacy_project_creates_backup_and_v3_directory(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            legacy_path = root / "legacy.hikari.json"
+            legacy_path = root / "legacy.slide.json"
             import json
             legacy = default_project()
             legacy["version"] = 2
@@ -436,13 +436,13 @@ class ProjectStoreTests(unittest.TestCase):
             store = ProjectStore(root / "other")
             loaded = store.open(legacy_path)
             self.assertEqual(loaded["version"], 3)
-            self.assertTrue(os.path.samefile(store.project_path, root / "legacy" / "project.hikari.json"))
-            self.assertEqual(len(list(root.glob("legacy.hikari.json.v2-backup-*"))), 1)
+            self.assertTrue(os.path.samefile(store.project_path, root / "legacy" / "project.slide.json"))
+            self.assertEqual(len(list(root.glob("legacy.slide.json.v2-backup-*"))), 1)
 
-    def test_opening_associated_hikari_file_migrates_to_v3_directory(self) -> None:
+    def test_opening_associated_slide_file_migrates_to_v3_directory(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            associated_path = root / "visual-novel.hikari"
+            associated_path = root / "visual-novel.slide"
             import json
             legacy = default_project("文件关联项目")
             legacy["version"] = 2
@@ -450,8 +450,8 @@ class ProjectStoreTests(unittest.TestCase):
             store = ProjectStore(root / "other")
             loaded = store.open(associated_path)
             self.assertEqual(loaded["meta"]["name"], "文件关联项目")
-            self.assertTrue(os.path.samefile(store.project_path, root / "visual-novel" / "project.hikari.json"))
-            self.assertEqual(len(list(root.glob("visual-novel.hikari.v2-backup-*"))), 1)
+            self.assertTrue(os.path.samefile(store.project_path, root / "visual-novel" / "project.slide.json"))
+            self.assertEqual(len(list(root.glob("visual-novel.slide.v2-backup-*"))), 1)
 
     def test_corrupt_manifest_recovers_from_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -473,13 +473,13 @@ class ProjectStoreTests(unittest.TestCase):
     def test_saving_to_unloaded_legacy_path_still_creates_backup(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            legacy_path = root / "star-sea-echo.hikari.json"
+            legacy_path = root / "star-sea-echo.slide.json"
             import json
             legacy_path.write_text(json.dumps(default_project(), ensure_ascii=False), encoding="utf-8")
             store = ProjectStore(root)
             store.save(default_project("新的内容"))
-            self.assertEqual(len(list(root.glob("star-sea-echo.hikari.json.v2-backup-*"))), 1)
-            self.assertTrue(os.path.samefile(store.project_path, root / "star-sea-echo" / "project.hikari.json"))
+            self.assertEqual(len(list(root.glob("star-sea-echo.slide.json.v2-backup-*"))), 1)
+            self.assertTrue(os.path.samefile(store.project_path, root / "star-sea-echo" / "project.slide.json"))
 
     def test_import_asset_copies_into_project_asset_folder(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -680,7 +680,7 @@ class ProjectStoreTests(unittest.TestCase):
             target = root / "copy"
             result = store.save_as(store.load(), target)
             self.assertTrue(result["ok"])
-            self.assertTrue(os.path.samefile(store.project_path, target / "project.hikari.json"))
+            self.assertTrue(os.path.samefile(store.project_path, target / "project.slide.json"))
             self.assertTrue((target / "assets" / "files" / "portrait.png").exists())
 
     def test_entry_chapter_cannot_be_migrated_as_disabled(self) -> None:

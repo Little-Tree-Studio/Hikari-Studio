@@ -8,7 +8,7 @@ import type { BranchSimulationProgress } from './engine-core/types';
 const waitForDesktopApi = async () => {
   const ready = () => typeof window.pywebview?.api?.load_project_session === 'function';
   if (ready()) return window.pywebview!.api;
-  const desktopHost = window.__HIKARI_DESKTOP__ === true;
+  const desktopHost = window.__SLIDE_DESKTOP__ === true;
   if (!desktopHost) return undefined;
   await new Promise<void>((resolve) => {
     let interval = 0;
@@ -35,7 +35,7 @@ const acceptProjectSession = (session: DesktopProjectSession): Project => {
   return session.project;
 };
 
-const reloadMark = (reloadId: string, phase: string) => performance.mark(`hikari.reload.${reloadId}.${phase}`);
+const reloadMark = (reloadId: string, phase: string) => performance.mark(`slide.reload.${reloadId}.${phase}`);
 const createReloadId = () => `reload-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
 const supportsCompressedProjectPayload = () => typeof DecompressionStream === 'function' && typeof atob === 'function';
 
@@ -74,13 +74,13 @@ export async function getEditorAppearance(): Promise<EditorAppearance | null> {
 export async function saveEditorAppearance(appearance: EditorAppearance): Promise<EditorAppearance> {
   const api = await waitForDesktopApi();
   if (api) return withTimeout(api.save_editor_appearance(appearance));
-  localStorage.setItem('hikari-editor-appearance', JSON.stringify(appearance));
+  localStorage.setItem('slide-editor-appearance', JSON.stringify(appearance));
   return appearance;
 }
 
 export async function getAppInfo(): Promise<AppInfo> {
   const api = await waitForDesktopApi();
-  if (!api) return { name: 'Hikari Studio', version: '0.4.0-beta.1', channel: 'beta', platform: 'Web', projectPath: '', dataPath: '', buildPath: '', startupProjectRequested: false };
+  if (!api) return { name: 'Slide Studio', version: '0.4.0-beta.1', channel: 'beta', platform: 'Web', projectPath: '', dataPath: '', buildPath: '', startupProjectRequested: false };
   return withTimeout(api.get_app_info());
 }
 
@@ -180,10 +180,10 @@ export async function loadProjectWithPerformance(fallback: Project): Promise<{ p
     }
   } catch (error) {
     console.error('Python project loading failed', error);
-    if (window.__HIKARI_DESKTOP__ === true) throw error;
+    if (window.__SLIDE_DESKTOP__ === true) throw error;
   }
-  if (window.__HIKARI_DESKTOP__ === true) throw new Error('桌面项目服务未就绪，已停止加载以保护项目文件');
-  const cached = await readLargeValue('hikari-project');
+  if (window.__SLIDE_DESKTOP__ === true) throw new Error('桌面项目服务未就绪，已停止加载以保护项目文件');
+  const cached = await readLargeValue('slide-project');
   return { project: cached ? JSON.parse(cached) as Project : fallback, performance: null };
 }
 
@@ -199,7 +199,7 @@ export async function reportProjectReloadPerformance(reloadId: string, surface: 
 
 export async function getProjectReloadPerformance(): Promise<ProjectReloadPerformance | null> {
   const api = await waitForDesktopApi();
-  if (!api || typeof api.get_project_reload_performance !== 'function') return window.__HIKARI_LAST_PROJECT_RELOAD__ ?? null;
+  if (!api || typeof api.get_project_reload_performance !== 'function') return window.__SLIDE_LAST_PROJECT_RELOAD__ ?? null;
   return withTimeout(api.get_project_reload_performance());
 }
 
@@ -211,7 +211,7 @@ export async function reportPreviewSeekPerformance(report: PreviewSeekPerformanc
 
 export async function getPreviewSeekPerformance(): Promise<PreviewSeekPerformanceReport | null> {
   const api = await waitForDesktopApi();
-  if (!api || typeof api.get_preview_seek_performance !== 'function') return window.__HIKARI_PREVIEW_SEEK_PERFORMANCE__ ?? null;
+  if (!api || typeof api.get_preview_seek_performance !== 'function') return window.__SLIDE_PREVIEW_SEEK_PERFORMANCE__ ?? null;
   return withTimeout(api.get_preview_seek_performance());
 }
 
@@ -221,9 +221,9 @@ export async function saveProject(project: Project) {
     if (!currentProjectSession) throw new Error('桌面项目会话尚未建立，请重新打开项目');
     return withTimeout(api.save_project(project, project.meta.id, currentProjectSession.projectPath, currentProjectSession.sessionToken));
   }
-  if (window.__HIKARI_DESKTOP__ === true) throw new Error('桌面项目服务未就绪，未执行保存');
+  if (window.__SLIDE_DESKTOP__ === true) throw new Error('桌面项目服务未就绪，未执行保存');
   const encoded = JSON.stringify(project);
-  await writeLargeValue('hikari-project', encoded);
+  await writeLargeValue('slide-project', encoded);
   return { ok: true, path: '浏览器预览缓存', bytes: encoded.length };
 }
 
@@ -370,11 +370,11 @@ export async function writeClipboardText(text: string): Promise<boolean> {
 }
 
 const previewClipboardFallback = (text: string, rules?: ScriptImportRules): ScriptImportPreview => {
-  const prefix = 'HIKARI_BLOCKS_V1\n';
+  const prefix = 'SLIDE_BLOCKS_V1\n';
   if (text.startsWith(prefix)) {
     try {
       const blocks = JSON.parse(text.slice(prefix.length));
-      if (Array.isArray(blocks)) return { sourceName: '浏览器剪贴板', format: 'Hikari JSON', blocks, warnings: [], rules };
+      if (Array.isArray(blocks)) return { sourceName: '浏览器剪贴板', format: 'Slide JSON', blocks, warnings: [], rules };
     } catch { /* report an empty preview below */ }
   }
   const blocks = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line, index) => {
