@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import contextlib
 import ctypes
 from copy import deepcopy
 import inspect
+import ipaddress
 import json
 import logging
 import os
+import tempfile
 import threading
 import time
 import urllib.error
@@ -100,11 +103,73 @@ class WindowsCredentialStore:
             self.advapi32.CredFree(pointer)
 
 
+class FileSecretStore:
+    """非 Windows 平台的 API Key 回退存储：应用数据目录内的受限权限文件。
+
+    Windows 继续使用 Credential Manager；此实现让 AiService 在 macOS/Linux
+    上可以构造与运行（与项目内其余跨平台回退保持一致），并在 POSIX 上
+    将文件权限收紧为 0600。
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    def read(self) -> str | None:
+        try:
+            return self.path.read_text(encoding="utf-8") or None
+        except FileNotFoundError:
+            return None
+
+    def write(self, value: str) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(value, encoding="utf-8")
+        if os.name == "posix":
+            try:
+                os.chmod(self.path, 0o600)
+            except OSError:
+                LOGGER.warning("Failed to restrict secret file permissions: %s", self.path)
+
+
+def default_secret_store(data_dir: Path) -> SecretStore:
+    if os.name == "nt":
+        return WindowsCredentialStore()
+    store = FileSecretStore(data_dir.resolve() / "settings" / "ai-key.secret")
+    LOGGER.warning("Non-Windows platform: API key is stored in a permission-restricted file (%s)", store.path)
+    return store
+
+
+def _write_json_atomic(path: Path, value: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(value, handle, ensure_ascii=False, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(temp_path)
+        raise
+
+
+def _endpoint_is_local_http(url: str) -> bool:
+    """http 明文端点只放行本机回环与私有网段地址（本地 LLM 服务常见场景）。"""
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    if host in {"localhost", "127.0.0.1", "::1"}:
+        return True
+    try:
+        return ipaddress.ip_address(host).is_private
+    except ValueError:
+        return False
+
+
 class AiService:
     def __init__(self, data_dir: Path, secret_store: SecretStore | None = None, provider_factory: Callable[[dict[str, Any], str], AiProvider] | None = None) -> None:
         self.settings_path = data_dir.resolve() / "settings" / "ai.json"
         self.health_cache = ModelHealthCache(data_dir.resolve() / "settings" / "ai-health.json")
-        self.secret_store = secret_store or WindowsCredentialStore()
+        self.secret_store = secret_store or default_secret_store(data_dir)
         self.provider_factory = provider_factory or self._create_provider
         self._monitor_stop = threading.Event()
         self._monitor_thread: threading.Thread | None = None
@@ -113,16 +178,25 @@ class AiService:
         settings = self._read_settings()
         return {**settings, "hasKey": bool(self.secret_store.read())}
 
+    def clear_key(self) -> dict[str, Any]:
+        self.secret_store.write("")
+        return self.get_settings()
+
     def save_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
         url = str(settings.get("url", "")).strip().rstrip("/")
         model = str(settings.get("model", "")).strip()
         parsed = urlparse(url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValueError("API URL 必须是有效的 http 或 https 地址")
+        if parsed.scheme == "http" and not _endpoint_is_local_http(url):
+            raise ValueError("为避免 API Key 明文传输，不允许使用公网 http:// 端点；本机与私有局域网地址可用，公网请改用 https://")
         if not model:
             raise ValueError("模型名称不能为空")
+        clear_key = bool(settings.get("clearKey"))
         api_key = str(settings.get("apiKey", "")).strip()
-        if api_key:
+        if clear_key:
+            self.secret_store.write("")
+        elif api_key:
             self.secret_store.write(api_key)
         fallback_models = []
         for candidate in settings.get("fallbackModels", []):
@@ -130,8 +204,7 @@ class AiService:
             if candidate_id and candidate_id != model and candidate_id not in fallback_models:
                 fallback_models.append(candidate_id)
         public = {"url": url, "model": model, "fallbackModels": fallback_models[:5], "temperature": min(1.5, max(0.0, float(settings.get("temperature", 0.4))))}
-        self.settings_path.parent.mkdir(parents=True, exist_ok=True)
-        self.settings_path.write_text(json.dumps(public, ensure_ascii=False, indent=2), encoding="utf-8")
+        _write_json_atomic(self.settings_path, public)
         return {**public, "hasKey": bool(self.secret_store.read())}
 
     def run(

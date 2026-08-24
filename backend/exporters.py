@@ -74,8 +74,12 @@ def export_renpy(project: dict[str, Any], output_dir: Path) -> Path:
     for name, identifier in character_ids.items():
         lines.append(f"define {identifier} = Character({quote(name)})")
     lines.extend(["", "label start:"])
-    entry_fragment = enabled_chapters[0]["fragments"][0]["id"]
-    lines.extend([f"    call {fragment_names[entry_fragment]}", "    return", ""])
+    entry_chapter = enabled_chapters[0] if enabled_chapters else None
+    entry_fragment = entry_chapter["fragments"][0] if entry_chapter and entry_chapter.get("fragments") else None
+    if entry_fragment is None:
+        raise ValueError("没有可导出的片段：请确认至少有一个未禁用章节包含片段")
+    entry_fragment_id = entry_fragment["id"]
+    lines.extend([f"    call {fragment_names[entry_fragment_id]}", "    return", ""])
     for chapter in enabled_chapters:
         lines.append(f"# {chapter['name']}")
         for fragment in chapter.get("fragments", []):
@@ -126,41 +130,7 @@ PLAYER_HTML = """<!doctype html>
 <html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#111719"><title>Slide Game</title><link rel="stylesheet" href="player.css"></head>
 <body><div id="game-root"></div><script src="project.js"></script><script src="player.js"></script></body></html>"""
 
-PLAYER_CSS = """*{box-sizing:border-box}html,body{margin:0;height:100%;background:#111;font-family:system-ui,sans-serif}#game{height:100%;position:relative;overflow:hidden;background:#1b252a}#background{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}#scene-layers,#characters{position:absolute;inset:0}#scene-layers img{position:absolute;width:100%;height:100%;object-fit:contain;pointer-events:none}#characters img{position:absolute;bottom:0;height:88%;width:30%;object-fit:contain;object-position:bottom;transform:translateX(-50%);pointer-events:none}#shade{position:absolute;inset:0;background:linear-gradient(transparent 45%,rgba(0,0,0,.65))}#dialogue{position:absolute;left:7%;right:7%;bottom:7%;padding:22px 26px;background:rgba(248,250,250,.94);border-left:5px solid #187c6b;box-shadow:0 10px 35px #0007;min-height:130px}#speaker{color:#126556;font-size:18px}#text{font-size:20px;line-height:1.7;margin:8px 0 0}#next{position:absolute;right:18px;bottom:12px;color:#187c6b}#choices{display:grid;gap:8px}#choices button{border:1px solid #b7c3c6;background:white;padding:12px 15px;text-align:left;font-size:16px;cursor:pointer}#choices button:hover{border-color:#187c6b;background:#e8f4f1}@media(max-width:700px){#dialogue{left:3%;right:3%;bottom:3%;padding:16px}#text{font-size:16px}}"""
 
-PLAYER_JS = """const p=window.SLIDE_PROJECT;
-const bg=document.querySelector('#background'),sceneLayers=document.querySelector('#scene-layers'),characters=document.querySelector('#characters'),speaker=document.querySelector('#speaker'),text=document.querySelector('#text'),choices=document.querySelector('#choices'),next=document.querySelector('#next');
-let fragment=p.chapters[0].fragments[0].id,index=0,currentBg='',variables={...(p.variables||{})},callStack=[];
-const audioChannels={bgm:new Audio(),sfx:new Audio(),voice:new Audio()};
-function blocks(){return p.scripts[fragment]||[]}
-function asset(id){return p.assets.find(a=>a.id===id)}
-function audioAsset(value){return p.assets.find(a=>a.id===value||a.name===value||(a.path||'').endsWith(value||''))}
-function playAudio(b){const channel=b.channel||'bgm',player=audioChannels[channel]||audioChannels.sfx;if((b.action||'play')==='stop'){player.pause();return}const a=audioAsset(b.assetId||b.title);if(!a)return;player.src=a.exportPath||a.uri||a.path;player.volume=Math.max(0,Math.min(1,b.volume??1));player.loop=b.loop??channel==='bgm';player.play().catch(()=>{})}
-function character(id){return (p.characters||[]).find(c=>c.id===id)}
-function characterBySpeaker(value){return (p.characters||[]).find(c=>c.id===value||c.name===value)}
-function dimension(value){return value&&value.value!=null?value.value+(value.unit||'px'):''}
-function displayName(b,c){if(!c)return b.speaker||'';const scheme=(c.displayNameSchemes||[]).find(s=>s.id===b.displayNameSchemeId);if(!scheme)return c.name;const value=scheme.kind==='fixed'?scheme.value:scheme.kind==='variable'?variables[scheme.value]:(c.attributes||{})[scheme.value];return String(value??'').trim()||c.name}
-function syncOverlays(c,img){characters.querySelectorAll(`[data-overlay-owner="${c.id}"]`).forEach(item=>item.remove());(c.overlays||[]).forEach(o=>{const a=asset(o.assetId);if(!a)return;const layer=document.createElement('img');layer.className='character-overlay';layer.dataset.overlayOwner=c.id;layer.src=a.exportPath||a.uri||a.path;layer.alt=o.name||'';layer.style.left=img.style.left;layer.style.opacity=o.opacity??1;layer.style.scale=img.style.scale;layer.style.zIndex=(o.layer??0)+(c.defaultLayer??0)+21;if(o.overrideSize){layer.style.width=dimension(o.width);layer.style.height=dimension(o.height)}characters.appendChild(layer)})}
-function applyCharacter(img,c,b={}){const position=b.position??c.defaultPosition??'center';img.style.left=({farLeft:10,left:28,center:50,right:72,farRight:90}[position]??b.x??50)+'%';img.style.opacity=b.opacity??1;img.style.scale=b.scale??c.defaultScale??1;img.style.zIndex=(b.layer??c.defaultLayer??0)+20;img.style.width=dimension(c.portraitWidth);img.style.height=dimension(c.portraitHeight);syncOverlays(c,img)}
-function fail(message){speaker.textContent='运行时错误';text.textContent=message;next.hidden=true}
-function go(target){if(!target||!p.scripts[target]){fail('无效的片段目标：'+(target||'未设置'));return false}fragment=target;index=0;return true}
-function compare(left,op,right){if(op==='neq')return left!==right;if(op==='gt')return Number(left)>Number(right);if(op==='gte')return Number(left)>=Number(right);if(op==='lt')return Number(left)<Number(right);if(op==='lte')return Number(left)<=Number(right);return left===right}
-function render(){choices.innerHTML='';next.hidden=false;for(let guard=0;guard<1000;guard++){
-  const list=blocks();if(index>=list.length){if(callStack.length){const frame=callStack.pop();fragment=frame.fragment;index=frame.index;continue}speaker.textContent='';text.textContent='游戏结束';next.hidden=true;return}
-  const b=list[index];
-  if(b.type==='scene'){const a=asset(b.assetId);if(a){currentBg=a.exportPath||a.uri||a.path;bg.src=currentBg}sceneLayers.innerHTML='';(b.layers||[]).sort((x,y)=>(x.layer||0)-(y.layer||0)).forEach(l=>{const la=asset(l.assetId);if(!la)return;const img=document.createElement('img');img.src=la.exportPath||la.uri||la.path;img.alt=l.name||'';img.style.left=(l.x??50)+'%';img.style.top=(l.y??50)+'%';img.style.opacity=l.opacity??1;img.style.transform=`translate(-50%,-50%) scale(${l.scale??1})`;img.style.mixBlendMode=l.blendMode||'normal';img.style.zIndex=l.layer||0;sceneLayers.appendChild(img)});index++;continue}
-  if(b.type==='characterShow'){const c=character(b.characterId),expression=b.expression||'默认',a=asset(b.assetId||(c&&c.portraits&&c.portraits[expression]));let img=characters.querySelector(`[data-character="${b.characterId}"]`);if(!img){img=document.createElement('img');img.dataset.character=b.characterId;characters.appendChild(img)}if(a)img.src=a.exportPath||a.uri||a.path;img.alt=((c&&c.name)||b.characterId)+' · '+expression;if(c)applyCharacter(img,c,b);index++;continue}
-  if(b.type==='characterHide'){characters.querySelectorAll(`[data-character="${b.characterId}"],[data-overlay-owner="${b.characterId}"]`).forEach(item=>item.remove());index++;continue}
-  if(b.type==='sound'){playAudio(b);index++;continue}
-  if(b.type==='setVariable'){if(b.variable)variables[b.variable]=b.value;index++;continue}
-  if(b.type==='jump'){if(!go(b.target))return;continue}
-  if(b.type==='condition'){const target=compare(variables[b.variable],b.operator,b.compareValue)?b.trueTarget:b.falseTarget;if(target&&!go(target))return;if(!target)index++;continue}
-  if(b.type==='call'){callStack.push({fragment,index:index+1});if(!go(b.target))return;continue}
-  if(b.type==='return'){if(!callStack.length){speaker.textContent='';text.textContent='游戏结束';next.hidden=true;return}const frame=callStack.pop();fragment=frame.fragment;index=frame.index;continue}
-  if(b.type==='branch'){speaker.textContent=b.title||'请选择';text.textContent='';next.hidden=true;(b.options||[]).forEach(o=>{const button=document.createElement('button');button.textContent=o.text;button.onclick=e=>{e.stopPropagation();if(!go(o.target))return;render()};choices.appendChild(button)});return}
-  if(b.type==='dialogue'){const c=characterBySpeaker(b.speaker),expression=b.expression||(c&&c.expressions&&c.expressions[0])||'默认',a=asset(c&&c.portraits&&c.portraits[expression]);if(c&&a){let img=characters.querySelector(`[data-character="${c.id}"]`);if(!img){img=document.createElement('img');img.dataset.character=c.id;characters.appendChild(img)}img.src=a.exportPath||a.uri||a.path;img.alt=c.name+' · '+expression;applyCharacter(img,c)}if(b.voice)playAudio({channel:'voice',assetId:b.voice});speaker.textContent=displayName(b,c)}else speaker.textContent='';text.textContent=b.text||'';return
-}fail('流程执行超过 1000 步，可能存在无限循环')}
-document.querySelector('#game').onclick=()=>{if(choices.children.length)return;index++;render()};render();"""
 
 
 def _referenced_asset_ids(project: dict[str, Any]) -> set[str]:

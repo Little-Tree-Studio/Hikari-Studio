@@ -26,7 +26,7 @@ export function analyzeAssetReferences(project: Project): AssetReferenceReport {
   const references: Record<string, AssetReference[]> = {};
   const missing: MissingAssetReference[] = [];
   const assetsById = new Map(project.assets.map((asset) => [asset.id, asset]));
-  const assetsByName = new Map(project.assets.flatMap((asset) => [[asset.name, asset], [asset.path.split(/[\\/]/).at(-1) ?? '', asset]]));
+  const assetsByName = new Map(project.assets.flatMap((asset) => [[asset.name, asset], [asset.path?.split(/[\\/]/).at(-1) ?? '', asset]]));
   const fragmentNames = new Map(project.chapters.flatMap((chapter) => chapter.fragments.map((fragment) => [fragment.id, `${chapter.name} / ${fragment.name}`])));
 
   const add = (assetId: string | undefined, reference: Omit<AssetReference, 'assetId'>) => {

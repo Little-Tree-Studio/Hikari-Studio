@@ -15,6 +15,7 @@ import (
 type objectStore interface {
 	Health(context.Context) error
 	Put(context.Context, string, []byte) error
+	DeleteMany(context.Context, []string) error
 }
 
 type s3ObjectStore struct {
@@ -81,4 +82,28 @@ func (s *s3ObjectStore) Put(ctx context.Context, key string, body []byte) error 
 		return fmt.Errorf("store crash report object: %w", err)
 	}
 	return nil
+}
+
+func (s *s3ObjectStore) DeleteMany(ctx context.Context, keys []string) error {
+	objects := make([]minio.ObjectInfo, 0, len(keys))
+	for _, key := range keys {
+		objects = append(objects, minio.ObjectInfo{Key: key})
+	}
+	for result := range s.client.RemoveObjects(ctx, s.bucket, objectsChannel(objects), minio.RemoveObjectsOptions{}) {
+		if result.Err != nil {
+			return fmt.Errorf("delete crash report objects: %w", result.Err)
+		}
+	}
+	return nil
+}
+
+func objectsChannel(objects []minio.ObjectInfo) <-chan minio.ObjectInfo {
+	channel := make(chan minio.ObjectInfo)
+	go func() {
+		defer close(channel)
+		for _, object := range objects {
+			channel <- object
+		}
+	}()
+	return channel
 }

@@ -61,7 +61,7 @@ type server struct {
 	now        func() time.Time
 }
 
-func newServer(settings settings, repository repository, store objectStore) http.Handler {
+func newServer(settings settings, repository repository, store objectStore) *server {
 	return &server{
 		settings:   settings,
 		repository: repository,
@@ -90,6 +90,12 @@ func (s *server) ServeHTTP(response http.ResponseWriter, request *http.Request) 
 			return
 		}
 		s.listReports(response, request)
+	case "/v1/admin/crash-reports/cleanup":
+		if request.Method != http.MethodPost {
+			writeError(response, http.StatusMethodNotAllowed, "Method Not Allowed")
+			return
+		}
+		s.cleanupReports(response, request)
 	default:
 		writeError(response, http.StatusNotFound, "Not Found")
 	}
@@ -231,9 +237,25 @@ func (s *server) listReports(response http.ResponseWriter, request *http.Request
 	}
 	limit = max(1, min(limit, 500))
 
-	reports, err := s.repository.ListReports(request.Context(), limit)
+	offset := 0
+	if rawOffset := request.URL.Query().Get("offset"); rawOffset != "" {
+		parsed, err := strconv.Atoi(rawOffset)
+		if err != nil || parsed < 0 {
+			writeError(response, http.StatusUnprocessableEntity, "invalid offset")
+			return
+		}
+		offset = parsed
+	}
+
+	reports, err := s.repository.ListReports(request.Context(), limit, offset)
 	if err != nil {
 		slog.Error("could not list crash reports", "error", err)
+		writeError(response, http.StatusInternalServerError, "Internal Server Error")
+		return
+	}
+	total, err := s.repository.CountReports(request.Context())
+	if err != nil {
+		slog.Error("could not count crash reports", "error", err)
 		writeError(response, http.StatusInternalServerError, "Internal Server Error")
 		return
 	}
@@ -253,7 +275,58 @@ func (s *server) listReports(response http.ResponseWriter, request *http.Request
 			"received_at":       formatDatabaseTime(report.ReceivedAt),
 		})
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"reports": serialized})
+	writeJSON(response, http.StatusOK, map[string]any{"total": total, "offset": offset, "reports": serialized})
+}
+
+func (s *server) cleanupReports(response http.ResponseWriter, request *http.Request) {
+	expected := []byte("Bearer " + s.settings.adminToken)
+	provided := []byte(request.Header.Get("Authorization"))
+	if subtle.ConstantTimeCompare(provided, expected) != 1 {
+		writeError(response, http.StatusUnauthorized, "invalid admin token")
+		return
+	}
+
+	days := s.settings.retentionDays
+	if rawDays := request.URL.Query().Get("olderThanDays"); rawDays != "" {
+		parsed, err := strconv.Atoi(rawDays)
+		if err != nil || parsed < 1 {
+			writeError(response, http.StatusUnprocessableEntity, "olderThanDays must be a positive integer")
+			return
+		}
+		days = parsed
+	}
+
+	before := s.now().UTC().Add(-time.Duration(days) * 24 * time.Hour)
+	keys, err := s.repository.CleanupExpired(request.Context(), before)
+	if err != nil {
+		slog.Error("could not clean up expired crash reports", "error", err)
+		writeError(response, http.StatusInternalServerError, "Internal Server Error")
+		return
+	}
+	if len(keys) > 0 {
+		if err := s.store.DeleteMany(request.Context(), keys); err != nil {
+			slog.Error("could not delete expired crash report objects", "error", err)
+			writeError(response, http.StatusInternalServerError, "Internal Server Error")
+			return
+		}
+	}
+	writeJSON(response, http.StatusOK, map[string]any{"removed": len(keys)})
+}
+
+func (s *server) cleanupExpiredAtStartup(ctx context.Context) {
+	before := s.now().UTC().Add(-time.Duration(s.settings.retentionDays) * 24 * time.Hour)
+	keys, err := s.repository.CleanupExpired(ctx, before)
+	if err != nil {
+		slog.Warn("startup cleanup of expired crash reports failed", "error", err)
+		return
+	}
+	if len(keys) > 0 {
+		if err := s.store.DeleteMany(ctx, keys); err != nil {
+			slog.Warn("startup cleanup could not delete expired objects", "error", err)
+			return
+		}
+		slog.Info("startup cleanup removed expired crash reports", "removed", len(keys))
+	}
 }
 
 func decodeCrashReport(body []byte) (*crashReport, error) {

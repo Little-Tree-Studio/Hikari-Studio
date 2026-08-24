@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { Activity, AlertTriangle, ArrowRight, BookOpenCheck, Bot, Box, Check, Clock3, Database, GitCompare, GitFork, KeyRound, ListTodo, LoaderCircle, Pause, Play, RefreshCw, RotateCcw, Settings2, Sparkles, Star, Wrench, XCircle } from 'lucide-react';
-import { cancelAiTask, compareAiTaskResults, discoverAiModels, getAiSettings, getAiTask, listAiTasks, pauseAiTask, rebaseAiPatch, restartAiTaskFromCheckpoint, resumeAiTask, retryAiTaskOperations, saveAiSettings, startAiTask } from '../api';
+import { Activity, AlertTriangle, ArrowRight, BookOpenCheck, Bot, Box, Check, Clock3, Database, GitCompare, GitFork, KeyRound, ListTodo, LoaderCircle, Pause, Play, RefreshCw, RotateCcw, Settings2, Sparkles, Star, Trash2, Wrench, XCircle } from 'lucide-react';
+import { cancelAiTask, clearAiKey, compareAiTaskResults, discoverAiModels, getAiSettings, getAiTask, listAiTasks, pauseAiTask, rebaseAiPatch, restartAiTaskFromCheckpoint, resumeAiTask, retryAiTaskOperations, saveAiSettings, startAiTask } from '../api';
 import type { AgentComparisonTarget, AgentContext, AgentOperation, AgentPatchApplyResult, AgentPatchPreconditionResult, AgentPlan, AgentResultComparison, AgentResultRef, AgentTask, AgentTaskEvent, AgentTaskStatus, AiModelDiscovery, AiSettingsInput, Project } from '../types';
 import { branchSimulationRunner } from '../engine-core/simulationRunner';
 import type { BranchSimulationProgress } from '../engine-core/types';
@@ -155,6 +155,20 @@ export function AiAgentPanel({ project, applyPlan, requestBuild, notify, navigat
       setSettings((current) => ({ ...current, apiKey: '' }));
       setSettingsOpen(false);
       notify('AI 服务配置已保存');
+    } catch (error) {
+      notify(String(error), 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const clearKey = async () => {
+    try {
+      setBusy(true);
+      const result = await clearAiKey();
+      setHasKey(result.hasKey);
+      setSettings((current) => ({ ...current, apiKey: '' }));
+      notify('已从本机清除保存的 API Key');
     } catch (error) {
       notify(String(error), 'error');
     } finally {
@@ -352,7 +366,7 @@ export function AiAgentPanel({ project, applyPlan, requestBuild, notify, navigat
     <header className="agent-header"><div><span className="agent-kicker"><Sparkles /> AI 制作 Agent</span><h1>把制作目标交给 Agent</h1><p>Agent 会读取当前项目并生成可审查的结构化改动，确认后才写入项目。</p></div><div className="agent-header-actions"><button className="button ghost" onClick={() => setMemoryOpen(true)}><BookOpenCheck />制作记忆</button><button className="button ghost" onClick={() => setSettingsOpen(!settingsOpen)}><Settings2 />服务配置</button></div></header>
     {settingsOpen && <section className="agent-settings">
       <div className="field full"><label>OpenAI 兼容 API URL</label><input value={settings.url} onChange={(event) => { setSettings({ ...settings, url: event.target.value }); setDiscovery(null); }} placeholder="https://api.openai.com/v1" /></div>
-      <div className="field full"><label>API Key {hasKey && <span className="configured"><Check />已安全保存</span>}</label><div className="key-input"><KeyRound /><input type="password" value={settings.apiKey} onChange={(event) => { setSettings({ ...settings, apiKey: event.target.value }); setDiscovery(null); }} placeholder={hasKey ? '留空以继续使用已保存密钥' : 'sk-...'} /></div></div>
+      <div className="field full"><label>API Key {hasKey && <span className="configured"><Check />已安全保存</span>}</label><div className="key-input"><KeyRound /><input type="password" value={settings.apiKey} onChange={(event) => { setSettings({ ...settings, apiKey: event.target.value }); setDiscovery(null); }} placeholder={hasKey ? '留空以继续使用已保存密钥' : 'sk-...'} />{hasKey && <button className="button ghost" title="清除已保存的 API Key" disabled={busy} onClick={() => void clearKey()}><Trash2 />清除</button>}</div></div>
       <div className="model-discovery-toolbar full"><div><strong>模型目录与健康探测</strong><span>读取 /models，并对高分候选验证连接和工具调用</span></div><button className="button ghost" disabled={discovering || !settings.url.trim()} onClick={() => void discover()}>{discovering ? <LoaderCircle className="spin" /> : <RefreshCw />}发现并探测</button></div>
       {discovery && <div className="model-catalog full">
         <header><span><Database />{discovery.source === 'upstream' ? '上游模型目录' : '内置模型目录'}</span><small>{discovery.models.length} 个模型{discovery.catalogCached ? ' · 目录缓存' : ''}{discovery.healthCache ? ` · 健康缓存 ${discovery.healthCache.cachedHits} · 新探测 ${discovery.healthCache.probed}` : ''}</small></header>

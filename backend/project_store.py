@@ -8,6 +8,7 @@ import re
 import shutil
 import tempfile
 import threading
+import time
 import uuid
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -565,17 +566,21 @@ class ProjectStore:
             expected[root / "ui" / "theme.json"] = payload.get("ui", {"theme": "slide-light", "dialogueStyle": "glass"})
             expected[root / ".slide" / "agent" / "memory.json"] = payload.get("productionMemory", default_production_memory())
 
+            # 提交顺序：组件分片 → 崩溃恢复快照 → manifest。
+            # manifest 是唯一提交点（最后写入）：中途失败时旧 manifest 仍然有效，
+            # 而 recovery 快照已包含本次完整载荷，可供 load(recover=True) 恢复。
+            save_started_at = time.time()
             for path, value in expected.items():
                 if path != self.project_path:
                     self._write_json_atomic(path, value)
-            self._write_json_atomic(self.project_path, manifest)
-            self._remove_stale_json(root / "chapters", {path for path in expected if path.parent == root / "chapters"})
-            self._remove_stale_json(root / "scripts", {path for path in expected if path.parent == root / "scripts"})
-            self._remove_stale_json(root / "timelines", {path for path in expected if path.parent == root / "timelines"})
-            self._remove_stale_json(root / "characters", {path for path in expected if path.parent == root / "characters"})
-            self._remove_stale_json(root / "scenes", {path for path in expected if path.parent == root / "scenes"})
-            self._remove_stale_json(root / "locales", {path for path in expected if path.parent == root / "locales"})
             self._write_json_atomic(self.recovery_path, payload)
+            self._write_json_atomic(self.project_path, manifest)
+            self._remove_stale_json(root / "chapters", {path for path in expected if path.parent == root / "chapters"}, save_started_at)
+            self._remove_stale_json(root / "scripts", {path for path in expected if path.parent == root / "scripts"}, save_started_at)
+            self._remove_stale_json(root / "timelines", {path for path in expected if path.parent == root / "timelines"}, save_started_at)
+            self._remove_stale_json(root / "characters", {path for path in expected if path.parent == root / "characters"}, save_started_at)
+            self._remove_stale_json(root / "scenes", {path for path in expected if path.parent == root / "scenes"}, save_started_at)
+            self._remove_stale_json(root / "locales", {path for path in expected if path.parent == root / "locales"}, save_started_at)
 
         self._remember_project(payload)
 
@@ -870,12 +875,24 @@ class ProjectStore:
                 os.unlink(temporary_name)
 
     @staticmethod
-    def _remove_stale_json(folder: Path, expected: set[Path]) -> None:
+    def _remove_stale_json(folder: Path, expected: set[Path], save_started_at: float) -> None:
+        """删除本次保存载荷中已不存在的分片文件。
+
+        仅删除保存开始前就存在的旧文件：保存期间被并发写入器创建或更新的
+        文件会被跳过，避免竞态下误删仍被引用的分片。
+        """
         if not folder.exists():
             return
         for path in folder.glob("*.json"):
-            if path not in expected:
-                path.unlink()
+            if path in expected:
+                continue
+            try:
+                modified_at = path.stat().st_mtime
+            except OSError:
+                continue
+            if modified_at > save_started_at:
+                continue
+            path.unlink()
 
     @staticmethod
     def _migrate(project: dict[str, Any], *, copy_project: bool = True) -> dict[str, Any]:

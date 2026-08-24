@@ -2,6 +2,15 @@ import type { Asset, AudioCategory, Project } from '../types';
 
 export const audioCategoryOf = (asset: Asset): AudioCategory => asset.audioCategory ?? 'bgm';
 
+/**
+ * 按 id、名称或路径尾段匹配音频素材。path 可能缺失（未迁移的旧素材），
+ * 空值一律返回 false，避免 `path.endsWith('')` 误匹配任意素材或抛 TypeError。
+ */
+export function assetMatchesTrack(asset: Asset, track?: string | null): boolean {
+  if (!track) return false;
+  return asset.id === track || asset.name === track || (asset.path !== undefined && asset.path.endsWith(track));
+}
+
 export function normalizeDialogueText(value: string): string {
   return value.toLocaleLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
 }

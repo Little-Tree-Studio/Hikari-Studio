@@ -3,17 +3,19 @@ package main
 import (
 	"fmt"
 	"os"
+	"strconv"
 )
 
 type settings struct {
-	databaseURL string
-	s3Endpoint  string
-	s3AccessKey string
-	s3SecretKey string
-	s3Bucket    string
-	s3SSE       string
-	adminToken  string
-	ipHashSalt  string
+	databaseURL   string
+	s3Endpoint    string
+	s3AccessKey   string
+	s3SecretKey   string
+	s3Bucket      string
+	s3SSE         string
+	adminToken    string
+	ipHashSalt    string
+	retentionDays int
 }
 
 func settingsFromEnv() (settings, error) {
@@ -55,6 +57,14 @@ func settingsFromEnv() (settings, error) {
 	}
 	if result.s3SSE != "AES256" && result.s3SSE != "none" {
 		return settings{}, fmt.Errorf("S3_SERVER_SIDE_ENCRYPTION must be AES256 or none")
+	}
+	result.retentionDays = 180
+	if rawRetention := os.Getenv("RETENTION_DAYS"); rawRetention != "" {
+		parsed, parseErr := strconv.Atoi(rawRetention)
+		if parseErr != nil || parsed < 1 {
+			return settings{}, fmt.Errorf("RETENTION_DAYS must be a positive integer")
+		}
+		result.retentionDays = parsed
 	}
 	return result, nil
 }

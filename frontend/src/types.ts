@@ -685,8 +685,8 @@ export interface DesktopApi {
   close_window(): Promise<boolean>;
   get_ai_settings(): Promise<AiSettings>;
   save_ai_settings(settings: AiSettingsInput): Promise<AiSettings>;
+  clear_ai_key(): Promise<AiSettings>;
   discover_ai_models(settings: AiSettingsInput): Promise<AiModelDiscovery>;
-  run_ai_agent(instruction: string, project: Project): Promise<AgentPlan>;
   start_ai_task(instruction: string, project: Project, context: AgentContext): Promise<AgentTask>;
   retry_ai_task_operations(taskId: string, operationIndexes: number[], project: Project): Promise<AgentTask>;
   check_ai_patch_preconditions(taskId: string, operationIndexes: number[], project: Project): Promise<AgentPatchPreconditionResult>;
@@ -786,6 +786,7 @@ export interface AiSettingsInput {
   fallbackModels?: string[];
   temperature: number;
   apiKey?: string;
+  clearKey?: boolean;
   probe?: boolean;
   probeLimit?: number;
   forceRefresh?: boolean;
