@@ -969,6 +969,25 @@ export default function App() {
   const [chapterSettingsOpen, setChapterSettingsOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  useEffect(() => {
+    if (!projectMenuOpen && !assetMenuOpen && !accountMenuOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+      if (!target.closest('.top-project-menu')) setProjectMenuOpen(false);
+      if (!target.closest('.asset-nav-menu')) setAssetMenuOpen(false);
+      if (!target.closest('.account-entry')) setAccountMenuOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setProjectMenuOpen(false);
+      setAssetMenuOpen(false);
+      setAccountMenuOpen(false);
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('keydown', onKeyDown);
+    return () => { window.removeEventListener('pointerdown', onPointerDown); window.removeEventListener('keydown', onKeyDown); };
+  }, [projectMenuOpen, assetMenuOpen, accountMenuOpen]);
   const [scriptImportOpen, setScriptImportOpen] = useState(false);
   const [scriptImportBusy, setScriptImportBusy] = useState(false);
   const [scriptImportPreview, setScriptImportPreview] = useState<ScriptImportPreview | null>(null);
