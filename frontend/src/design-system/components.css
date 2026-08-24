@@ -341,13 +341,30 @@ html[data-editor-theme="high-contrast"] img { color-scheme: normal; }
 
 /* Asset overview */
 .desktop-app .asset-manager-workspace,
-.desktop-app .asset-health-strip,
-.desktop-app .asset-health-strip > button,
 .desktop-app .asset-table-panel,
 .desktop-app .asset-table-toolbar {
   border-color: var(--line);
   background: var(--panel);
   color: var(--ink);
+}
+.desktop-app .asset-health-strip {
+  border-color: var(--line);
+  background: var(--bg);
+  color: var(--ink);
+}
+.desktop-app .asset-health-strip > button {
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--ink);
+}
+.desktop-app .asset-health-strip .asset-health-icon {
+  background: var(--panel-3);
+  color: var(--muted-strong);
+}
+.desktop-app .asset-health-strip > button.active .asset-health-icon { color: var(--accent-strong); }
+.desktop-app .asset-health-strip > button.warning .asset-health-icon {
+  background: color-mix(in srgb, var(--danger) 12%, var(--panel));
+  color: var(--danger);
 }
 .desktop-app .asset-filter-panel,
 .desktop-app .asset-overview-table > header {
@@ -355,14 +372,18 @@ html[data-editor-theme="high-contrast"] img { color-scheme: normal; }
   background: var(--panel-2);
   color: var(--muted-strong);
 }
-.desktop-app .asset-health-strip > button:hover,
+.desktop-app .asset-health-strip > button:hover { background: var(--panel); border-color: var(--muted); }
+.desktop-app .asset-health-strip > button.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--ink);
+}
 .desktop-app .asset-filter-panel section > button:hover,
 .desktop-app .asset-overview-table > div > article:hover { background: var(--panel-3); }
-.desktop-app .asset-health-strip > button.active,
 .desktop-app .asset-filter-panel section > button.active { background: var(--accent-soft); color: var(--accent-strong); }
 .desktop-app .asset-overview-table article > span { color: var(--muted-strong); }
 .desktop-app .asset-overview-table article > span > em,
-.desktop-app .asset-name-cell > span:first-child { background: var(--panel-3); color: var(--muted-strong); }
+.desktop-app .asset-name-cell .asset-thumb { background: var(--panel-3); color: var(--muted-strong); }
 .desktop-app .asset-warning-banner {
   border-color: color-mix(in srgb, var(--line) 60%, var(--danger));
   background: color-mix(in srgb, var(--panel) 85%, var(--danger) 15%);
@@ -440,7 +461,6 @@ html[data-editor-theme="high-contrast"] img { color-scheme: normal; }
 .desktop-app .character-property-scroll textarea { background: var(--control-bg); color: var(--ink); }
 
 /* Audio workspace */
-.desktop-app .audio-category-tabs,
 .desktop-app .audio-workspace,
 .desktop-app .audio-list-panel,
 .desktop-app .audio-detail-panel > header,
@@ -449,12 +469,29 @@ html[data-editor-theme="high-contrast"] img { color-scheme: normal; }
   background: var(--panel);
   color: var(--ink);
 }
+.desktop-app .audio-category-tabs {
+  border-color: var(--line);
+  background: var(--bg);
+  color: var(--ink);
+}
+.desktop-app .audio-category-tabs > button {
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--ink);
+}
+.desktop-app .audio-category-tabs > button:hover { background: var(--panel); border-color: var(--muted); }
+.desktop-app .audio-category-tabs > button.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+.desktop-app .audio-category-tabs > button.active em {
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel));
+  color: var(--accent-strong);
+}
+.desktop-app .audio-category-tabs em { background: var(--panel-3); color: var(--muted-strong); }
 .desktop-app .audio-list-toolbar .asset-search { border-color: var(--line); background: var(--control-bg); color: var(--ink); }
 .desktop-app .audio-detail-panel { border-color: var(--line); background: var(--panel-2); color: var(--ink); }
-.desktop-app .audio-category-tabs > button { color: var(--muted-strong); }
-.desktop-app .audio-category-tabs > button:hover { background: var(--panel-3); }
-.desktop-app .audio-category-tabs > button.active { background: var(--accent-soft); color: var(--accent-strong); }
-.desktop-app .audio-category-tabs em { background: var(--panel-3); color: var(--muted-strong); }
 .desktop-app .audio-detail-panel input,
 .desktop-app .audio-detail-panel select { background: var(--control-bg); color: var(--ink); }
 

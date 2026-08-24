@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState, type DragEvent } from 'react';
 import {
-  AlertTriangle, Archive, AudioLines, CheckCircle2, File, FileImage, FileText,
-  Film, Folder, FolderOpen, HardDrive, Image, Link2, LocateFixed, PackageCheck,
-  LoaderCircle, RefreshCw, Search, Trash2, Type, Upload, Wrench, X,
+  AlertTriangle, Archive, AudioLines, ArrowUpDown, CheckCircle2, File, FileImage,
+  Film, Folder, FolderOpen, HardDrive, Image, Link2, ListFilter, LocateFixed,
+  LoaderCircle, PackageCheck, RefreshCw, Search, Trash2, Type, Upload, Wrench, X,
 } from 'lucide-react';
 import { applyAssetFolderRepair, importAssets, inspectAssets, previewAssetFolderRepair, replaceAssetFile } from '../api';
 import { EditorAssetImportDialog, type EditorImportAction } from './EditorAssetImportDialog';
@@ -10,6 +10,7 @@ import { applyAssetImport, describeAssetImport } from '../core/assetImport';
 import { analyzeAssetReferences } from '../core/assetReferences';
 import { Checkbox } from './ui/Checkbox';
 import { Radio, RadioGroup } from './ui/RadioGroup';
+import { Select } from './ui/Select';
 import type { Asset, AssetFileStatus, AssetFolderRepairPreview, AssetRepairMatch, Project } from '../types';
 
 type Commit = (updater: (project: Project) => Project, label?: string) => void;
@@ -30,6 +31,13 @@ const kinds = [
   { id: 'video', label: '视频', icon: Film },
   { id: 'font', label: '字体', icon: Type },
   { id: 'file', label: '其它', icon: File },
+] as const;
+
+const sortOptions = [
+  { id: 'default', label: '默认排序' },
+  { id: 'name', label: '按名称' },
+  { id: 'size', label: '按大小' },
+  { id: 'refs', label: '按引用数' },
 ] as const;
 
 const kindOf = (asset: Asset) => asset.kind === 'scene' || asset.kind === 'character' ? 'image' : asset.kind;
@@ -55,7 +63,7 @@ const mergeAssetFile = (existing: Asset | undefined, replacement: Asset): Asset 
 function AssetIcon({ asset }: { asset: Asset }) {
   const kind = kindOf(asset);
   if (kind === 'image' && asset.uri) return <img src={asset.uri} alt="" />;
-  const Icon = kind === 'audio' ? AudioLines : kind === 'video' ? Film : kind === 'font' ? Type : FileText;
+  const Icon = kind === 'audio' ? AudioLines : kind === 'video' ? Film : kind === 'font' ? Type : FileImage;
   return <Icon />;
 }
 
@@ -64,6 +72,7 @@ export function AssetManager({ project, commit, notify, requestConfirm, activate
   const [kind, setKind] = useState('all');
   const [directory, setDirectory] = useState('all');
   const [stateFilter, setStateFilter] = useState<'all' | 'used' | 'unused' | 'missing' | 'forced'>('all');
+  const [sortKey, setSortKey] = useState('default');
   const [selectedId, setSelectedId] = useState<string>();
   const [statuses, setStatuses] = useState<Record<string, AssetFileStatus>>({});
   const [scanning, setScanning] = useState(false);
@@ -82,6 +91,7 @@ export function AssetManager({ project, commit, notify, requestConfirm, activate
   const selected = project.assets.find((asset) => asset.id === selectedId);
   const missingFiles = project.assets.filter((asset) => statuses[asset.id]?.exists === false);
   const incompatibleImages = project.assets.filter((asset) => kindOf(asset) === 'image' && !supportedImage(asset));
+  const unusedCount = project.assets.filter((asset) => !report.references[asset.id]?.length).length;
 
   const scan = async () => {
     setScanning(true);
@@ -100,7 +110,7 @@ export function AssetManager({ project, commit, notify, requestConfirm, activate
   };
   useEffect(() => { void scan(); }, [project.assets.map((asset) => `${asset.id}:${asset.path}:${asset.size}`).join('|')]);
 
-  const shown = project.assets.filter((asset) => {
+  const filtered = project.assets.filter((asset) => {
     const references = report.references[asset.id]?.length ?? 0;
     const missing = statuses[asset.id]?.exists === false || incompatibleImages.some((item) => item.id === asset.id) || decodeFailures.has(asset.id);
     return (kind === 'all' || kindOf(asset) === kind)
@@ -108,6 +118,17 @@ export function AssetManager({ project, commit, notify, requestConfirm, activate
       && (stateFilter === 'all' || stateFilter === 'used' && references > 0 || stateFilter === 'unused' && references === 0 || stateFilter === 'missing' && missing || stateFilter === 'forced' && asset.forceBundle)
       && `${asset.name} ${asset.path}`.toLocaleLowerCase().includes(query.toLocaleLowerCase());
   });
+  const shown = useMemo(() => {
+    if (sortKey === 'default') return filtered;
+    const refs = (asset: Asset) => report.references[asset.id]?.length ?? 0;
+    const size = (asset: Asset) => statuses[asset.id]?.size ?? asset.size ?? 0;
+    return [...filtered].sort((a, b) => sortKey === 'name' ? a.name.localeCompare(b.name, 'zh-Hans-CN')
+      : sortKey === 'size' ? size(b) - size(a)
+        : refs(b) - refs(a));
+  }, [filtered, sortKey, report, statuses]);
+
+  const filterActive = query !== '' || kind !== 'all' || directory !== 'all' || stateFilter !== 'all';
+  const clearFilters = () => { setQuery(''); setKind('all'); setDirectory('all'); setStateFilter('all'); };
 
   const doImport = async (paths?: string[]) => {
     try {
@@ -235,24 +256,233 @@ export function AssetManager({ project, commit, notify, requestConfirm, activate
   const selectedRepairCount = selectedMatches.size + Object.keys(conflictSelections).length;
   const update = (assetId: string, patch: Partial<Asset>, label: string) => commit((current) => ({ ...current, assets: current.assets.map((asset) => asset.id === assetId ? { ...asset, ...patch } : asset) }), label);
 
+  const stats = [
+    { id: 'all' as const, icon: PackageCheck, value: project.assets.length, label: '登记素材', hint: `共 ${formatBytes(project.assets.reduce((sum, asset) => sum + (asset.size ?? 0), 0))}` },
+    { id: 'used' as const, icon: Link2, value: report.bundledIds.size, label: '预计打包', hint: formatBytes(report.bundledSize) },
+    { id: 'unused' as const, icon: Archive, value: unusedCount, label: '游离资源', hint: '未被任何内容引用' },
+    { id: 'missing' as const, icon: AlertTriangle, value: repairIssues.length, label: '问题资源', hint: repairIssues.length ? '缺失、损坏或不兼容' : '一切正常' },
+    { id: 'forced' as const, icon: HardDrive, value: project.assets.filter((asset) => asset.forceBundle).length, label: '强制打包', hint: '无视引用进入产物' },
+  ];
+
   return <div className={`asset-manager ${dropActive ? 'drop-active' : ''}`} onDragOver={(event) => { event.preventDefault(); setDropActive(true); }} onDragLeave={() => setDropActive(false)} onDrop={drop}>
-    <header className="asset-manager-header"><div><h1>资源总览</h1><p>检查素材引用、磁盘文件与构建打包策略</p></div>{repairIssues.length > 0 && <button className="button warning" onClick={() => setRepairOpen(true)}><Wrench />修复全部· {repairIssues.length}</button>}<button className="button ghost" disabled={scanning} onClick={() => void scan()}><RefreshCw className={scanning ? 'spinning' : ''} />重新扫描</button><button className="button primary" onClick={() => void doImport()}><Upload />导入素材</button></header>
-    <div className="asset-health-strip"><button className={stateFilter === 'all' ? 'active' : ''} onClick={() => setStateFilter('all')}><PackageCheck /><span><strong>{project.assets.length}</strong><small>登记素材</small></span></button><button className={stateFilter === 'used' ? 'active' : ''} onClick={() => setStateFilter('used')}><Link2 /><span><strong>{report.bundledIds.size}</strong><small>预计打包 · {formatBytes(report.bundledSize)}</small></span></button><button className={stateFilter === 'unused' ? 'active' : ''} onClick={() => setStateFilter('unused')}><Archive /><span><strong>{project.assets.filter((asset) => !report.references[asset.id]?.length).length}</strong><small>游离资源</small></span></button><button className={`${stateFilter === 'missing' ? 'active' : ''} ${repairIssues.length ? 'warning' : ''}`} onClick={() => setStateFilter('missing')}><AlertTriangle /><span><strong>{repairIssues.length}</strong><small>缺失、损坏或不兼容</small></span></button><button className={stateFilter === 'forced' ? 'active' : ''} onClick={() => setStateFilter('forced')}><HardDrive /><span><strong>{project.assets.filter((asset) => asset.forceBundle).length}</strong><small>强制打包</small></span></button></div>
-    {repairIssues.length > 0 && <div className="asset-warning-banner"><AlertTriangle /><span><strong>发现 {repairIssues.length} 个资源问题</strong><small>包含缺失文件、损坏图片、不兼容格式或丢失引用</small></span><button onClick={() => setRepairOpen(true)}>修复全部</button></div>}
-    {stateFilter === 'missing' && report.missing.length > 0 && <section className="missing-reference-panel"><header><AlertTriangle /><strong>找不到资源记录的引用</strong><span>重新导入对应素材，或前往引用位置解除关联</span></header><div>{report.missing.map((reference, index) => <button key={`${reference.sourceId}-${reference.assetId}-${index}`} onClick={() => reference.fragmentId && activate(reference.fragmentId, reference.blockIndex)}><strong>{reference.assetId}</strong><span>{reference.sourceName}</span><small>{reference.detail}</small><em>{reference.fragmentId ? '前往剧本' : '检查配置'}</em></button>)}</div></section>}
-    <div className="asset-manager-workspace">
-      <aside className="asset-filter-panel"><div className="asset-panel-heading"><FolderOpen /><strong>类型与目录</strong></div><section><small>素材类型</small>{kinds.map((item) => { const Icon = item.icon; const count = item.id === 'all' ? project.assets.length : project.assets.filter((asset) => kindOf(asset) === item.id).length; return <button className={kind === item.id ? 'active' : ''} key={item.id} onClick={() => setKind(item.id)}><Icon /><span>{item.label}</span><em>{count}</em></button>; })}</section><section><small>所在目录</small><button className={directory === 'all' ? 'active' : ''} onClick={() => setDirectory('all')}><FolderOpen /><span>全部目录</span><em>{project.assets.length}</em></button>{directories.map((item) => <button className={directory === item ? 'active' : ''} key={item} onClick={() => setDirectory(item)}><Folder /><span>{item}</span><em>{project.assets.filter((asset) => directoryOf(asset) === item).length}</em></button>)}</section></aside>
-      <section className="asset-table-panel"><div className="asset-table-toolbar"><div className="asset-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索名称或路径" />{query && <button onClick={() => setQuery('')}><X /></button>}</div><span>{shown.length} / {project.assets.length}</span></div><div className="asset-overview-table"><header><span>素材</span><span>类型 / 目录</span><span>大小</span><span>引用</span><span>打包策略</span><span>状态</span><span /></header><div>{shown.map((asset) => { const refs = report.references[asset.id] ?? []; const status = statuses[asset.id]; const missing = status?.exists === false; const bundled = report.bundledIds.has(asset.id); return <article className={`${selectedId === asset.id ? 'selected' : ''} ${missing ? 'missing' : ''}`} key={asset.id} onClick={() => setSelectedId(asset.id)}><span className="asset-name-cell"><span><AssetIcon asset={asset} /></span><span><strong>{asset.name}</strong><small>{asset.path}</small></span></span><span><strong>{kinds.find((item) => item.id === kindOf(asset))?.label ?? asset.kind}</strong><small>{directoryOf(asset)}</small></span><span>{formatBytes(status?.size ?? asset.size)}</span><span>{refs.length ? <button onClick={(event) => { event.stopPropagation(); setSelectedId(asset.id); }}><strong>{refs.length}</strong> 处</button> : <em>游离</em>}</span><span>{asset.forceBundle ? <b>强制打包</b> : bundled ? '随引用打包' : '不打包'}</span><span className={missing ? 'status-missing' : 'status-ok'}>{missing ? <><AlertTriangle />文件缺失</> : <><CheckCircle2 />正常</>}</span><button className="icon-button" title="删除素材" onClick={(event) => { event.stopPropagation(); void remove(asset); }}><Trash2 /></button></article>; })}{!shown.length && <div className="asset-table-empty"><Image /><strong>没有符合条件的素材</strong><span>调整筛选条件，或将文件拖入此窗口</span></div>}</div></div></section>
-      <aside className="asset-inspector"><header><FileImage /><strong>素材详情</strong></header>{selected ? <div><div className="asset-inspector-preview"><AssetIcon asset={selected} /></div><label>显示名称<input value={selected.name} onChange={(event) => update(selected.id, { name: event.target.value }, '重命名素材')} /></label><dl><div><dt>资源 ID</dt><dd>{selected.id}</dd></div><div><dt>项目路径</dt><dd>{selected.path}</dd></div><div><dt>文件状态</dt><dd className={statuses[selected.id]?.exists === false ? 'danger' : ''}>{statuses[selected.id]?.exists === false ? '磁盘文件不存在' : '文件可用'}</dd></div><div><dt>引用次数</dt><dd>{report.references[selected.id]?.length ?? 0}</dd></div><div><dt>打包体积</dt><dd>{formatBytes(statuses[selected.id]?.size ?? selected.size)}</dd></div></dl><button className={`button full ${statuses[selected.id]?.exists === false ? 'warning' : 'ghost'}`} onClick={() => void relink(selected)}><LocateFixed />{statuses[selected.id]?.exists === false ? '重新定位文件' : '更换素材文件'}</button><label className="asset-force-toggle"><Checkbox checked={selected.forceBundle ?? false} onChange={(checked) => update(selected.id, { forceBundle: checked }, `${checked ? '强制打包' : '取消强制打包'} ${selected.name}`)} /><span><strong>强制打包</strong><small>即使没有直接引用也进入构建产物</small></span></label><section className="asset-inspector-references"><strong>引用详情</strong>{(report.references[selected.id] ?? []).map((reference, index) => <button key={`${reference.sourceId}-${index}`} onClick={() => reference.fragmentId && activate(reference.fragmentId, reference.blockIndex)}><span>{reference.sourceName}</span><small>{reference.detail}</small></button>)}{!report.references[selected.id]?.length && <p>该素材未被角色、场景或剧本使用。</p>}</section></div> : <div className="asset-inspector-empty"><FileImage /><span>选择素材查看引用与打包设置</span></div>}</aside>
+    <header className="asset-manager-header">
+      <div className="asset-manager-title">
+        <h1>资源总览</h1>
+        <p>检查素材引用、磁盘文件与构建打包策略</p>
+      </div>
+      <div className="asset-manager-actions">
+        {repairIssues.length > 0 && <button className="button warning" onClick={() => setRepairOpen(true)}><Wrench />修复全部 · {repairIssues.length}</button>}
+        <button className="button ghost" disabled={scanning} onClick={() => void scan()}><RefreshCw className={scanning ? 'spinning' : ''} />重新扫描</button>
+        <button className="button primary" onClick={() => void doImport()}><Upload />导入素材</button>
+      </div>
+    </header>
+
+    <div className="asset-health-strip">
+      {stats.map((stat) => {
+        const Icon = stat.icon;
+        const active = stateFilter === stat.id;
+        return <button key={stat.id} className={`${active ? 'active' : ''} ${stat.id === 'missing' && repairIssues.length ? 'warning' : ''}`} onClick={() => setStateFilter(active && stat.id !== 'all' ? 'all' : stat.id)}>
+          <span className="asset-health-icon"><Icon /></span>
+          <span className="asset-health-text">
+            <strong>{stat.value}</strong>
+            <small>{stat.label} · {stat.hint}</small>
+          </span>
+        </button>;
+      })}
     </div>
+
+    {repairIssues.length > 0 && <div className="asset-warning-banner">
+      <AlertTriangle />
+      <span><strong>发现 {repairIssues.length} 个资源问题</strong><small>包含缺失文件、损坏图片、不兼容格式或丢失引用</small></span>
+      <button onClick={() => setRepairOpen(true)}>修复全部</button>
+    </div>}
+
+    {stateFilter === 'missing' && report.missing.length > 0 && <section className="missing-reference-panel">
+      <header><AlertTriangle /><strong>找不到资源记录的引用</strong><span>重新导入对应素材，或前往引用位置解除关联</span></header>
+      <div>{report.missing.map((reference, index) => <button key={`${reference.sourceId}-${reference.assetId}-${index}`} onClick={() => reference.fragmentId && activate(reference.fragmentId, reference.blockIndex)}><strong>{reference.assetId}</strong><span>{reference.sourceName}</span><small>{reference.detail}</small><em>{reference.fragmentId ? '前往剧本' : '检查配置'}</em></button>)}</div>
+    </section>}
+
+    <div className="asset-manager-workspace">
+      <aside className="asset-filter-panel">
+        <div className="asset-panel-heading"><ListFilter /><strong>筛选</strong>{filterActive && <button className="asset-filter-clear" onClick={clearFilters}>重置</button>}</div>
+        <section>
+          <small>素材类型</small>
+          {kinds.map((item) => {
+            const Icon = item.icon;
+            const count = item.id === 'all' ? project.assets.length : project.assets.filter((asset) => kindOf(asset) === item.id).length;
+            return <button className={kind === item.id ? 'active' : ''} key={item.id} onClick={() => setKind(item.id)}><Icon /><span>{item.label}</span><em>{count}</em></button>;
+          })}
+        </section>
+        <section>
+          <small>所在目录</small>
+          <button className={directory === 'all' ? 'active' : ''} onClick={() => setDirectory('all')}><FolderOpen /><span>全部目录</span><em>{project.assets.length}</em></button>
+          {directories.map((item) => <button className={directory === item ? 'active' : ''} key={item} onClick={() => setDirectory(item)}><Folder /><span>{item}</span><em>{project.assets.filter((asset) => directoryOf(asset) === item).length}</em></button>)}
+        </section>
+      </aside>
+
+      <section className="asset-table-panel">
+        <div className="asset-table-toolbar">
+          <div className="asset-search">
+            <Search />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索名称或路径" />
+            {query && <button onClick={() => setQuery('')} title="清空搜索"><X /></button>}
+          </div>
+          <label className="asset-sort">
+            <ArrowUpDown />
+            <Select value={sortKey} onChange={(value) => setSortKey(value)}>
+              {sortOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+            </Select>
+          </label>
+          {filterActive && <button className="asset-filter-reset" onClick={clearFilters}><X />清除筛选</button>}
+          <span className="asset-toolbar-count">{shown.length} / {project.assets.length} 项</span>
+        </div>
+        <div className="asset-overview-table">
+          <header>
+            <span>素材</span><span>类型 / 目录</span><span>大小</span><span>引用</span><span>打包策略</span><span>状态</span><span />
+          </header>
+          <div>
+            {shown.map((asset) => {
+              const refs = report.references[asset.id] ?? [];
+              const status = statuses[asset.id];
+              const missing = status?.exists === false;
+              const bundled = report.bundledIds.has(asset.id);
+              return <article className={`${selectedId === asset.id ? 'selected' : ''} ${missing ? 'missing' : ''}`} key={asset.id} onClick={() => setSelectedId(asset.id)}>
+                <span className="asset-name-cell">
+                  <span className="asset-thumb"><AssetIcon asset={asset} /></span>
+                  <span className="asset-name-text"><strong>{asset.name}</strong><small>{asset.path}</small></span>
+                </span>
+                <span className="asset-meta-cell"><strong>{kinds.find((item) => item.id === kindOf(asset))?.label ?? asset.kind}</strong><small>{directoryOf(asset)}</small></span>
+                <span>{formatBytes(status?.size ?? asset.size)}</span>
+                <span>{refs.length ? <button className="asset-ref-link" onClick={(event) => { event.stopPropagation(); setSelectedId(asset.id); }}><strong>{refs.length}</strong> 处</button> : <em>游离</em>}</span>
+                <span>{asset.forceBundle ? <b className="asset-bundle-forced">强制打包</b> : bundled ? <b className="asset-bundle-auto">随引用打包</b> : <em>不打包</em>}</span>
+                <span className={missing ? 'status-missing' : 'status-ok'}>{missing ? <><AlertTriangle />文件缺失</> : <><CheckCircle2 />正常</>}</span>
+                <button className="icon-button asset-row-remove" title="删除素材" onClick={(event) => { event.stopPropagation(); void remove(asset); }}><Trash2 /></button>
+              </article>;
+            })}
+            {!shown.length && <div className="asset-table-empty">
+              <Image />
+              <strong>{filterActive ? '没有符合条件的素材' : '还没有登记任何素材'}</strong>
+              <span>{filterActive ? '调整筛选条件，或清除全部筛选' : '点击右上角“导入素材”，或将文件拖入此窗口'}</span>
+              {filterActive
+                ? <button className="button ghost" onClick={clearFilters}><X />清除筛选</button>
+                : <button className="button primary" onClick={() => void doImport()}><Upload />导入素材</button>}
+            </div>}
+          </div>
+        </div>
+      </section>
+
+      <aside className="asset-inspector">
+        <header><FileImage /><strong>素材详情</strong></header>
+        {selected ? <div>
+          <div className="asset-inspector-preview"><AssetIcon asset={selected} /></div>
+          <label className="asset-inspector-field">显示名称<input value={selected.name} onChange={(event) => update(selected.id, { name: event.target.value }, '重命名素材')} /></label>
+          <dl>
+            <div><dt>资源 ID</dt><dd>{selected.id}</dd></div>
+            <div><dt>项目路径</dt><dd>{selected.path}</dd></div>
+            <div><dt>文件状态</dt><dd className={statuses[selected.id]?.exists === false ? 'danger' : ''}>{statuses[selected.id]?.exists === false ? '磁盘文件不存在' : '文件可用'}</dd></div>
+            <div><dt>引用次数</dt><dd>{report.references[selected.id]?.length ?? 0}</dd></div>
+            <div><dt>打包体积</dt><dd>{formatBytes(statuses[selected.id]?.size ?? selected.size)}</dd></div>
+          </dl>
+          <button className={`button full ${statuses[selected.id]?.exists === false ? 'warning' : 'ghost'}`} onClick={() => void relink(selected)}><LocateFixed />{statuses[selected.id]?.exists === false ? '重新定位文件' : '更换素材文件'}</button>
+          <label className="asset-force-toggle">
+            <Checkbox checked={selected.forceBundle ?? false} onChange={(checked) => update(selected.id, { forceBundle: checked }, `${checked ? '强制打包' : '取消强制打包'} ${selected.name}`)} />
+            <span><strong>强制打包</strong><small>即使没有直接引用也进入构建产物</small></span>
+          </label>
+          <section className="asset-inspector-references">
+            <strong>引用详情</strong>
+            {(report.references[selected.id] ?? []).map((reference, index) => <button key={`${reference.sourceId}-${index}`} onClick={() => reference.fragmentId && activate(reference.fragmentId, reference.blockIndex)}><span>{reference.sourceName}</span><small>{reference.detail}</small></button>)}
+            {!report.references[selected.id]?.length && <p>该素材未被角色、场景或剧本使用。</p>}
+          </section>
+        </div> : <div className="asset-inspector-empty"><FileImage /><span>选择素材查看引用与打包设置</span></div>}
+      </aside>
+    </div>
+
     {pendingImports.length > 0 && <EditorAssetImportDialog assets={pendingImports} characters={project.characters} sourceLabel="资源总览" close={() => setPendingImports([])} apply={applyImported} />}
-    {repairOpen && <div className="modal-backdrop asset-repair-backdrop" onClick={() => !applyingMatches && setRepairOpen(false)}><section className="modal asset-repair-dialog" role="dialog" aria-modal="true" aria-labelledby="asset-repair-title" onClick={(event) => event.stopPropagation()}><header className="modal-header"><Wrench /><div><strong id="asset-repair-title">统一素材修复中心</strong><small>按文件名、扩展名和 SHA-256 哈希批量恢复素材引用</small></div><button className="icon-button" title="关闭" disabled={applyingMatches} onClick={() => setRepairOpen(false)}><X /></button></header>
-      <div className="asset-folder-repair-toolbar"><div><FolderOpen /><span><strong>{folderPreview ? folderPreview.folder : '选择原素材所在文件夹'}</strong><small>{folderPreview ? `递归扫描 ${folderPreview.scannedFiles} 个支持的文件` : '扫描结果只会预览，确认前不会修改项目'}</small></span></div><button className="button primary" disabled={matchingFolder || applyingMatches} onClick={() => void previewFolder()}>{matchingFolder ? <LoaderCircle className="spinning" /> : <FolderOpen />}{matchingFolder ? '正在扫描' : folderPreview ? '重新选择文件夹' : '选择文件夹自动匹配'}</button></div>
-      {folderPreview ? <div className="modal-body asset-folder-results"><div className="asset-repair-summary"><span className="success"><CheckCircle2 /><strong>{folderPreview.matches.length}</strong> 可修复</span><span className="warning"><AlertTriangle /><strong>{folderPreview.ambiguous.length}</strong> 冲突</span><span><Search /><strong>{folderPreview.unmatched.length}</strong> 未匹配</span></div>{folderPreview.scanWarnings.length > 0 && <section><header><strong>扫描警告</strong><small>{folderPreview.scanWarnings.length} 个文件或目录未能读取，其余结果仍可使用</small></header>{folderPreview.scanWarnings.slice(0, 20).map((warning, index) => <article className="asset-folder-unmatched" key={`${warning.code}-${warning.path ?? index}`}><span className="asset-repair-icon warning"><AlertTriangle /></span><span><strong>{warning.code}</strong><small>{warning.message}</small>{warning.path && <code>{warning.path}</code>}</span></article>)}</section>}
-        {folderPreview.matches.length > 0 && <section><header><strong>确定匹配</strong><small>仅勾选项会被复制并替换，素材 ID 保持不变</small></header>{folderPreview.matches.map((match) => <label className="asset-folder-match" key={match.assetId}><Checkbox checked={selectedMatches.has(match.assetId)} onChange={() => toggleMatch(match)} /><span className="asset-repair-icon success"><CheckCircle2 /></span><span><strong>{match.name}</strong><small>{match.fileName} · {match.reason}</small><code>{match.sourcePath}</code></span><em>{match.score >= 400 ? '哈希' : match.score >= 300 ? '高' : match.score >= 200 ? '中' : '弱'}</em></label>)}</section>}
-        {folderPreview.ambiguous.length > 0 && <section><header><strong>存在冲突</strong><small>选择正确候选后可与确定匹配一起批量修复</small></header>{folderPreview.ambiguous.map((item) => { const resolved = Boolean(conflictSelections[item.assetId]); return <article className={`asset-folder-conflict ${resolved ? 'resolved' : ''}`} key={item.assetId}><span className={`asset-repair-icon ${resolved ? 'success' : ''}`}>{resolved ? <CheckCircle2 /> : <AlertTriangle />}</span><div><strong>{item.name}</strong><small>{item.reason} · {item.candidates.length} 个同分候选</small><RadioGroup className="asset-conflict-candidates" value={conflictSelections[item.assetId] ?? ''} onChange={(value) => setConflictSelections((current) => ({ ...current, [item.assetId]: value }))}>{item.candidates.map((candidate) => <label key={candidate.sourcePath}><Radio value={candidate.sourcePath} /><span><b>{candidate.fileName}</b><code>{candidate.sourcePath}</code></span></label>)}</RadioGroup></div><button className="button ghost" disabled={Boolean(repairingId)} onClick={() => void repairAsset(item.assetId)}><LocateFixed />浏览其他文件</button></article>; })}</section>}
-        {folderPreview.unmatched.length > 0 && <section><header><strong>未找到匹配</strong><small>可手动重新定位，或换一个更完整的素材文件夹扫描</small></header>{folderPreview.unmatched.map((item) => <article className="asset-folder-unmatched" key={item.assetId}><span className="asset-repair-icon muted"><Search /></span><span><strong>{item.name}</strong><small>预期文件：{item.expectedPath}</small></span><button className="button ghost" disabled={Boolean(repairingId)} onClick={() => void repairAsset(item.assetId)}><LocateFixed />手动选择</button></article>)}</section>}
-      </div> : <div className="modal-body asset-repair-list">{repairIssues.map((issue) => <article key={issue.assetId}><span className="asset-repair-icon"><AlertTriangle /></span><div><strong>{issue.name}</strong><small>{issue.reason} · {issue.references} 处引用</small><code>{issue.assetId}</code></div><button className="button ghost" disabled={Boolean(repairingId)} onClick={() => void repairAsset(issue.assetId)}>{repairingId === issue.assetId ? <LoaderCircle className="spinning" /> : <LocateFixed />}{repairingId === issue.assetId ? '正在替换' : '手动选择'}</button></article>)}{!repairIssues.length && <div className="asset-repair-complete"><CheckCircle2 /><strong>所有问题已修复</strong><span>可以关闭窗口继续制作。</span></div>}</div>}
-      <footer className="modal-footer"><span>{folderPreview ? `已选择 ${selectedRepairCount} 项 · ${Object.keys(conflictSelections).length} 个冲突已解决` : `剩余 ${repairIssues.length} 项`}</span>{folderPreview && <button className="button ghost" disabled={applyingMatches} onClick={() => { setFolderPreview(undefined); setSelectedMatches(new Set()); setConflictSelections({}); }}>返回问题列表</button>}<button className="button primary" disabled={applyingMatches || Boolean(folderPreview && !selectedRepairCount)} onClick={() => folderPreview ? void applyFolderMatches() : setRepairOpen(false)}>{applyingMatches && <LoaderCircle className="spinning" />}{folderPreview ? applyingMatches ? '正在修复' : `应用 ${selectedRepairCount} 项修复` : repairIssues.length ? '稍后继续' : '完成'}</button></footer></section></div>}
+
+    {repairOpen && <div className="modal-backdrop asset-repair-backdrop" onClick={() => !applyingMatches && setRepairOpen(false)}>
+      <section className="modal asset-repair-dialog" role="dialog" aria-modal="true" aria-labelledby="asset-repair-title" onClick={(event) => event.stopPropagation()}>
+        <header className="modal-header">
+          <Wrench />
+          <div><strong id="asset-repair-title">统一素材修复中心</strong><small>按文件名、扩展名和 SHA-256 哈希批量恢复素材引用</small></div>
+          <button className="icon-button" title="关闭" disabled={applyingMatches} onClick={() => setRepairOpen(false)}><X /></button>
+        </header>
+        <div className="asset-folder-repair-toolbar">
+          <div>
+            <FolderOpen />
+            <span><strong>{folderPreview ? folderPreview.folder : '选择原素材所在文件夹'}</strong><small>{folderPreview ? `递归扫描 ${folderPreview.scannedFiles} 个支持的文件` : '扫描结果只会预览，确认前不会修改项目'}</small></span>
+          </div>
+          <button className="button primary" disabled={matchingFolder || applyingMatches} onClick={() => void previewFolder()}>
+            {matchingFolder ? <LoaderCircle className="spinning" /> : <FolderOpen />}
+            {matchingFolder ? '正在扫描' : folderPreview ? '重新选择文件夹' : '选择文件夹自动匹配'}
+          </button>
+        </div>
+        {folderPreview ? <div className="modal-body asset-folder-results">
+          <div className="asset-repair-summary">
+            <span className="success"><CheckCircle2 /><strong>{folderPreview.matches.length}</strong> 可修复</span>
+            <span className="warning"><AlertTriangle /><strong>{folderPreview.ambiguous.length}</strong> 冲突</span>
+            <span><Search /><strong>{folderPreview.unmatched.length}</strong> 未匹配</span>
+          </div>
+          {folderPreview.scanWarnings.length > 0 && <section>
+            <header><strong>扫描警告</strong><small>{folderPreview.scanWarnings.length} 个文件或目录未能读取，其余结果仍可使用</small></header>
+            {folderPreview.scanWarnings.slice(0, 20).map((warning, index) => <article className="asset-folder-unmatched" key={`${warning.code}-${warning.path ?? index}`}>
+              <span className="asset-repair-icon warning"><AlertTriangle /></span>
+              <span><strong>{warning.code}</strong><small>{warning.message}</small>{warning.path && <code>{warning.path}</code>}</span>
+            </article>)}
+          </section>}
+          {folderPreview.matches.length > 0 && <section>
+            <header><strong>确定匹配</strong><small>仅勾选项会被复制并替换，素材 ID 保持不变</small></header>
+            {folderPreview.matches.map((match) => <label className="asset-folder-match" key={match.assetId}>
+              <Checkbox checked={selectedMatches.has(match.assetId)} onChange={() => toggleMatch(match)} />
+              <span className="asset-repair-icon success"><CheckCircle2 /></span>
+              <span><strong>{match.name}</strong><small>{match.fileName} · {match.reason}</small><code>{match.sourcePath}</code></span>
+              <em>{match.score >= 400 ? '哈希' : match.score >= 300 ? '高' : match.score >= 200 ? '中' : '弱'}</em>
+            </label>)}
+          </section>}
+          {folderPreview.ambiguous.length > 0 && <section>
+            <header><strong>存在冲突</strong><small>选择正确候选后可与确定匹配一起批量修复</small></header>
+            {folderPreview.ambiguous.map((item) => {
+              const resolved = Boolean(conflictSelections[item.assetId]);
+              return <article className={`asset-folder-conflict ${resolved ? 'resolved' : ''}`} key={item.assetId}>
+                <span className={`asset-repair-icon ${resolved ? 'success' : ''}`}>{resolved ? <CheckCircle2 /> : <AlertTriangle />}</span>
+                <div>
+                  <strong>{item.name}</strong>
+                  <small>{item.reason} · {item.candidates.length} 个同分候选</small>
+                  <RadioGroup className="asset-conflict-candidates" value={conflictSelections[item.assetId] ?? ''} onChange={(value) => setConflictSelections((current) => ({ ...current, [item.assetId]: value }))}>
+                    {item.candidates.map((candidate) => <label key={candidate.sourcePath}><Radio value={candidate.sourcePath} /><span><b>{candidate.fileName}</b><code>{candidate.sourcePath}</code></span></label>)}
+                  </RadioGroup>
+                </div>
+                <button className="button ghost" disabled={Boolean(repairingId)} onClick={() => void repairAsset(item.assetId)}><LocateFixed />浏览其他文件</button>
+              </article>;
+            })}
+          </section>}
+          {folderPreview.unmatched.length > 0 && <section>
+            <header><strong>未找到匹配</strong><small>可手动重新定位，或换一个更完整的素材文件夹扫描</small></header>
+            {folderPreview.unmatched.map((item) => <article className="asset-folder-unmatched" key={item.assetId}>
+              <span className="asset-repair-icon muted"><Search /></span>
+              <span><strong>{item.name}</strong><small>预期文件：{item.expectedPath}</small></span>
+              <button className="button ghost" disabled={Boolean(repairingId)} onClick={() => void repairAsset(item.assetId)}><LocateFixed />手动选择</button>
+            </article>)}
+          </section>}
+        </div> : <div className="modal-body asset-repair-list">
+          {repairIssues.map((issue) => <article key={issue.assetId}>
+            <span className="asset-repair-icon"><AlertTriangle /></span>
+            <div><strong>{issue.name}</strong><small>{issue.reason} · {issue.references} 处引用</small><code>{issue.assetId}</code></div>
+            <button className="button ghost" disabled={Boolean(repairingId)} onClick={() => void repairAsset(issue.assetId)}>
+              {repairingId === issue.assetId ? <LoaderCircle className="spinning" /> : <LocateFixed />}
+              {repairingId === issue.assetId ? '正在替换' : '手动选择'}
+            </button>
+          </article>)}
+          {!repairIssues.length && <div className="asset-repair-complete"><CheckCircle2 /><strong>所有问题已修复</strong><span>可以关闭窗口继续制作。</span></div>}
+        </div>}
+        <footer className="modal-footer">
+          <span>{folderPreview ? `已选择 ${selectedRepairCount} 项 · ${Object.keys(conflictSelections).length} 个冲突已解决` : `剩余 ${repairIssues.length} 项`}</span>
+          {folderPreview && <button className="button ghost" disabled={applyingMatches} onClick={() => { setFolderPreview(undefined); setSelectedMatches(new Set()); setConflictSelections({}); }}>返回问题列表</button>}
+          <button className="button primary" disabled={applyingMatches || Boolean(folderPreview && !selectedRepairCount)} onClick={() => folderPreview ? void applyFolderMatches() : setRepairOpen(false)}>
+            {applyingMatches && <LoaderCircle className="spinning" />}
+            {folderPreview ? applyingMatches ? '正在修复' : `应用 ${selectedRepairCount} 项修复` : repairIssues.length ? '稍后继续' : '完成'}
+          </button>
+        </footer>
+      </section>
+    </div>}
   </div>;
 }

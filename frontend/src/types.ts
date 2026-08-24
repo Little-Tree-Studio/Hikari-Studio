@@ -680,6 +680,8 @@ export interface DesktopApi {
   open_build_output(path: string): Promise<{ ok: boolean; path: string }>;
   launch_build_output(path: string): Promise<{ ok: boolean; path: string }>;
   minimize_window(): Promise<boolean>;
+  resize_popup_window(width: number, height: number, windowId: string): Promise<boolean>;
+  set_window_always_on_top(enabled: boolean, windowId?: string): Promise<boolean>;
   set_project_creation_mode(enabled: boolean): Promise<boolean>;
   toggle_maximize(): Promise<boolean>;
   close_window(): Promise<boolean>;
@@ -954,6 +956,7 @@ declare global {
     __SLIDE_PREVIEW_SEEK_PERFORMANCE__?: import('./performance/previewSeekProfiler').PreviewSeekPerformanceReport;
     __SLIDE_RPC__?: { baseUrl: string; token: string };
     pywebview?: { api: DesktopApi };
+    __SLIDE_WINDOW_ID__?: string;
     __SLIDE_RUNTIME_SELF_TEST__?: () => { ok: boolean; engineVersion: number; current?: string; readCount: number; backlogCount: number; characterCount: number; diagnosticErrors: number; diagnosticWarnings: number };
   }
 }

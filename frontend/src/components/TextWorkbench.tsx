@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type TextareaHTMLAttributes } from 'react';
 import {
   CheckCircle2, ClipboardPaste, CornerDownRight, Copy, Eraser,
   Languages, LocateFixed, MessageSquareText, Plus, Search, Trash2, X,
@@ -9,7 +9,7 @@ import {
   type LanguageCode, type TextSlot, type TextSlotKind,
 } from '../core/localization';
 import { audioCategoryOf } from '../core/audio';
-import { useFixedVirtualList } from '../hooks/useVirtualList';
+import { useMeasuredVirtualList } from '../hooks/useVirtualList';
 import { Select } from './ui/Select';
 import type { LocalizedBlockText, Project } from '../types';
 
@@ -33,6 +33,41 @@ const VOICE_NONE = 'none';
 
 const slotDraftId = (column: string, slot: TextSlot) => `${column}::${slot.key}::${slot.kind}::${slot.optionIndex ?? ''}`;
 const slotRowId = (slot: TextSlot) => `${slot.key}::${slot.kind}::${slot.optionIndex ?? ''}`;
+
+const TEXTAREA_MAX_HEIGHT = 240;
+
+function AutoSizeTextarea({ value, ...rest }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+  const resize = useCallback(() => {
+    const element = ref.current;
+    if (!element) return;
+    element.style.height = 'auto';
+    element.style.height = `${Math.min(element.scrollHeight, TEXTAREA_MAX_HEIGHT)}px`;
+  }, []);
+  useLayoutEffect(() => { resize(); }, [value, resize]);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+    let width = element.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (element.clientWidth === width) return;
+      width = element.clientWidth;
+      resize();
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [resize]);
+  return <textarea ref={ref} rows={1} value={value} {...rest} />;
+}
+
+function MeasuredTextRow({ itemKey, top, measure, className, style, children }: { itemKey: string; top: number; measure: (key: string, element: HTMLElement | null) => () => void; className: string; style?: CSSProperties; children: ReactNode }) {
+  const cleanupRef = useRef<() => void>(() => undefined);
+  const setRowRef = useCallback((element: HTMLDivElement | null) => {
+    cleanupRef.current();
+    cleanupRef.current = element ? measure(itemKey, element) : () => undefined;
+  }, [itemKey, measure]);
+  return <div ref={setRowRef} className={className} style={{ ...style, transform: `translateY(${top}px)` }}>{children}</div>;
+}
 
 function pruneEntry(entry: LocalizedBlockText): LocalizedBlockText | undefined {
   const next: LocalizedBlockText = { ...entry };
@@ -88,8 +123,9 @@ export function TextWorkbench({ project, commit, notify, requestText, requestCon
     });
   }, [slots, fragmentFilter, kindFilter, missingOnly, activeFocusLanguage, query, extraLanguages, translations]);
 
-  const rowHeight = showVoice ? 96 : 62;
-  const list = useFixedVirtualList(scrollRef, visibleSlots.length, rowHeight);
+  const slotKeys = useMemo(() => visibleSlots.map((slot) => slotRowId(slot)), [visibleSlots]);
+  const estimateRowHeight = useCallback(() => (showVoice ? 96 : 62), [showVoice]);
+  const list = useMeasuredVirtualList(scrollRef, slotKeys, estimateRowHeight);
 
   const commitBaseText = (slot: TextSlot, value: string) => {
     const clean = value.trim() ? value : '';
@@ -298,7 +334,7 @@ export function TextWorkbench({ project, commit, notify, requestText, requestCon
     const value = drafts[draftId] ?? current;
     const missing = !isBase && !value.trim() && Boolean(slot.baseText.trim());
     return <div className={`text-cell ${isBase ? 'base' : 'lang'} ${missing ? 'missing' : ''}`} key={column}>
-      <textarea
+      <AutoSizeTextarea
         data-row={row}
         data-column={column}
         value={value}
@@ -394,10 +430,10 @@ export function TextWorkbench({ project, commit, notify, requestText, requestCon
         })}
       </header>
       <div className="text-table-body" ref={scrollRef} onScroll={list.onScroll}>
-        <div className="text-table-canvas" style={{ height: list.totalSize }}>
+        <div className="text-table-canvas" style={{ height: list.layout.totalSize }}>
           {list.indexes.map((index) => {
             const slot = visibleSlots[index];
-            return <div className="text-row" style={{ transform: `translateY(${index * rowHeight}px)`, height: rowHeight, gridTemplateColumns: gridTemplate }} key={slotRowId(slot)}>
+            return <MeasuredTextRow itemKey={slotRowId(slot)} top={list.layout.offsets[index]} measure={list.measure} className="text-row" style={{ gridTemplateColumns: gridTemplate }} key={slotRowId(slot)}>
               <button className="text-row-locate" title="在剧本中定位" onClick={() => activate(slot.fragmentId, slot.blockIndex)}>
                 <strong>{slot.fragmentName}</strong>
                 <small>Block {slot.blockIndex + 1} · {TEXT_SLOT_KIND_LABELS[slot.kind]}{slot.optionIndex !== undefined ? ` ${slot.optionIndex + 1}` : ''}</small>
@@ -406,7 +442,7 @@ export function TextWorkbench({ project, commit, notify, requestText, requestCon
               </button>
               {renderCell(BASE_COLUMN, fallback, slot, index)}
               {extraLanguages.map((language) => renderCell(language, language, slot, index))}
-            </div>;
+            </MeasuredTextRow>;
           })}
           {!visibleSlots.length && <div className="text-table-empty"><Languages /><strong>没有匹配的文本行</strong><span>调整筛选条件，或先在剧本中添加对白、旁白与选项。</span></div>}
         </div>

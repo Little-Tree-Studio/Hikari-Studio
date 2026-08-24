@@ -40,6 +40,7 @@ class DesktopApi:
         self._state_dir = (state_dir or store.data_dir).resolve()
         self._output_root = (output_root or root / "exports").resolve()
         self._window: Any = None
+        self._popup_windows: dict[str, Any] = {}
         self._window_state_store: Any = None
         self._window_placement: Any = None
         self._window_maximized = False
@@ -64,6 +65,38 @@ class DesktopApi:
         self._window_state_store = window_state_store
         self._window_placement = placement
         self._window_maximized = bool(getattr(placement, "maximized", False))
+
+    def _register_popup_window(self, window_id: str, window: Any) -> bool:
+        if not window_id or window_id == "main":
+            return False
+        self._popup_windows[window_id] = window
+        return True
+
+    def _unregister_popup_window(self, window_id: str) -> None:
+        self._popup_windows.pop(window_id, None)
+
+    def set_window_always_on_top(self, enabled: bool, window_id: str | None = None) -> bool:
+        target = self._popup_windows.get(window_id or "") if window_id else self._window
+        setter = getattr(target, "set_always_on_top", None)
+        if not callable(setter):
+            return False
+        setter(bool(enabled))
+        return True
+
+    def resize_popup_window(self, width: float, height: float, window_id: str) -> bool:
+        target = self._popup_windows.get(window_id)
+        resize = getattr(target, "resize_content", None)
+        if not callable(resize):
+            return False
+        try:
+            target_width = round(float(width))
+            target_height = round(float(height))
+        except (TypeError, ValueError, OverflowError):
+            return False
+        if not (320 <= target_width <= 2_000 and 240 <= target_height <= 2_000):
+            return False
+        resize(target_width, target_height)
+        return True
 
     def persist_window_state(self, maximized: bool | None = None) -> None:
         if self._project_creation_mode:

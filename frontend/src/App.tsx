@@ -1,12 +1,13 @@
 import { Profiler, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   AlignLeft, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, AudioLines, Bell, BookOpen, Braces, BugPlay,
   CheckCircle2, ChartColumnBig, ChevronDown, ChevronsUpDown, CircleAlert, CirclePlay, Clapperboard, Code2, Copy, CornerDownRight,
-  FilePlus2, FileText, FileUp, Flag, FolderOpen, FolderPlus,
+  ExternalLink, FilePlus2, FileText, FileUp, Flag, FolderOpen, FolderPlus,
   GitBranch, GitFork, GripVertical, HardDrive, History, Image, Languages, LocateFixed, Maximize2,
   LogOut, Menu, MessageSquareText, Minus, Music2, NotebookPen, PackageCheck, Palette, Plus,
-  Pin, Redo2, Rocket, Save, Search, Settings2, ShieldCheck,
+  Pin, PinOff, Redo2, Rocket, Save, Search, Settings2, ShieldCheck,
   Sparkles, Trash2, Undo2, UserPlus, UserRound, Users, X, PanelBottom, PanelRight, PictureInPicture2, LoaderCircle,
 } from 'lucide-react';
 import {
@@ -311,8 +312,8 @@ const StoryCard = memo(function StoryCard({ index, project, block, selected, ass
   && previous.dragging === next.dragging
   && previous.listDragging === next.listDragging);
 
-function Inspector({ project, block, update, dock, setDock, notify }: { project: Project; block?: StoryBlock; update: (patch: StoryBlockPatch) => void; dock: InspectorDock; setDock: (dock: InspectorDock) => void; notify: (message: string, tone?: 'error' | 'success') => void }) {
-  const header = <div className="inspector-header"><strong>属性检查器</strong>{block && <span>{blockMeta[block.type].name}</span>}<div className="inspector-dock-controls" role="group" aria-label="属性检查器停靠位置"><button className={dock === 'preview' ? 'active' : ''} title="停靠在预览下方" onClick={() => setDock('preview')}><PanelRight /></button><button className={dock === 'editor' ? 'active' : ''} title="停靠在编辑器下方" onClick={() => setDock('editor')}><PanelBottom /></button><button className={dock === 'floating' ? 'active' : ''} title="浮动面板" onClick={() => setDock('floating')}><PictureInPicture2 /></button></div></div>;
+function Inspector({ project, block, update, dock, setDock, notify, standalone = false, alwaysOnTop = false, openStandalone, toggleAlwaysOnTop }: { project: Project; block?: StoryBlock; update: (patch: StoryBlockPatch) => void; dock: InspectorDock; setDock: (dock: InspectorDock) => void; notify: (message: string, tone?: 'error' | 'success') => void; standalone?: boolean; alwaysOnTop?: boolean; openStandalone?: () => void; toggleAlwaysOnTop?: () => void }) {
+  const header = <div className="inspector-header"><strong>属性检查器</strong>{block && <span>{blockMeta[block.type].name}</span>}<div className="inspector-dock-controls" role="group" aria-label="属性检查器停靠位置"><button className={dock === 'preview' ? 'active' : ''} title="停靠在预览下方" onClick={() => setDock('preview')}><PanelRight /></button><button className={dock === 'editor' ? 'active' : ''} title="停靠在编辑器下方" onClick={() => setDock('editor')}><PanelBottom /></button><button className={dock === 'floating' ? 'active' : ''} title="浮动面板" onClick={() => setDock('floating')}><PictureInPicture2 /></button>{standalone ? <button className={alwaysOnTop ? 'active' : ''} title={alwaysOnTop ? '取消置顶' : '置顶独立窗口'} onClick={toggleAlwaysOnTop}>{alwaysOnTop ? <PinOff /> : <Pin />}</button> : <button title="打开独立窗口" onClick={openStandalone}><ExternalLink /></button>}</div></div>;
   if (!block) return <section className="inspector">{header}<div className="empty-state"><Settings2 /><strong>选择一个 Block</strong><span>在这里编辑详细参数</span></div></section>;
   const fragmentOptions = project.chapters.flatMap((chapter) => chapter.fragments);
   const sceneDefinitions = projectScenes(project);
@@ -855,15 +856,114 @@ function ScriptPage({ project, commit, selected, setSelected, view, setView, ope
     setSelectedIndexes(new Set([insertion]));
     notify('已创建“显示角色”Block并保存自定义位置');
   };
-  const inspector = <><Profiler id="inspector" onRender={recordComponentRender}><Inspector project={project} block={selectedBlock} update={(patch) => updateBlock(selected, patch)} dock={inspectorDock} setDock={setInspectorDock} notify={notify} /></Profiler>{droppedAssets.length > 0 && <EditorAssetImportDialog assets={droppedAssets} characters={project.characters} sourceLabel="剧本编辑器" close={() => setDroppedAssets([])} apply={applyDroppedAssets} />}</>;
+  const [floatingPos, setFloatingPos] = useState<{ x: number; y: number } | null>(null);
+  const [standaloneInspectorWindow, setStandaloneInspectorWindow] = useState<Window | null>(null);
+  const [standaloneAlwaysOnTop, setStandaloneAlwaysOnTop] = useState(false);
+  const standaloneCloseDockRef = useRef<InspectorDock | null>(null);
+  const standaloneWindowRef = useRef<Window | null>(null);
+  const standaloneRestorePendingRef = useRef(false);
+  const onFloatingPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    if (!target.closest('.inspector-header') || target.closest('button')) return;
+    event.preventDefault();
+    const rect = event.currentTarget.getBoundingClientRect();
+    const offset = { dx: event.clientX - rect.left, dy: event.clientY - rect.top, width: rect.width, height: rect.height };
+    const onMove = (move: PointerEvent) => {
+      setFloatingPos({
+        x: Math.min(Math.max(0, move.clientX - offset.dx), window.innerWidth - offset.width),
+        y: Math.min(Math.max(0, move.clientY - offset.dy), window.innerHeight - offset.height),
+      });
+    };
+    const onUp = () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); window.removeEventListener('pointercancel', onUp); };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  };
+  const closeStandaloneInspector = (nextDock: InspectorDock = 'floating') => {
+    standaloneCloseDockRef.current = nextDock;
+    standaloneRestorePendingRef.current = true;
+    const popup = standaloneInspectorWindow;
+    setStandaloneInspectorWindow(null);
+    setStandaloneAlwaysOnTop(false);
+    setInspectorDock(nextDock);
+    if (popup && !popup.closed) popup.close();
+  };
+  const restoreStandaloneInspector = () => {
+    if (!standaloneRestorePendingRef.current) return;
+    standaloneRestorePendingRef.current = false;
+    const nextDock = standaloneCloseDockRef.current ?? 'floating';
+    standaloneCloseDockRef.current = null;
+    standaloneWindowRef.current = null;
+    setStandaloneInspectorWindow(null);
+    setStandaloneAlwaysOnTop(false);
+    setInspectorDock(nextDock);
+  };
+  const syncStandaloneDocument = (popup: Window) => {
+    popup.document.documentElement.dataset.editorTheme = document.documentElement.dataset.editorTheme ?? '';
+    popup.document.documentElement.dataset.cornerStyle = document.documentElement.dataset.cornerStyle ?? '';
+    popup.document.documentElement.dataset.motion = document.documentElement.dataset.motion ?? '';
+    popup.document.documentElement.style.cssText = document.documentElement.style.cssText;
+  };
+  const openStandaloneInspector = () => {
+    if (standaloneInspectorWindow && !standaloneInspectorWindow.closed) {
+      standaloneInspectorWindow.focus();
+      return;
+    }
+    const width = Math.min(520, Math.max(320, window.innerWidth - 48));
+    const height = Math.min(500, Math.max(240, window.innerHeight - 150));
+    standaloneCloseDockRef.current = inspectorDock;
+    standaloneRestorePendingRef.current = true;
+    const popup = window.open('', 'slide-inspector', `popup,width=${width},height=${height},resizable=yes`);
+    if (!popup) { standaloneRestorePendingRef.current = false; notify('独立检查器窗口被系统拦截', 'error'); return; }
+    standaloneWindowRef.current = popup;
+    popup.document.open();
+    popup.document.write('<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><title>属性检查器</title></head><body><div id="standalone-inspector-root"></div></body></html>');
+    popup.document.close();
+    popup.resizeTo(width, height);
+    for (const node of document.head.querySelectorAll('style,link[rel="stylesheet"]')) popup.document.head.appendChild(node.cloneNode(true));
+    popup.document.body.className = 'desktop-app standalone-inspector-host';
+    syncStandaloneDocument(popup);
+    popup.addEventListener('beforeunload', restoreStandaloneInspector, { once: true });
+    setStandaloneInspectorWindow(popup);
+    const resizeWhenReady = window.setInterval(() => {
+      const windowId = popup.__SLIDE_WINDOW_ID__;
+      const api = window.pywebview?.api;
+      if (!windowId || !api || typeof api.resize_popup_window !== 'function') return;
+      window.clearInterval(resizeWhenReady);
+      void api.resize_popup_window(width, height, windowId);
+    }, 25);
+    window.setTimeout(() => window.clearInterval(resizeWhenReady), 2000);
+    notify('独立检查器已打开');
+  };
+  useEffect(() => {
+    if (standaloneInspectorWindow && !standaloneInspectorWindow.closed) syncStandaloneDocument(standaloneInspectorWindow);
+  });
+  useEffect(() => {
+    if (!standaloneInspectorWindow) return;
+    const timer = window.setInterval(() => {
+      if (standaloneInspectorWindow.closed) restoreStandaloneInspector();
+    }, 150);
+    return () => window.clearInterval(timer);
+  }, [standaloneInspectorWindow]);
+  useEffect(() => {
+    if (!standaloneInspectorWindow || inspectorDock === standaloneCloseDockRef.current) return;
+    closeStandaloneInspector(inspectorDock);
+  }, [inspectorDock, standaloneInspectorWindow]);
+  useEffect(() => () => {
+    const popup = standaloneWindowRef.current;
+    if (popup && !popup.closed) popup.close();
+  }, []);
+  const inspector = <><Profiler id="inspector" onRender={recordComponentRender}><Inspector project={project} block={selectedBlock} update={(patch) => updateBlock(selected, patch)} dock={inspectorDock} setDock={setInspectorDock} notify={notify} openStandalone={openStandaloneInspector} /></Profiler>{droppedAssets.length > 0 && <EditorAssetImportDialog assets={droppedAssets} characters={project.characters} sourceLabel="剧本编辑器" close={() => setDroppedAssets([])} apply={applyDroppedAssets} />}</>;
+  const standaloneInspectorRoot = standaloneInspectorWindow?.document.getElementById('standalone-inspector-root');
+  const standalonePortal = standaloneInspectorRoot ? createPortal(<div className="floating-inspector standalone-inspector-window"><Profiler id="standalone-inspector" onRender={recordComponentRender}><Inspector project={project} block={selectedBlock} update={(patch) => updateBlock(selected, patch)} dock={inspectorDock} setDock={closeStandaloneInspector} notify={notify} standalone alwaysOnTop={standaloneAlwaysOnTop} toggleAlwaysOnTop={() => void (async () => { const next = !standaloneAlwaysOnTop; const api = window.pywebview?.api; const windowId = standaloneInspectorWindow?.__SLIDE_WINDOW_ID__; if (!api || !windowId || typeof api.set_window_always_on_top !== 'function') { notify('当前环境不支持独立窗口置顶', 'error'); return; } const applied = await api.set_window_always_on_top(next, windowId); if (!applied) { notify('当前环境不支持独立窗口置顶', 'error'); return; } setStandaloneAlwaysOnTop(next); })()} /></Profiler></div>, standaloneInspectorRoot) : null;
   return <div className={`editor-layout inspector-${inspectorDock}`} data-selected-block-index={selected}><section className="editor-pane"><EditorTabBar openFragmentIds={openFragmentIds} activeFragmentId={project.activeFragmentId} fragmentNames={fragmentNames} activateFragment={activateFragment} closeFragment={closeFragment} closeOtherFragments={closeOtherFragments} closeAllFragments={closeAllFragments} reorderFragmentTabs={reorderFragmentTabs} /><div className="editor-toolbar"><div className="editor-title"><strong>{activeName}</strong><small>{blocks.length} Blocks</small></div><button className="button ghost" onClick={openImport}><FileUp /> 导入剧本</button><div className="view-switch">{([['cards', '卡片'], ['plain', '纯文本'], ['code', "Ren'Py"], ['json', 'JSON']] as [View, string][]).map(([key, name]) => <button key={key} className={`view-button ${view === key ? 'active' : ''}`} onClick={() => setView(key)}>{name}</button>)}</div></div>
     {references.length > 0 && <div className="fragment-references"><strong>此片段被 {references.length} 处引用</strong><div>{references.map((reference) => <button key={`${reference.fragmentId}-${reference.blockIndex}-${reference.kind}`} onClick={() => { activateFragment(reference.fragmentId); setSelected(reference.blockIndex); }}>{reference.kind} · {fragmentNames.get(reference.fragmentId) ?? reference.fragmentId}<span>前往</span></button>)}</div></div>}
     {view === 'cards' && <Profiler id="block-list" onRender={recordComponentRender}><div className="blocks-area" ref={blocksAreaRef} tabIndex={0} onScroll={(event) => { cardVirtual.onScroll(event); window.clearTimeout(scrollSaveTimer.current); const value = event.currentTarget.scrollTop; scrollSaveTimer.current = window.setTimeout(() => saveScrollTop(value), 350); }}><div className="virtual-list-canvas" style={{ height: cardVirtual.layout.totalSize }}>{cardVirtual.indexes.map((index) => { const block = blocks[index]; const showDropMarker = dragOverIndex === index && draggedIndex !== null && (draggedIndex !== index || dragOverEdge === 'after'); return <MeasuredVirtualRow itemKey={block.id} index={index} top={cardVirtual.layout.offsets[index]} measure={cardVirtual.measure} className={`virtual-block-row block-drop-target ${highlightedBlockId === block.id ? 'block-just-inserted' : ''} ${showDropMarker ? `drag-over-${dragOverEdge}` : ''}`} key={block.id}><div data-block-index={index} data-block-id={block.id}><Profiler id={`story-card:${block.type}`} onRender={recordComponentRender}><StoryCard index={index} project={project} block={block} selected={selectedIndexes.has(index)} asset={block.assetId ? assetLookups.byId.get(block.assetId) : undefined} voiceAsset={block.voice ? assetLookups.byReference.get(block.voice) : undefined} onSelect={selectBlock} onContextMenu={openBlockContextMenu} onChange={updateBlock} onMove={moveBlock} onDuplicate={duplicateBlock} onDelete={deleteBlock} dragging={draggedIndex === index} listDragging={draggedIndex !== null} onPointerDown={beginPointerDrag} onPointerMove={updatePointerDrag} onPointerUp={finishPointerDrag} onPointerCancel={cancelPointerDrag} /></Profiler><div className="insert-row"><button className="insert-button" title="插入 Block" onClick={() => openBlocks(index + 1)}><Plus /></button></div></div></MeasuredVirtualRow>; })}</div><div className={`quick-composer ${activeDialogueCharacter ? 'dialogue-mode' : ''}`} ref={composerRef}><div className="composer-prefix">{activeDialogueCharacter ? activeDialogueCharacter.name : <AlignLeft />}</div><textarea aria-label={activeDialogueCharacter ? `${activeDialogueCharacter.name} 连续对话` : '输入旁白'} value={composerText} placeholder={activeDialogueCharacter ? `${activeDialogueCharacter.name} 的对白` : '输入旁白'} onChange={(event) => setComposerText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Tab') { event.preventDefault(); openComposerMenu(); } else if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); submitComposer(); } }} />{dialogueCharacterId && <button className="icon-button" title="退出连续对话" onClick={() => { setDialogueCharacterId(null); setDialogueSchemeId(''); }}><X /></button>}{composerMenuOpen && <div className="composer-menu" role="menu" style={composerMenuPos ?? undefined}><strong>插入 Block</strong><div className="composer-menu-grid">{(['scene', 'sound', 'characterShow', 'camera', 'branch', 'condition'] as BlockType[]).map((type) => { const MetaIcon = blockMeta[type].icon; return <button key={type} onClick={() => insertComposerBlock(type)}><MetaIcon />{blockMeta[type].name}</button>; })}</div><strong>连续对话角色</strong><div className="composer-characters">{project.characters.map((character) => <button key={character.id} onClick={() => { setDialogueCharacterId(character.id); setDialogueSchemeId(''); }}>{character.name}</button>)}</div>{activeDialogueCharacter && <><strong>显示名方案</strong><div className="composer-characters"><button className={!dialogueSchemeId ? 'active' : ''} onClick={() => { setDialogueSchemeId(''); setComposerMenuOpen(false); }}>主名称</button>{activeDialogueCharacter.displayNameSchemes?.map((scheme) => <button className={dialogueSchemeId === scheme.id ? 'active' : ''} key={scheme.id} onClick={() => { setDialogueSchemeId(scheme.id); setComposerMenuOpen(false); }}>{scheme.name}</button>)}</div></>}<footer className="composer-menu-footer"><small>Esc 关闭</small><button onClick={() => setComposerMenuOpen(false)}>关闭</button></footer></div>}</div></div></Profiler>}
     {view === 'plain' && <Profiler id="block-list" onRender={recordComponentRender}><div className="plain-script-editor" ref={plainAreaRef} onScroll={(event) => { plainVirtual.onScroll(event); window.clearTimeout(scrollSaveTimer.current); const value = event.currentTarget.scrollTop; scrollSaveTimer.current = window.setTimeout(() => saveScrollTop(value), 350); }}><div className="virtual-list-canvas" style={{ height: plainVirtual.layout.totalSize }}>{plainVirtual.indexes.map((index) => { const block = blocks[index]; const previous = blocks[index - 1]; const grouped = block.type === 'dialogue' && previous?.type === 'dialogue' && previous.speaker === block.speaker; return <MeasuredVirtualRow itemKey={block.id} index={index} top={plainVirtual.layout.offsets[index]} measure={plainVirtual.measure} className="virtual-plain-row" key={block.id}><div data-block-index={index} className={`plain-block-row ${selectedIndexes.has(index) ? 'selected' : ''} ${grouped ? 'grouped' : ''}`} onClick={(event) => selectBlock(index, event)} onContextMenu={(event) => { event.preventDefault(); if (!selectedIndexes.has(index)) selectBlock(index); setContextMenu({ x: event.clientX, y: event.clientY }); }}><span className="plain-block-kind">{block.type === 'dialogue' ? grouped ? '' : block.speaker : blockMeta[block.type].name}</span><div>{(block.type === 'dialogue' || block.type === 'narration') ? <><textarea defaultValue={block.text ?? ''} onBlur={(event) => updateBlock(index, { text: event.target.value })} /><small>{block.type === 'dialogue' ? block.expression : ''}</small></> : block.type === 'branch' ? <><strong>分支 · {block.options?.length ?? 0} 个选项</strong>{block.options?.map((option) => <small className="plain-branch-option" key={option.text}>├ {option.text} → {fragmentNames.get(option.target) ?? option.target}</small>)}</> : <span className="plain-instruction">{block.title ?? block.text ?? (block.type === 'condition' ? `${block.variable} ${block.operator} ${String(block.compareValue ?? '')}` : block.type === 'setVariable' ? `${block.variable} = ${String(block.value ?? '')}` : block.target ? `→ ${fragmentNames.get(block.target) ?? block.target}` : blockMeta[block.type].description)}</span>}</div></div></MeasuredVirtualRow>; })}</div></div></Profiler>}
     {view === 'code' && <pre className="code-editor">{code || '# empty fragment'}</pre>}{view === 'json' && <pre className="json-editor">{JSON.stringify(blocks, null, 2)}</pre>}
     {contextMenu && <div className="context-menu block-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()}><strong>已选择 {selectedIndexes.size} 个 Block</strong><button onClick={() => void writeBlockClipboard(false)}>复制</button><button onClick={() => void writeBlockClipboard(true)}>剪切</button><button onClick={duplicateSelected}>创建副本</button><button onClick={() => void pasteBlocks()}>粘贴到下方</button><button className="danger" onClick={() => void deleteSelected()}>删除</button></div>}
-    {inspectorDock === 'editor' && inspector}
-  </section><section className="preview-inspector"><Profiler id="preview" onRender={recordComponentRender}><Preview project={project} editorIndex={selected} debugMode={debugRunning} language={previewLanguage} onLanguageChange={onPreviewLanguageChange} onEditorLocationChange={activateFragment} onStageCharacterMove={moveStageCharacter} /></Profiler>{inspectorDock === 'preview' && inspector}</section>{inspectorDock === 'floating' && <div className="floating-inspector">{inspector}</div>}</div>;
+    {inspectorDock === 'editor' && !standaloneInspectorWindow && inspector}
+   </section><section className="preview-inspector"><Profiler id="preview" onRender={recordComponentRender}><Preview project={project} editorIndex={selected} debugMode={debugRunning} language={previewLanguage} onLanguageChange={onPreviewLanguageChange} onEditorLocationChange={activateFragment} onStageCharacterMove={moveStageCharacter} /></Profiler>{inspectorDock === 'preview' && !standaloneInspectorWindow && inspector}</section>{inspectorDock === 'floating' && !standaloneInspectorWindow && <div className="floating-inspector" style={floatingPos ? { left: floatingPos.x, top: floatingPos.y, right: 'auto', bottom: 'auto' } : undefined} onPointerDown={onFloatingPointerDown}>{inspector}</div>}{standalonePortal}</div>;
 }
 
 function PageHeader({ title, sub, children }: { title: string; sub: string; children?: ReactNode }) {

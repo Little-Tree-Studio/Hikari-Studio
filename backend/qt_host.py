@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -127,6 +128,14 @@ class QtWindowAdapter:
     def destroy(self) -> None:
         self._window.close()
 
+    def set_always_on_top(self, enabled: bool) -> None:
+        self._window.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, bool(enabled))
+        self._window.show()
+        self._window.raise_()
+
+    def resize_content(self, width: int, height: int) -> None:
+        self._window.resize(int(width), int(height))
+
     def activate(self) -> None:
         self._window.show()
         self._window.raise_()
@@ -199,12 +208,14 @@ class QtWebHost:
         parent: "QtWebHost | None" = None,
         title: str = "Slide Studio",
         rpc_server: Any = None,
+        window_id: str | None = None,
     ) -> None:
         self.application = application
         self.api = api
         self.parent = parent
         self.children: list[QtWebHost] = []
         self.rpc_server = rpc_server
+        self.window_id = window_id or "main"
         self.window = QtMainWindow()
         self.window.setWindowTitle(title)
         if not application.windowIcon().isNull():
@@ -214,11 +225,20 @@ class QtWebHost:
         # maximize bounds, system buttons, and Win11 rounded corners.
         self.window.setWindowFlag(Qt.WindowType.Window, True)
         self.window.setMinimumSize(760, 520)
+        if parent is not None:
+            self.window.setMinimumSize(320, 240)
         self.window.setGeometry(x if x is not None else 0, y if y is not None else 0, width, height)
         self.view = QWebEngineView(self.window)
         self.page = QtWebPage(self.view, self)
         self.view.setPage(self.page)
         self.window.setCentralWidget(self.view)
+        if self.window_id != "main":
+            register = getattr(self.api, "_register_popup_window", None)
+            if callable(register):
+                register(self.window_id, QtWindowAdapter(self.window, self.view, self.application))
+            unregister = getattr(self.api, "_unregister_popup_window", None)
+            if callable(unregister):
+                self.window.closing.connect(lambda: unregister(self.window_id))
         if rpc_server is not None:
             self.interceptor = RpcRequestInterceptor(rpc_server)
             self.page.profile().setUrlRequestInterceptor(self.interceptor)
@@ -230,6 +250,7 @@ class QtWebHost:
                 "window.__SLIDE_RPC__ = "
                 f"{{baseUrl: {json.dumps(rpc_server.base_url)}, "
                 f"token: {json.dumps(rpc_server.token)}}};"
+                f"window.__SLIDE_WINDOW_ID__ = {json.dumps(self.window_id)};"
             )
             self.page.scripts().insert(script)
         if url is not None:
@@ -254,6 +275,7 @@ class QtWebHost:
             parent=self,
             title="Slide Studio Preview",
             rpc_server=self.rpc_server,
+            window_id=f"popup-{uuid.uuid4().hex}",
         )
         self.children.append(popup)
         popup.window.show()

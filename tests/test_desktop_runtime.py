@@ -16,6 +16,35 @@ from backend.window_state import WindowPlacement, WindowStateStore
 
 
 class DesktopRuntimeTests(unittest.TestCase):
+    def test_popup_always_on_top_targets_only_registered_window(self) -> None:
+        class FakeWindow:
+            def __init__(self) -> None:
+                self.values: list[bool] = []
+                self.sizes: list[tuple[int, int]] = []
+
+            def set_always_on_top(self, enabled: bool) -> None:
+                self.values.append(enabled)
+
+            def resize_content(self, width: int, height: int) -> None:
+                self.sizes.append((width, height))
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            main = FakeWindow()
+            popup = FakeWindow()
+            api = DesktopApi(ProjectStore(root / "projects"), root)
+            api._bind_window(main)
+
+            self.assertTrue(api._register_popup_window("inspector", popup))
+            self.assertTrue(api.set_window_always_on_top(True, "inspector"))
+            self.assertEqual(popup.values, [True])
+            self.assertEqual(main.values, [])
+            self.assertTrue(api.resize_popup_window(520, 500, "inspector"))
+            self.assertEqual(popup.sizes, [(520, 500)])
+            self.assertFalse(api.resize_popup_window(200, 100, "inspector"))
+            api._unregister_popup_window("inspector")
+            self.assertFalse(api.set_window_always_on_top(False, "inspector"))
+
     def test_window_drag_moves_to_a_valid_pointer_derived_position(self) -> None:
         class FakeWindow:
             def __init__(self) -> None:
