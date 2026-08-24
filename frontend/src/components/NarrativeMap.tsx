@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointer
 import {
   BookOpen, Braces, ChevronRight, CircleDot, CirclePlay, ExternalLink, FileText,
   GitBranch, GitCommitHorizontal, GripVertical, LayoutList, ListTree, LocateFixed,
-  Maximize2, Minus, Pencil, Plus, Power, PowerOff, RotateCcw, Search, Trash2, Variable,
+  Maximize2, Minus, Network, Pencil, Plus, Power, PowerOff, RotateCcw, Search, Trash2,
+  Variable, Workflow,
 } from 'lucide-react';
 import { Select } from './ui/Select';
 import type { Project, StoryBlock, VariableDefinition, VariablePersistence, VariableScope, VariableType } from '../types';
@@ -19,7 +20,7 @@ type NarrativeNode = {
   chapterId?: string;
   disabled?: boolean;
 };
-type EdgeKind = 'trunk' | 'structure' | 'branch' | 'condition' | 'jump' | 'call' | 'variable';
+type EdgeKind = 'trunk' | 'structure' | 'branch' | 'condition' | 'jump' | 'call' | 'variable' | 'sequence';
 type NarrativeEdge = {
   id: string;
   source: string;
@@ -34,6 +35,7 @@ type NarrativeEdge = {
   detachable?: boolean;
 };
 type Focus = { type: 'structure' | 'variable' | 'branch'; id: string } | null;
+type ViewMode = 'graph' | 'flow';
 
 type Props = {
   project: Project;
@@ -67,7 +69,7 @@ const containsBindingDeep = (value: unknown, name: string): boolean => {
   return false;
 };
 
-function buildGraph(project: Project) {
+export function buildGraph(project: Project) {
   const nodes: NarrativeNode[] = [];
   const edges: NarrativeEdge[] = [];
   const defaults: Record<string, Point> = {};
@@ -124,11 +126,77 @@ function buildGraph(project: Project) {
   return { nodes, edges, defaults };
 }
 
+const flowNodeKinds = new Set<NodeKind>(['branch', 'condition', 'write', 'jump', 'call']);
+const flowEdgeKinds = new Set<EdgeKind>(['branch', 'condition', 'jump', 'call']);
+
+type FlowShape = 'start' | 'process' | 'decision' | 'data' | 'subroutine';
+const flowSizes: Record<FlowShape, { w: number; h: number }> = { start: { w: 150, h: 46 }, process: { w: 190, h: 58 }, decision: { w: 178, h: 96 }, data: { w: 190, h: 58 }, subroutine: { w: 190, h: 58 } };
+export const flowShapeOf = (node: NarrativeNode | undefined, entryFragmentId?: string): FlowShape => {
+  if (!node) return 'process';
+  if (node.kind === 'fragment') return node.fragmentId === entryFragmentId ? 'start' : 'process';
+  if (node.kind === 'branch' || node.kind === 'condition') return 'decision';
+  if (node.kind === 'write') return 'data';
+  return 'subroutine';
+};
+
+export function buildFlowLayout(graph: ReturnType<typeof buildGraph>, entryFragmentId?: string) {
+  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+  const childrenOf = new Map<string, string[]>();
+  const incoming = new Set<string>();
+  const link = (parent: string, child: string) => {
+    if (!parent || !child || parent === child || !nodeById.has(child)) return;
+    const list = childrenOf.get(parent) ?? [];
+    if (list.includes(child)) return;
+    list.push(child);
+    childrenOf.set(parent, list);
+    incoming.add(child);
+  };
+  graph.nodes.filter((node) => flowNodeKinds.has(node.kind) && node.fragmentId).forEach((node) => link(`fragment:${node.fragmentId}`, node.id));
+  graph.edges.filter((edge) => flowEdgeKinds.has(edge.kind)).forEach((edge) => link(edge.source, edge.target));
+
+  const fragments = graph.nodes.filter((node) => node.kind === 'fragment').map((node) => node.id);
+  const roots = [
+    ...(entryFragmentId ? [`fragment:${entryFragmentId}`] : []),
+    ...fragments.filter((id) => id !== `fragment:${entryFragmentId}` && !incoming.has(id)),
+    ...fragments,
+  ];
+
+  const slot = 258;
+  const levelHeight = 158;
+  const positions: Record<string, Point> = {};
+  const placed = new Set<string>();
+  const levelEnd: number[] = [];
+  let frontier = 80;
+  const place = (id: string, level: number) => {
+    if (placed.has(id)) return;
+    placed.add(id);
+    const children = (childrenOf.get(id) ?? []).filter((child) => !placed.has(child));
+    if (!children.length) {
+      const x = Math.max(frontier, levelEnd[level] ?? 0);
+      positions[id] = { x, y: 64 + level * levelHeight };
+      levelEnd[level] = x + slot;
+      frontier = x + slot;
+      return;
+    }
+    children.forEach((child) => place(child, level + 1));
+    const width = flowSizes[flowShapeOf(nodeById.get(id), entryFragmentId)].w;
+    const childCenter = (childId: string) => positions[childId].x + flowSizes[flowShapeOf(nodeById.get(childId), entryFragmentId)].w / 2;
+    const center = (childCenter(children[0]) + childCenter(children[children.length - 1])) / 2;
+    const x = Math.max(center - width / 2, levelEnd[level] ?? 0);
+    positions[id] = { x, y: 64 + level * levelHeight };
+    levelEnd[level] = Math.max(levelEnd[level] ?? 0, x + width + 12);
+    frontier = Math.max(frontier, levelEnd[level] ?? 0);
+  };
+  roots.forEach((root) => place(root, 0));
+  return positions;
+}
+
 export function NarrativeMap({ project, activate, commit, notify, requestText }: Props) {
   const graph = useMemo(() => buildGraph(project), [project.chapters, project.scripts]);
   const graphNodeIds = useMemo(() => graph.nodes.map((node) => node.id).join('\u001f'), [graph.nodes]);
   const [positions, setPositions] = useState<Record<string, Point>>(() => ({ ...graph.defaults, ...(project.settings.narrativeMap?.positions ?? {}) }));
   const [viewport, setViewport] = useState({ x: 0, y: 0, scale: .85 });
+  const [viewMode, setViewMode] = useState<ViewMode>(() => project.settings.narrativeMap?.viewMode ?? 'graph');
   const [tab, setTab] = useState<'structure' | 'variables' | 'branches'>('structure');
   const [branchView, setBranchView] = useState<'chapter' | 'flat'>('chapter');
   const [focus, setFocus] = useState<Focus>(null);
@@ -150,6 +218,24 @@ export function NarrativeMap({ project, activate, commit, notify, requestText }:
       return next;
     });
   }, [graphNodeIds, project.meta.id]);
+
+  const entryFragmentId = useMemo(() => (project.chapters.find((chapter) => chapter.entry) ?? project.chapters[0])?.fragments[0]?.id, [project.chapters]);
+  const graphIndex = useMemo(() => new Map(graph.nodes.map((node) => [node.id, node] as const)), [graph.nodes]);
+  const flowPositions = useMemo(() => viewMode === 'flow' ? buildFlowLayout(graph, entryFragmentId) : null, [viewMode, graph, entryFragmentId]);
+  const nodePositions = flowPositions ?? positions;
+  const nodePositionsRef = useRef(nodePositions);
+  nodePositionsRef.current = nodePositions;
+  const visibleEdges = useMemo(() => {
+    if (viewMode === 'graph') return graph.edges;
+    const sequence = graph.nodes.filter((node) => flowNodeKinds.has(node.kind) && node.fragmentId).map((node): NarrativeEdge => ({ id: `flow-sequence:${node.id}`, source: `fragment:${node.fragmentId}`, target: node.id, kind: 'sequence' }));
+    return [...sequence, ...graph.edges.filter((edge) => flowEdgeKinds.has(edge.kind))];
+  }, [graph, viewMode]);
+  const switchViewMode = (mode: ViewMode) => {
+    if (mode === viewMode) return;
+    setViewMode(mode);
+    commit((current) => ({ ...current, settings: { ...current.settings, narrativeMap: { ...(current.settings.narrativeMap ?? { positions: {} }), viewMode: mode } } }), mode === 'flow' ? '切换叙事地图为流程图模式' : '切换叙事地图为结构图模式');
+  };
+  useEffect(() => { if (viewMode === 'flow') fitView(); }, [viewMode]);
 
   const variableNodeReferences = useMemo(() => Object.fromEntries(Object.keys(project.variables).map((name) => {
     const refs = graph.nodes.filter((node) => {
@@ -183,18 +269,36 @@ export function NarrativeMap({ project, activate, commit, notify, requestText }:
   const isHighlightedEdge = (edge: NarrativeEdge) => focus?.type === 'structure' ? edge.source === focus.id || edge.target === focus.id : focus?.type === 'branch' ? edge.id === focus.id || edge.source === focus.id : focus?.type === 'variable' ? edge.variable === focus.id : false;
   const hasFocus = Boolean(focus);
   const definitionFor = (name: string) => project.variableDefinitions?.[name] ?? defaultDefinition(project.variables[name]);
-  const persistPositions = (next: Record<string, Point>, label = '移动叙事地图节点') => commit((current) => ({ ...current, settings: { ...current.settings, narrativeMap: { positions: next } } }), label);
+  const persistPositions = (next: Record<string, Point>, label = '移动叙事地图节点') => commit((current) => ({ ...current, settings: { ...current.settings, narrativeMap: { ...(current.settings.narrativeMap ?? { positions: {} }), positions: next } } }), label);
   const toCanvasPoint = (clientX: number, clientY: number) => { const rect = canvasRef.current?.getBoundingClientRect(); return { x: ((clientX - (rect?.left ?? 0)) - viewport.x) / viewport.scale, y: ((clientY - (rect?.top ?? 0)) - viewport.y) / viewport.scale }; };
   const edgePath = (edge: NarrativeEdge, targetPoint?: Point) => {
-    const source = positions[edge.source]; const target = targetPoint ?? positions[edge.target];
+    const source = nodePositions[edge.source]; const target = targetPoint ?? nodePositions[edge.target];
     if (!source || !target) return '';
+    if (viewMode === 'flow') {
+      const s = flowSizes[flowShapeOf(graphIndex.get(edge.source), entryFragmentId)];
+      const t = flowSizes[flowShapeOf(graphIndex.get(edge.target), entryFragmentId)];
+      const x1 = source.x + s.w / 2; const y1 = source.y + s.h;
+      const x2 = targetPoint ? targetPoint.x : target.x + t.w / 2; const y2 = targetPoint ? targetPoint.y : target.y;
+      const bend = y2 >= y1 ? Math.max(40, (y2 - y1) * .4) : 48;
+      return `M ${x1} ${y1} C ${x1} ${y1 + bend}, ${x2} ${y2 - bend}, ${x2} ${y2}`;
+    }
     const x1 = source.x + nodeWidth; const y1 = source.y + 48; const x2 = target.x; const y2 = target.y + 48;
     if (edge.kind === 'trunk') return `M ${x1} ${y1} L ${x2} ${y2}`;
     const bend = Math.max(60, Math.abs(x2 - x1) * .42);
     return `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`;
   };
+  const edgeLabelPoint = (edge: NarrativeEdge, targetPoint?: Point): Point => {
+    const source = nodePositions[edge.source]; const target = targetPoint ?? nodePositions[edge.target];
+    if (!source || !target) return { x: 0, y: 0 };
+    if (viewMode === 'flow') {
+      const s = flowSizes[flowShapeOf(graphIndex.get(edge.source), entryFragmentId)];
+      const t = flowSizes[flowShapeOf(graphIndex.get(edge.target), entryFragmentId)];
+      return { x: (source.x + s.w / 2 + target.x + t.w / 2) / 2, y: (source.y + s.h + target.y) / 2 };
+    }
+    return { x: (source.x + nodeWidth + target.x) / 2, y: (source.y + target.y) / 2 + 35 };
+  };
   const fitView = () => {
-    const values = Object.values(positionsRef.current); const canvas = canvasRef.current;
+    const values = Object.values(nodePositionsRef.current); const canvas = canvasRef.current;
     if (!values.length || !canvas) return;
     const minX = Math.min(...values.map((point) => point.x)); const minY = Math.min(...values.map((point) => point.y));
     const maxX = Math.max(...values.map((point) => point.x + nodeWidth)); const maxY = Math.max(...values.map((point) => point.y + 110));
@@ -202,8 +306,8 @@ export function NarrativeMap({ project, activate, commit, notify, requestText }:
     setViewport({ x: 45 - minX * scale, y: 45 - minY * scale, scale });
   };
   const resetLayout = () => { setPositions(graph.defaults); positionsRef.current = graph.defaults; persistPositions({}, '恢复叙事地图默认布局'); setViewport({ x: 0, y: 0, scale: .85 }); notify('已恢复默认布局'); };
-  const locateActive = () => { const point = positions[`fragment:${project.activeFragmentId}`]; if (point) setViewport((current) => ({ ...current, x: 320 - point.x * current.scale, y: 170 - point.y * current.scale })); };
-  const beginPan = (event: ReactPointerEvent<HTMLDivElement>) => { if ((event.target as HTMLElement).closest('.narrative-node,.map-path-hit,.narrative-map-tools')) return; event.currentTarget.setPointerCapture(event.pointerId); panRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originX: viewport.x, originY: viewport.y }; setSelectedEdgeId(null); };
+  const locateActive = () => { const point = nodePositions[`fragment:${project.activeFragmentId}`]; if (point) setViewport((current) => ({ ...current, x: 320 - point.x * current.scale, y: 170 - point.y * current.scale })); };
+  const beginPan = (event: ReactPointerEvent<HTMLDivElement>) => { if ((event.target as HTMLElement).closest('.narrative-node,.flow-node,.map-path-hit,.narrative-map-tools')) return; event.currentTarget.setPointerCapture(event.pointerId); panRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originX: viewport.x, originY: viewport.y }; setSelectedEdgeId(null); };
   const movePan = (event: ReactPointerEvent<HTMLDivElement>) => { const pan = panRef.current; if (!pan || pan.pointerId !== event.pointerId) return; setViewport((current) => ({ ...current, x: pan.originX + event.clientX - pan.startX, y: pan.originY + event.clientY - pan.startY })); };
   const endPan = (event: ReactPointerEvent<HTMLDivElement>) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); panRef.current = null; };
   useEffect(() => {
@@ -226,7 +330,7 @@ export function NarrativeMap({ project, activate, commit, notify, requestText }:
     canvas.addEventListener('wheel', wheelZoom, { passive: false });
     return () => canvas.removeEventListener('wheel', wheelZoom);
   }, []);
-  const beginDrag = (nodeId: string, event: ReactPointerEvent<HTMLDivElement>) => { event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId); const point = positions[nodeId]; dragRef.current = { pointerId: event.pointerId, nodeId, startX: event.clientX, startY: event.clientY, originX: point.x, originY: point.y }; };
+  const beginDrag = (nodeId: string, event: ReactPointerEvent<HTMLDivElement>) => { if (viewMode === 'flow') return; event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId); const point = positions[nodeId]; dragRef.current = { pointerId: event.pointerId, nodeId, startX: event.clientX, startY: event.clientY, originX: point.x, originY: point.y }; };
   const moveDrag = (event: ReactPointerEvent<HTMLDivElement>) => { const drag = dragRef.current; if (!drag || drag.pointerId !== event.pointerId) return; event.stopPropagation(); setPositions((current) => { const next = { ...current, [drag.nodeId]: { x: Math.max(20, Math.round(drag.originX + (event.clientX - drag.startX) / viewport.scale)), y: Math.max(20, Math.round(drag.originY + (event.clientY - drag.startY) / viewport.scale)) } }; positionsRef.current = next; return next; }); };
   const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => { if (!dragRef.current) return; event.stopPropagation(); if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); dragRef.current = null; persistPositions(positionsRef.current); };
   const findTarget = (clientX: number, clientY: number) => {
@@ -282,7 +386,7 @@ export function NarrativeMap({ project, activate, commit, notify, requestText }:
   const activeChapter = project.chapters.find((chapter) => chapter.fragments.some((fragment) => fragment.id === project.activeFragmentId)) ?? project.chapters[0];
   const focusStructure = (nodeId: string) => {
     setFocus((current) => current?.type === 'structure' && current.id === nodeId ? null : { type: 'structure', id: nodeId });
-    const point = positions[nodeId];
+    const point = nodePositions[nodeId];
     const canvas = canvasRef.current;
     if (point && canvas) setViewport((current) => ({ ...current, x: canvas.clientWidth / 2 - (point.x + nodeWidth / 2) * current.scale, y: canvas.clientHeight / 2 - (point.y + 48) * current.scale }));
   };
@@ -333,11 +437,13 @@ export function NarrativeMap({ project, activate, commit, notify, requestText }:
         {tab === 'variables' ? <><div className="narrative-panel-toolbar"><div className="asset-search"><Search /><input value={variableQuery} onChange={(event) => setVariableQuery(event.target.value)} placeholder="搜索变量" /></div><button className="icon-button" title="新增变量" onClick={() => void addVariable()}><Plus /></button></div><div className="variable-table">{Object.entries(project.variables).filter(([name]) => name.toLocaleLowerCase().includes(variableQuery.toLocaleLowerCase())).map(([name, value]) => { const definition = definitionFor(name); const refs = variableReferences[name] ?? []; const readOnly = definition.scope === 'system'; const expanded = focus?.type === 'variable' && focus.id === name; return <article className={`${expanded ? 'active' : ''} ${readOnly ? 'system-variable' : ''}`} key={name}><button className="variable-summary" onClick={() => setFocus(expanded ? null : { type: 'variable', id: name })}><ChevronRight /><span><strong>{definition.displayName || name}</strong><small>{name} · {refs.length} 处引用</small></span><em>{readOnly ? '系统' : definition.type === 'boolean' ? '布尔' : definition.type === 'number' ? '数值' : '文本'}</em></button>{expanded && <div className="variable-editor"><div className="variable-key-row"><label>变量名<code>{name}</code></label><button className="button ghost" disabled={readOnly} onClick={() => void renameVariable(name)}><Pencil />重命名变量名</button></div><label>显示名<input disabled={readOnly} defaultValue={definition.displayName ?? ''} onBlur={(event) => patchDefinition(name, { displayName: event.target.value.trim() })} /></label><label>用途说明<textarea disabled={readOnly} defaultValue={definition.description ?? ''} onBlur={(event) => patchDefinition(name, { description: event.target.value.trim() })} /></label><div className="variable-editor-row"><label>类型<Select disabled={readOnly} value={definition.type} onChange={(value) => patchDefinition(name, { type: value as VariableType })}><option value="boolean">布尔</option><option value="number">数值</option><option value="string">文本</option></Select></label><label>默认值{definition.type === 'boolean' ? <Select disabled={readOnly} value={String(value)} onChange={(value) => updateDefault(name, value, definition.type)}><option value="false">false</option><option value="true">true</option></Select> : <input disabled={readOnly} defaultValue={String(value)} onBlur={(event) => updateDefault(name, event.target.value, definition.type)} />}</label></div><div className="variable-editor-row"><label>作用域<Select disabled={readOnly} value={definition.scope} onChange={(value) => patchDefinition(name, { scope: value as VariableScope })}><option value="project">项目变量</option><option value="system">系统变量</option></Select></label><label>持久化<Select disabled={readOnly} value={definition.persistence} onChange={(value) => patchDefinition(name, { persistence: value as VariablePersistence })}><option value="slot">存档绑定</option><option value="shared">全局共享</option></Select></label></div><div className="variable-references"><strong>引用位置</strong>{refs.map((ref) => <button key={ref.id} disabled={!ref.fragmentId} onClick={() => ref.fragmentId && activate(ref.fragmentId, ref.blockIndex)}><span>{ref.label}</span>{ref.fragmentId && <ExternalLink />}</button>)}{!refs.length && <small>尚未被 Block 使用</small>}</div><button className="button danger" disabled={Boolean(refs.length) || readOnly} onClick={() => removeVariable(name)}><Trash2 />删除变量</button>{readOnly && <small className="system-variable-note">系统变量由引擎注入，只能查看。</small>}</div>}</article>; })}</div></> : <><div className="branch-view-switch"><button className={branchView === 'chapter' ? 'active' : ''} onClick={() => setBranchView('chapter')}><ListTree />按章节</button><button className={branchView === 'flat' ? 'active' : ''} onClick={() => setBranchView('flat')}><LayoutList />平铺</button></div><div className={`branch-list ${branchView}`}>{branchView === 'chapter' ? branchBlocks.map((group) => <details open key={group.chapterId}><summary>{group.chapterName}<small>{group.branches.length} 个分支</small></summary>{group.branches.map((branch) => <div className="branch-tree-group" key={branch.id}><button className={focus?.type === 'branch' && focus.id === branch.id ? 'active' : ''} onClick={() => setFocus(focus?.type === 'branch' && focus.id === branch.id ? null : { type: 'branch', id: branch.id })}><GitBranch /><span><strong>{branch.title}</strong><small>{branch.fragmentName} · Block {branch.blockIndex + 1}</small></span></button>{branch.options.map((option) => { const active = focus?.type === 'branch' && focus.id === option.id; const target = graph.nodes.find((node) => node.id === `fragment:${option.target}`); return <button className={`branch-tree-option ${active ? 'active' : ''}`} key={option.id} onClick={() => setFocus(active ? null : { type: 'branch', id: option.id })}><em>{String.fromCharCode(65 + option.index)}</em><span><strong>{option.text}</strong><small>前往 {target?.title ?? option.target}</small></span></button>; })}</div>)}</details>) : branchBlocks.flatMap((group) => group.branches).map((branch) => <div className="branch-flat-group" key={branch.id}><button className={focus?.type === 'branch' && focus.id === branch.id ? 'active' : ''} onClick={() => setFocus(focus?.type === 'branch' && focus.id === branch.id ? null : { type: 'branch', id: branch.id })}><GitBranch /><span><strong>{branch.title}</strong><small>{branch.fragmentName} · {branch.options.length} 个选项</small></span></button>{branch.options.map((option) => { const active = focus?.type === 'branch' && focus.id === option.id; return <button className={active ? 'active' : ''} key={option.id} onClick={() => setFocus(active ? null : { type: 'branch', id: option.id })}><em>{String.fromCharCode(65 + option.index)}</em><span>{option.text}</span></button>; })}</div>)}{!branchBlocks.length && <div className="narrative-empty">当前项目没有分支选项</div>}</div></>}
       </aside>
       <section className="narrative-flow-panel">
-        <div className="narrative-map-tools"><div className="map-zoom"><button className="icon-button" title="缩小" onClick={() => setViewport((current) => ({ ...current, scale: Math.max(.35, current.scale - .1) }))}><Minus /></button><span>{Math.round(viewport.scale * 100)}%</span><button className="icon-button" title="放大" onClick={() => setViewport((current) => ({ ...current, scale: Math.min(2, current.scale + .1) }))}><Plus /></button></div><button className="button ghost" onClick={() => setLegendOpen((value) => !value)}><CircleDot />图例</button>{legendOpen && <div className="narrative-legend">{[['trunk','章节主干'],['structure','结构 / 归属'],['branch','选项跳转'],['condition','条件跳转'],['call','调用片段'],['variable','变量读写']].map(([kind, label]) => <span key={kind}><i className={kind} />{label}</span>)}</div>}</div>
-        <div className="map-canvas blueprint-canvas narrative-canvas" ref={canvasRef} tabIndex={0} onPointerDown={beginPan} onPointerMove={movePan} onPointerUp={endPan} onPointerCancel={endPan}>
-          <div className="narrative-viewport" style={{ transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})` }}><div className="narrative-world"><svg className="map-lines" width="4000" height="1800"><defs><marker id="narrative-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" /></marker></defs>{graph.edges.map((edge) => { const path = edgePath(edge); const selected = selectedEdgeId === edge.id; const highlighted = isHighlightedEdge(edge); return <g key={edge.id} className={`${selected ? 'selected' : ''} ${highlighted ? 'causal-highlight' : ''} ${hasFocus && !highlighted ? 'causal-dim' : ''}`} onClick={(event) => { if (!edge.detachable) return; event.stopPropagation(); setSelectedEdgeId(edge.id); }}><path className="map-path-hit" d={path} /><path className={`map-path ${edge.kind}`} d={path} markerEnd="url(#narrative-arrow)" />{edge.label && <text x={(positions[edge.source]?.x + nodeWidth + (positions[edge.target]?.x ?? 0)) / 2} y={(positions[edge.source]?.y + (positions[edge.target]?.y ?? 0)) / 2 + 35}>{edge.label}</text>}</g>; })}{wireDraft && <path className="map-path draft" d={edgePath({ id: 'draft', source: wireDraft.source, target: '', kind: 'jump' }, wireDraft)} />}</svg>{graph.nodes.map((node) => { const point = positions[node.id]; if (!point) return null; const highlighted = isHighlightedNode(node); const isFragment = node.kind === 'fragment'; return <article className={`narrative-node kind-${node.kind} ${node.fragmentId === project.activeFragmentId ? 'active' : ''} ${highlighted ? 'causal-highlight' : ''} ${hasFocus && !highlighted ? 'causal-dim' : ''}`} style={{ left: point.x, top: point.y }} key={node.id}>{isFragment && <button className={`narrative-port in ${wireTargetId === node.fragmentId ? 'snap-target' : ''}`} data-fragment-id={node.fragmentId} aria-label={`连接到 ${node.title}`} />}<div className="node-header" onPointerDown={(event) => beginDrag(node.id, event)} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}><GripVertical />{node.kind === 'chapter' ? <GitCommitHorizontal /> : node.kind === 'write' ? <Braces /> : <GitBranch />}<span>{node.title}</span>{node.fragmentId && <button title="在剧本中打开" onPointerDown={(event) => event.stopPropagation()} onClick={() => activate(node.fragmentId!, node.blockIndex)}><ExternalLink /></button>}</div><div className="node-body"><span>{node.subtitle}</span><small>{node.kind === 'chapter' ? '章节主干' : node.kind === 'fragment' ? 'Fragment' : node.kind === 'write' ? '变量写入' : node.kind === 'condition' ? '变量读取 / 条件' : '流程控制'}</small></div>{isFragment && <button className="narrative-port out" aria-label={`从 ${node.title} 创建连线`} onPointerDown={(event) => beginWire(node.fragmentId!, event)} />}</article>; })}</div></div>
+        <div className="narrative-map-tools"><div className="view-mode-switch" role="group" aria-label="显示模式"><button className={viewMode === 'graph' ? 'active' : ''} title="结构图模式：章节、Fragment、Block 与变量关系" onClick={() => switchViewMode('graph')}><Network />结构图</button><button className={viewMode === 'flow' ? 'active' : ''} title="流程图模式：标准流程图形状，自顶向下展示叙事流程与分支" onClick={() => switchViewMode('flow')}><Workflow />流程图</button></div><div className="map-zoom"><button className="icon-button" title="缩小" onClick={() => setViewport((current) => ({ ...current, scale: Math.max(.35, current.scale - .1) }))}><Minus /></button><span>{Math.round(viewport.scale * 100)}%</span><button className="icon-button" title="放大" onClick={() => setViewport((current) => ({ ...current, scale: Math.min(2, current.scale + .1) }))}><Plus /></button></div><button className="button ghost" onClick={() => setLegendOpen((value) => !value)}><CircleDot />图例</button>{legendOpen && <div className="narrative-legend">{(viewMode === 'flow' ? [['start','开始（入口片段）'],['process','流程片段'],['sequence','顺序执行'],['decision','分支 / 条件判断'],['data','变量写入'],['jump','跳转片段'],['call','调用片段']] : [['trunk','章节主干'],['structure','结构 / 归属'],['branch','选项跳转'],['condition','条件跳转'],['call','调用片段'],['variable','变量读写']]).map(([kind, label]) => <span key={kind}><i className={kind} />{label}</span>)}</div>}</div>
+        <div className={`map-canvas blueprint-canvas narrative-canvas ${viewMode === 'flow' ? 'mode-flow' : ''}`} ref={canvasRef} tabIndex={0} onPointerDown={beginPan} onPointerMove={movePan} onPointerUp={endPan} onPointerCancel={endPan}>
+          <div className="narrative-viewport" style={{ transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})` }}><div className="narrative-world"><svg className="map-lines" width="4000" height="1800"><defs><marker id="narrative-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" /></marker></defs>{visibleEdges.map((edge) => { const path = edgePath(edge); const label = edgeLabelPoint(edge); const selected = selectedEdgeId === edge.id; const highlighted = isHighlightedEdge(edge); return <g key={edge.id} className={`${selected ? 'selected' : ''} ${highlighted ? 'causal-highlight' : ''} ${hasFocus && !highlighted ? 'causal-dim' : ''}`} onClick={(event) => { if (!edge.detachable) return; event.stopPropagation(); setSelectedEdgeId(edge.id); }}><path className="map-path-hit" d={path} /><path className={`map-path ${edge.kind}`} d={path} markerEnd="url(#narrative-arrow)" />{edge.label && <text x={label.x} y={label.y}>{edge.label}</text>}</g>; })}{wireDraft && <path className="map-path draft" d={edgePath({ id: 'draft', source: wireDraft.source, target: '', kind: 'jump' }, wireDraft)} />}</svg>{graph.nodes.map((node) => { const point = nodePositions[node.id]; if (!point) return null; const highlighted = isHighlightedNode(node);
+if (viewMode === 'flow') { const shape = flowShapeOf(node, entryFragmentId); return <div className={`flow-node kind-${node.kind} shape-${shape} ${node.fragmentId === project.activeFragmentId ? 'active' : ''} ${highlighted ? 'causal-highlight' : ''} ${hasFocus && !highlighted ? 'causal-dim' : ''}`} style={{ left: point.x, top: point.y }} key={node.id} role="button" tabIndex={0} title={node.fragmentId ? `在剧本中打开 ${node.title}` : node.title} onClick={() => node.fragmentId && activate(node.fragmentId, node.blockIndex)}><i className="flow-shape" /><span className="flow-content"><span className="flow-title">{shape === 'start' ? `开始 · ${node.title}` : node.title}</span><small>{shape === 'decision' ? (node.kind === 'condition' ? '条件判断' : '分支选择') : shape === 'data' ? '变量写入' : shape === 'subroutine' ? (node.kind === 'call' ? '调用片段' : '跳转片段') : node.subtitle}</small></span></div>; }
+const isFragment = node.kind === 'fragment'; return <article className={`narrative-node kind-${node.kind} ${node.fragmentId === project.activeFragmentId ? 'active' : ''} ${highlighted ? 'causal-highlight' : ''} ${hasFocus && !highlighted ? 'causal-dim' : ''}`} style={{ left: point.x, top: point.y }} key={node.id}>{isFragment && <button className={`narrative-port in ${wireTargetId === node.fragmentId ? 'snap-target' : ''}`} data-fragment-id={node.fragmentId} aria-label={`连接到 ${node.title}`} />}<div className="node-header" onPointerDown={(event) => beginDrag(node.id, event)} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}><GripVertical />{node.kind === 'chapter' ? <GitCommitHorizontal /> : node.kind === 'write' ? <Braces /> : <GitBranch />}<span>{node.title}</span>{node.fragmentId && <button title="在剧本中打开" onPointerDown={(event) => event.stopPropagation()} onClick={() => activate(node.fragmentId!, node.blockIndex)}><ExternalLink /></button>}</div><div className="node-body"><span>{node.subtitle}</span><small>{node.kind === 'chapter' ? '章节主干' : node.kind === 'fragment' ? 'Fragment' : node.kind === 'write' ? '变量写入' : node.kind === 'condition' ? '变量读取 / 条件' : '流程控制'}</small></div>{isFragment && <button className="narrative-port out" aria-label={`从 ${node.title} 创建连线`} onPointerDown={(event) => beginWire(node.fragmentId!, event)} />}</article>; })}</div></div>
         </div>
-        <div className="narrative-map-status"><span>拖动平移 · 滚轮缩放 · F 适应视图</span><button onClick={resetLayout}><RotateCcw />默认</button></div>
+        <div className="narrative-map-status"><span>{viewMode === 'flow' ? '标准流程图 · 分支向下展开 · 拖动平移 · 滚轮缩放 · F 适应视图' : '拖动平移 · 滚轮缩放 · F 适应视图'}</span>{viewMode === 'graph' && <button onClick={resetLayout}><RotateCcw />默认</button>}</div>
       </section>
     </div>
   </div>;

@@ -430,8 +430,7 @@ html[data-editor-theme="high-contrast"] img { color-scheme: normal; }
 .desktop-app .variable-table article,
 .desktop-app .variable-summary,
 .desktop-app .narrative-panel-toolbar .asset-search,
-.desktop-app .branch-list > button,
-.desktop-app .narrative-legend {
+.desktop-app .branch-list > button {
   border-color: var(--line);
   background: var(--panel);
   color: var(--ink);

@@ -15,7 +15,8 @@ export function StandalonePreviewApp() {
   if (!project) return <div className="preview-load-error"><TriangleAlert /><strong>无法载入预览</strong><span>请从 Hikari Studio 编辑器重新打开独立预览。</span></div>;
   const parameters = new URLSearchParams(window.location.search);
   const fragmentId = parameters.get('fragment');
+  const language = parameters.get('lang') ?? undefined;
   const previewProject = fragmentId && project.scripts[fragmentId] ? { ...project, activeFragmentId: fragmentId } : project;
   const index = Math.max(0, Number(parameters.get('index') ?? 0));
-  return <main className="standalone-preview-app"><Preview project={previewProject} editorIndex={index} standalone /></main>;
+  return <main className="standalone-preview-app"><Preview project={previewProject} editorIndex={index} standalone language={language} /></main>;
 }

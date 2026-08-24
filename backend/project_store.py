@@ -49,6 +49,19 @@ def _component_id(value: Any) -> str:
     return identifier
 
 
+def _language_file_name(language: Any) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_-]+", "_", str(language or "").strip()).strip("_")
+    if not cleaned or cleaned in {".", ".."}:
+        raise ValueError(f"Unsafe language code: {language!r}")
+    return f"{cleaned}.json"
+
+
+def _translation_table(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): entry for key, entry in value.items() if isinstance(entry, dict)}
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -545,7 +558,9 @@ class ProjectStore:
             expected.update({root / "scenes" / f"{_component_id(scene['id'])}.json": scene for scene in payload.get("scenes", [])})
             assets = [{key: value for key, value in asset.items() if key != "uri"} for asset in payload.get("assets", [])]
             expected[root / "assets" / "index.json"] = assets
-            expected[root / "locales" / "zh-CN.json"] = payload.get("translations", {})
+            translations_payload = payload.get("translations") if isinstance(payload.get("translations"), dict) else {}
+            for language in manifest["locale"]["languages"]:
+                expected[root / "locales" / _language_file_name(language)] = _translation_table(translations_payload.get(language))
             expected[root / "settings" / "editor.json"] = payload.get("settings", {})
             expected[root / "ui" / "theme.json"] = payload.get("ui", {"theme": "hikari-light", "dialogueStyle": "glass"})
             expected[root / ".hikari" / "agent" / "memory.json"] = payload.get("productionMemory", default_production_memory())
@@ -559,6 +574,7 @@ class ProjectStore:
             self._remove_stale_json(root / "timelines", {path for path in expected if path.parent == root / "timelines"})
             self._remove_stale_json(root / "characters", {path for path in expected if path.parent == root / "characters"})
             self._remove_stale_json(root / "scenes", {path for path in expected if path.parent == root / "scenes"})
+            self._remove_stale_json(root / "locales", {path for path in expected if path.parent == root / "locales"})
             self._write_json_atomic(self.recovery_path, payload)
 
         self._remember_project(payload)
@@ -767,6 +783,13 @@ class ProjectStore:
                 if asset_directory_uri is None:
                     asset_directory_uri = self.asset_dir.as_uri().rstrip("/")
                 asset["uri"] = f"{asset_directory_uri}/{quote(Path(path_value).name, safe='')}"
+        locale_config = manifest.get("locale", {"default": "zh-CN", "languages": ["zh-CN"]})
+        if not isinstance(locale_config, dict) or not isinstance(locale_config.get("languages"), list):
+            locale_config = {"default": locale_config.get("default", "zh-CN") if isinstance(locale_config, dict) else "zh-CN", "languages": ["zh-CN"]}
+        translations: dict[str, Any] = {}
+        for language in locale_config["languages"]:
+            data = self._read_json(root / "locales" / _language_file_name(language), default={})
+            translations[str(language)] = _translation_table(data)
         project = {
             "version": PROJECT_VERSION,
             "meta": manifest["meta"],
@@ -781,8 +804,8 @@ class ProjectStore:
             "variables": manifest.get("variables", {}),
             "variableDefinitions": manifest.get("variableDefinitions", {}),
             "settings": self._read_json(root / "settings" / "editor.json", default={"textSpeed": 35, "autoSave": True, "skipRead": True}),
-            "locale": manifest.get("locale", {"default": "zh-CN", "languages": ["zh-CN"]}),
-            "translations": self._read_json(root / "locales" / "zh-CN.json", default={}),
+            "locale": locale_config,
+            "translations": translations,
             "ui": self._read_json(root / "ui" / "theme.json", default={"theme": "hikari-light", "dialogueStyle": "glass"}),
             "productionMemory": self._read_json(root / ".hikari" / "agent" / "memory.json", default=default_production_memory()),
         }
@@ -902,6 +925,12 @@ class ProjectStore:
             locale["languages"] = [locale["default"]]
         if locale["default"] not in locale["languages"]:
             locale["languages"].insert(0, locale["default"])
+        raw_translations = result.get("translations")
+        result["translations"] = {
+            str(language): _translation_table(table)
+            for language, table in (raw_translations.items() if isinstance(raw_translations, dict) else [])
+            if isinstance(table, dict)
+        }
         result.setdefault("ui", {"theme": "hikari-light", "dialogueStyle": "glass"})
         memory = result.get("productionMemory")
         if not isinstance(memory, dict):

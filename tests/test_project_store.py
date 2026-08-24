@@ -291,6 +291,37 @@ class ProjectStoreTests(unittest.TestCase):
             self.assertEqual(reopened["variableDefinitions"], project["variableDefinitions"])
             self.assertEqual(reopened["locale"], project["locale"])
 
+    def test_v3_round_trip_preserves_per_language_translations(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = ProjectStore(root)
+            project = store.load()
+            project["locale"] = {"default": "zh-CN", "languages": ["zh-CN", "en-US"]}
+            project["translations"] = {
+                "en-US": {
+                    "lake-meeting::b4": {"text": "So you really did come.", "voice": "voice-b4-en"},
+                    "lake-meeting::b6": {"title": "How do you answer?", "options": ["Believe her", "Change the subject"]},
+                },
+                "ja-JP": {"lake-meeting::b4": {"text": "本当に来たんだね"}},
+                "zh-CN": {"legacy-flat": "dropped"},
+            }
+            store.save(project)
+
+            project_root = store.project_path.parent
+            self.assertTrue((project_root / "locales" / "zh-CN.json").exists())
+            self.assertTrue((project_root / "locales" / "en-US.json").exists())
+            self.assertFalse((project_root / "locales" / "ja-JP.json").exists())
+
+            reopened = ProjectStore(root).load()
+            self.assertEqual(reopened["translations"]["en-US"], project["translations"]["en-US"])
+            self.assertNotIn("ja-JP", reopened["translations"])
+            self.assertEqual(reopened["translations"]["zh-CN"], {})
+
+            reopened["locale"]["languages"] = ["zh-CN"]
+            reopened["translations"].pop("en-US", None)
+            ProjectStore(root).save(reopened)
+            self.assertFalse((project_root / "locales" / "en-US.json").exists())
+
     def test_v3_round_trip_preserves_runtime_ui_theme(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = ProjectStore(Path(directory))

@@ -156,6 +156,8 @@
 .game-settings label { display: grid; grid-template-columns: 108px minmax(100px, 1fr) 68px; align-items: center; gap: 10px; min-height: 46px; padding: 4px 15px; }
 .game-settings label span { color: #d2dbd8; font-size: 13px; }
 .game-settings label strong { color: #9fb0ab; font-size: 11px; text-align: right; }
+.game-settings .game-setting-language select { min-width: 0; height: 30px; border: 1px solid rgba(255,255,255,.22); border-radius: 4px; background: #1d2a2e; color: #e8f0ed; padding: 0 6px; font-size: 12px; cursor: pointer; }
+.game-settings .game-setting-language select:focus { outline: none; border-color: #48bba6; }
 .game-settings input[type="range"] { width: 100%; accent-color: var(--runtime-accent, #33aa94); cursor: pointer; }
 .game-settings .game-setting-toggle input[type="checkbox"] { width: 34px; height: 18px; justify-self: start; appearance: none; position: relative; border: 1px solid rgba(255, 255, 255, .2); border-radius: 10px; background: #253235; cursor: pointer; transition: background .15s, border-color .15s; }
 .game-settings .game-setting-toggle input[type="checkbox"]::after { content: ""; position: absolute; left: 2px; top: 2px; width: 12px; height: 12px; border-radius: 50%; background: #899894; transition: transform .15s, background .15s; }

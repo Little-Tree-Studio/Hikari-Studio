@@ -271,7 +271,7 @@ class DesktopApiTests(unittest.TestCase):
                 "backgroundColor": "#112233",
             })
             project = session["project"]
-            self.assertEqual(Path(session["projectPath"]), target / "project.hikari.json")
+            self.assertEqual(Path(session["projectPath"]).resolve(), (target / "project.hikari.json").resolve())
             self.assertTrue((target / "project.hikari.json").is_file())
             self.assertEqual(project["meta"]["resolution"], [1920, 1080])
             self.assertEqual(project["meta"]["windowTitle"], "夜航 - Demo")
@@ -434,7 +434,7 @@ class DesktopApiTests(unittest.TestCase):
             selected = root / "selected builds"
 
             renpy = api.export_renpy(project, str(selected))
-            self.assertEqual(Path(renpy["path"]), selected / "Custom-Output" / "renpy" / "script.rpy")
+            self.assertEqual(Path(renpy["path"]).resolve(), (selected / "Custom-Output" / "renpy" / "script.rpy").resolve())
 
             web_entry = selected / "Custom-Output" / "web" / "index.html"
             web_entry.parent.mkdir(parents=True)
@@ -442,7 +442,7 @@ class DesktopApiTests(unittest.TestCase):
             with patch("backend.api.build_web_game", return_value=web_entry) as build_web:
                 web_result = api.build_web(project, None, str(selected))
             self.assertTrue(web_result["ok"])
-            self.assertEqual(build_web.call_args.args[1], selected / "Custom-Output" / "web")
+            self.assertEqual(build_web.call_args.args[1].resolve(), (selected / "Custom-Output" / "web").resolve())
 
             windows_entry = selected / "Custom-Output" / "windows" / "Custom-Output.exe"
             windows_entry.parent.mkdir(parents=True)
@@ -450,19 +450,19 @@ class DesktopApiTests(unittest.TestCase):
             with patch("backend.api.build_windows_game", return_value=windows_entry) as build_windows:
                 windows_result = api.build_windows(project, None, str(selected), "system")
             self.assertTrue(windows_result["ok"])
-            self.assertEqual(build_windows.call_args.args[1], selected / "Custom-Output" / "windows")
+            self.assertEqual(build_windows.call_args.args[1].resolve(), (selected / "Custom-Output" / "windows").resolve())
             self.assertEqual(build_windows.call_args.kwargs["browser_mode"], "system")
 
             with patch("backend.api.os.startfile") as startfile:
                 opened = api.open_build_output(web_result["path"])
                 launched = api.launch_build_output(web_result["path"])
-            self.assertEqual(Path(opened["path"]), web_entry.parent)
-            self.assertEqual(Path(launched["path"]), web_entry)
-            self.assertEqual([Path(call.args[0]) for call in startfile.call_args_list], [web_entry.parent, web_entry])
+            self.assertEqual(Path(opened["path"]).resolve(), web_entry.parent.resolve())
+            self.assertEqual(Path(launched["path"]).resolve(), web_entry.resolve())
+            self.assertEqual([Path(call.args[0]).resolve() for call in startfile.call_args_list], [web_entry.parent.resolve(), web_entry.resolve()])
 
             with patch("backend.api.subprocess.Popen") as popen:
                 launched = api.launch_build_output(windows_result["path"])
-            self.assertEqual(Path(launched["path"]), windows_entry)
+            self.assertEqual(Path(launched["path"]).resolve(), windows_entry.resolve())
             popen.assert_called_once_with([str(windows_entry)], cwd=str(windows_entry.parent), close_fds=True)
 
             with self.assertRaisesRegex(ValueError, "Ren'Py"):

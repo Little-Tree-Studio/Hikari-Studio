@@ -25,7 +25,8 @@
   "locale": {
     "default": "zh-CN",
     "languages": [
-      "zh-CN"
+      "zh-CN",
+      "en-US"
     ]
   },
   "chapterOrder": [

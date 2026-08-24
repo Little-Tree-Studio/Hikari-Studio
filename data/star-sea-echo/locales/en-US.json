@@ -1,0 +1,26 @@
+{
+  "opening::op1": {
+    "text": "Echoes of the Star Sea"
+  },
+  "lake-meeting::b3": {
+    "text": "Morning mist drifts slowly across the lake as the first summer light settles on the old pier."
+  },
+  "lake-meeting::b4": {
+    "speaker": "Lin Cheng",
+    "text": "So you really did come."
+  },
+  "lake-meeting::b5": {
+    "speaker": "Su Rui",
+    "text": "Because someone wrote in a letter that missing today meant losing this sea of stars forever."
+  },
+  "lake-meeting::b6": {
+    "title": "How do you answer?",
+    "options": [
+      "Believe her",
+      "Change the subject"
+    ]
+  },
+  "old-school::school1": {
+    "text": "Dust drifts through the beams of light in the corridor."
+  }
+}

@@ -336,7 +336,7 @@ export interface Project {
     autoPlay?: boolean;
     autoPlayDelay?: number;
     fastForward?: boolean;
-    narrativeMap?: { positions: Record<string, { x: number; y: number }> };
+    narrativeMap?: { positions: Record<string, { x: number; y: number }>; viewMode?: 'graph' | 'flow' };
     chapterScheduling?: { mode: ChapterScheduleMode; preprocessingChapterId?: string };
     editorSession?: {
       openFragmentIds: string[];

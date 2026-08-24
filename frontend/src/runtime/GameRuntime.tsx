@@ -3,7 +3,8 @@ import { ArchiveRestore, ChevronDown, DoorOpen, Eye, EyeOff, History, Pause, Pla
 import { SaveGameDialog } from '../components/SaveGameDialog';
 import { gameUiThemeCssVariables, normalizeGameUiTheme } from '../core/gameUiTheme';
 import { acknowledgeSaveSlotNotice, captureSaveThumbnail, listSaveSlots, readSaveSlotWithRecovery, readSharedVariables, writeSaveSlot, writeSharedVariables, type SaveSlotRecord } from '../core/saveGames';
-import { readLargeValue, writeLargeValue } from '../core/storage';
+import { readLargeValue, readSmallValue, writeLargeValue, writeSmallValue } from '../core/storage';
+import { applyLanguage, languageLabel } from '../core/localization';
 import { characterWidthCss, dimensionCss } from '../core/stageLayout';
 import { evaluateTimelineAtTime, timelineForProject } from '../core/timeline';
 import { advanceEngine, chooseBranch, createEngineState, currentBlock, loadSaveGameWithReport, resolveDialogueSpeaker, rollbackEngine } from '../engine-core/runtime';
@@ -23,7 +24,19 @@ interface RuntimePreferences {
   skipReadOnly: boolean;
 }
 
-export function GameRuntime({ project, conformanceCaseId }: { project: Project; conformanceCaseId?: BlockType }) {
+export function GameRuntime({ project: baseProject, conformanceCaseId }: { project: Project; conformanceCaseId?: BlockType }) {
+  const runtimeLanguages = baseProject.locale?.languages ?? [];
+  const [language, setLanguage] = useState(() => {
+    const stored = readSmallValue(`hikari-runtime-language:${baseProject.meta.id}`);
+    return runtimeLanguages.includes(stored ?? '') ? stored! : baseProject.locale?.default ?? runtimeLanguages[0] ?? 'zh-CN';
+  });
+  const project = useMemo(() => applyLanguage(baseProject, language), [baseProject, language]);
+  const updateLanguage = (next: string) => {
+    if (!runtimeLanguages.includes(next) || next === language) return;
+    setLanguage(next);
+    writeSmallValue(`hikari-runtime-language:${baseProject.meta.id}`, next);
+    setNotice(`Language: ${languageLabel(next)}`);
+  };
   const entry = project.chapters.find((chapter) => chapter.entry)?.fragments[0]?.id ?? project.chapters[0]?.fragments[0]?.id ?? project.activeFragmentId;
   const [state, setState] = useState<EngineState>(() => createEngineState(project, entry));
   const [screen, setScreen] = useState<'title' | 'playing'>(conformanceCaseId ? 'playing' : 'title');
@@ -550,6 +563,7 @@ export function GameRuntime({ project, conformanceCaseId }: { project: Project; 
       <label><span>文字速度</span><input aria-label="文字速度" type="range" min="10" max="100" step="1" value={preferences.textSpeed} onChange={(event) => updatePreference('textSpeed', Number(event.target.value))} /><strong>{preferences.textSpeed} 字/秒</strong></label>
       <label><span>自动模式速度</span><input aria-label="自动模式速度" type="range" min=".5" max="5" step=".1" value={preferences.autoDelay} onChange={(event) => updatePreference('autoDelay', Number(event.target.value))} /><strong>{preferences.autoDelay.toFixed(1)} 秒</strong></label>
       <label className="game-setting-toggle"><span>仅跳过已读</span><input aria-label="仅跳过已读" type="checkbox" checked={preferences.skipReadOnly} onChange={(event) => updatePreference('skipReadOnly', event.target.checked)} /><strong>{preferences.skipReadOnly ? '开启' : '关闭'}</strong></label>
+      {runtimeLanguages.length > 1 && <label className="game-setting-language"><span>游戏语言</span><select aria-label="游戏语言" value={language} onChange={(event) => updateLanguage(event.target.value)}>{runtimeLanguages.map((code) => <option value={code} key={code}>{languageLabel(code)}</option>)}</select></label>}
     </section>}
     {confirmation && <div className="game-confirm-backdrop" role="presentation" onClick={() => setConfirmation(null)}><section className="game-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="game-confirm-title" onClick={(event) => event.stopPropagation()}><span>CONFIRM</span><h2 id="game-confirm-title">{confirmation === 'new-game' ? '开始新游戏？' : confirmation === 'return-title' ? '返回标题画面？' : '退出游戏？'}</h2><p>{confirmation === 'new-game' ? '当前未保存的游戏进度将会丢失。' : confirmation === 'return-title' ? '请确认当前进度已经保存。' : 'Windows 版本将关闭游戏，Web 版本需要关闭标签页。'}</p><footer><button onClick={() => setConfirmation(null)}>取消</button><button className="primary" onClick={confirmAction}>确认</button></footer></section></div>}
     {saveMode && <SaveGameDialog project={project} state={state} mode={saveMode} playTimeSeconds={Math.floor((Date.now() - sessionStartedAt.current) / 1000)} close={() => { setSaveMode(null); void refreshContinueSlot(); }} loadState={(loadedState) => { setState({ ...loadedState, readBlocks: { ...globalReadBlocks.current, ...loadedState.readBlocks } }); setScreen('playing'); }} notify={setNotice} />}

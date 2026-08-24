@@ -45,12 +45,15 @@ import {
 } from "../core/saveGames";
 import { RuntimeDebugger, type RuntimeConsoleEntry } from "./RuntimeDebugger";
 import { SaveGameDialog } from "./SaveGameDialog";
+import { applyLanguage, languageLabel } from "../core/localization";
 
 interface PreviewProps {
   project: Project;
   editorIndex: number;
   standalone?: boolean;
   debugMode?: boolean;
+  language?: string;
+  onLanguageChange?: (language: string) => void;
   onEditorLocationChange?: (fragmentId: string, blockIndex: number) => void;
   onStageCharacterMove?: (characterId: string, x: number, y: number) => void;
   timelinePreview?: TimelinePreviewValues;
@@ -79,15 +82,22 @@ const Y_SNAP_POINTS = [
 ];
 
 export function Preview({
-  project,
+  project: baseProject,
   editorIndex,
   standalone = false,
   debugMode = false,
+  language,
+  onLanguageChange,
   onEditorLocationChange,
   onStageCharacterMove,
   timelinePreview,
   conformanceCaseId,
 }: PreviewProps) {
+  const runtimeLanguages = baseProject.locale?.languages ?? [];
+  const project = useMemo(
+    () => applyLanguage(baseProject, language),
+    [baseProject, language],
+  );
   const previewSeekCacheRef = useRef<EngineSeekCache | null>(null);
   const traceRestoreCacheRef = useRef<EngineTraceRestoreCache | null>(null);
   const previewSeekProfilerRef = useRef<PreviewSeekProfiler | null>(null);
@@ -452,9 +462,9 @@ export function Preview({
     }
     try {
       setRuntimeNotice("正在准备独立预览…");
-      await writeLargeValue("hikari-preview-project", JSON.stringify(project));
+      await writeLargeValue("hikari-preview-project", JSON.stringify(baseProject));
       const url = new URL(window.location.href);
-      url.search = `?preview=1&fragment=${encodeURIComponent(state.fragmentId)}&index=${state.instructionPointer}`;
+      url.search = `?preview=1&fragment=${encodeURIComponent(state.fragmentId)}&index=${state.instructionPointer}${language && runtimeLanguages.length > 1 ? `&lang=${encodeURIComponent(language)}` : ''}`;
       previewWindow.location.replace(url.toString());
       setRuntimeNotice("独立预览已打开");
     } catch (error) {
@@ -576,6 +586,19 @@ export function Preview({
           <option value="1280x720">1280 × 720</option>
           <option value="1920x1080">1920 × 1080</option>
         </Select>
+        {onLanguageChange && runtimeLanguages.length > 1 && (
+          <Select
+            className="compact"
+            value={language ?? runtimeLanguages[0]}
+            onChange={(value) => onLanguageChange(value)}
+          >
+            {runtimeLanguages.map((code) => (
+              <option value={code} key={code}>
+                {languageLabel(code)}
+              </option>
+            ))}
+          </Select>
+        )}
         <span className="toolbar-sep" aria-hidden="true" />
         <button
           className="icon-button small"
