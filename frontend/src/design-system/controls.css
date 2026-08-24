@@ -2,7 +2,7 @@
 .ds-select:hover:not(:disabled) { border-color: var(--accent); }
 .ds-select:disabled { cursor: not-allowed; opacity: .45; }
 .ds-select:focus-visible, .ds-select[data-state="open"] { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
-.ds-select.compact { min-height: 27px; padding: 3px 6px; font-size: 11px; }
+.ds-select.compact { width: auto; flex: 0 1 auto; min-height: 27px; padding: 3px 6px; font-size: 11px; }
 .ds-select-value { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ds-select-icon { flex: 0 0 auto; display: grid; place-items: center; color: var(--muted); transition: transform var(--motion-fast) var(--motion-ease); }
 .ds-select[data-state="open"] .ds-select-icon { transform: rotate(180deg); }

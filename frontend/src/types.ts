@@ -52,6 +52,15 @@ export interface BranchOption {
   target: string;
 }
 
+export type LanguageCode = string;
+export interface LocalizedBlockText {
+  text?: string;
+  title?: string;
+  speaker?: string;
+  options?: string[];
+  voice?: string;
+}
+
 export interface StoryBlockData {
   id: string;
   type: BlockType;
@@ -196,6 +205,8 @@ export interface AssetRepairAmbiguous {
 export interface AssetFolderRepairPreview {
   folder: string;
   scannedFiles: number;
+  scanWarnings: { code: string; path?: string; message: string }[];
+  hashCacheHits: number;
   matches: AssetRepairMatch[];
   ambiguous: AssetRepairAmbiguous[];
   unmatched: { assetId: string; name: string; expectedPath: string }[];
@@ -336,7 +347,7 @@ export interface Project {
     };
   };
   locale?: { default: string; languages: string[] };
-  translations?: Record<string, string>;
+  translations?: Record<LanguageCode, Record<string, LocalizedBlockText>>;
   ui?: {
     theme: string;
     dialogueStyle: string;

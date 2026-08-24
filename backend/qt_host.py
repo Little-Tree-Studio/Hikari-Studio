@@ -254,6 +254,5 @@ class QtWebHost:
             rpc_server=self.rpc_server,
         )
         self.children.append(popup)
-        popup.load_finished_connect(lambda ok: popup.install_api_bridge() if ok else None)
         popup.window.show()
         return popup.page

@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-from backend.native_asset_worker import NativeAssetFile, scan_assets
+from backend.native_asset_worker import NativeAssetFile, NativeAssetResult, NativeAssetStats, inspect_assets, scan_assets
 from backend.project_store import ProjectStore, default_project
 
 
@@ -461,6 +461,44 @@ class ProjectStoreTests(unittest.TestCase):
             self.assertEqual(imported[0]["contentHash"], hashlib.sha256(b"fake-png").hexdigest())
             self.assertTrue((store.asset_dir / "background.png").exists())
 
+    def test_import_asset_uses_native_metadata_and_avoids_full_byte_comparison(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = ProjectStore(root / "data")
+            source = root / "background.png"
+            source.write_bytes(b"source-content")
+            destination = store.asset_dir / source.name
+            destination.write_bytes(b"other--content")
+            digest = hashlib.sha256(source.read_bytes()).hexdigest()
+            native_file = NativeAssetFile(
+                path=source.resolve(), name=source.name, stem=source.stem, extension=source.suffix,
+                size=source.stat().st_size, modified_ns=source.stat().st_mtime_ns, sha256=digest,
+            )
+            result = NativeAssetResult(
+                files=[native_file], warnings=[], stats=NativeAssetStats(1, 1, 1, 0),
+            )
+
+            with patch("backend.project_store.inspect_assets", return_value=result) as worker:
+                imported = store.import_assets([str(source)])
+
+            worker.assert_called_once()
+            self.assertEqual(imported[0]["path"], "background-2.png")
+            self.assertEqual(imported[0]["contentHash"], digest)
+            self.assertEqual((store.asset_dir / "background-2.png").read_bytes(), b"source-content")
+
+    def test_import_asset_falls_back_when_worker_is_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = ProjectStore(root / "data")
+            source = root / "fallback.png"
+            source.write_bytes(b"python-fallback")
+
+            with patch("backend.project_store.inspect_assets", return_value=None):
+                imported = store.import_assets([str(source)])
+
+            self.assertEqual(imported[0]["size"], len(b"python-fallback"))
+            self.assertEqual(imported[0]["contentHash"], hashlib.sha256(b"python-fallback").hexdigest())
+
     def test_missing_asset_match_prefers_hash_over_exact_filename(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -491,8 +529,11 @@ class ProjectStoreTests(unittest.TestCase):
                 extension=candidate.suffix, size=candidate.stat().st_size,
                 modified_ns=candidate.stat().st_mtime_ns, sha256=digest,
             )
+            result = NativeAssetResult(
+                files=[native_file], warnings=[], stats=NativeAssetStats(1, 1, 1, 0),
+            )
 
-            with patch("backend.project_store.scan_assets", return_value=[native_file]) as worker:
+            with patch("backend.project_store.scan_assets", return_value=result) as worker:
                 preview = store.match_missing_assets(str(search), [{
                     "assetId": "portrait-id", "name": "portrait", "path": "portrait.png",
                     "contentHash": digest,
@@ -508,13 +549,31 @@ class ProjectStoreTests(unittest.TestCase):
             root.mkdir()
             image = root / "角色 头像.PNG"
             image.write_bytes(b"native-worker")
-            files = scan_assets(root, {".png"}, hash_files=True)
-            if files is None:
+            result = scan_assets(root, {".png"}, hash_files=True, cache_path=root / "hash-cache.json")
+            if result is None:
                 self.skipTest("Rust asset worker is not built")
-            self.assertEqual(len(files), 1)
-            self.assertEqual(files[0].path, image.resolve())
-            self.assertEqual(files[0].extension, ".png")
-            self.assertEqual(files[0].sha256, hashlib.sha256(b"native-worker").hexdigest())
+            self.assertEqual(len(result.files), 1)
+            self.assertEqual(result.files[0].path, image.resolve())
+            self.assertEqual(result.files[0].extension, ".png")
+            self.assertEqual(result.files[0].sha256, hashlib.sha256(b"native-worker").hexdigest())
+
+            cached = scan_assets(root, {".png"}, hash_files=True, cache_path=root / "hash-cache.json")
+            self.assertIsNotNone(cached)
+            self.assertEqual(cached.stats.cache_hits, 1)
+
+    def test_native_asset_worker_inspects_explicit_paths_and_warns_for_missing_files(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            existing = root / "voice.ogg"
+            missing = root / "missing.ogg"
+            existing.write_bytes(b"voice")
+            result = inspect_assets([existing, missing], hash_files=True, cache_path=root / "cache.json")
+            if result is None:
+                self.skipTest("Rust asset worker is not built")
+            self.assertEqual([item.path for item in result.files], [existing.resolve()])
+            self.assertEqual(result.stats.discovered_files, 2)
+            self.assertEqual(result.stats.inspected_files, 1)
+            self.assertEqual(result.warnings[0].code, "inspect-file")
 
     def test_missing_asset_match_uses_filename_and_reports_unmatched(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

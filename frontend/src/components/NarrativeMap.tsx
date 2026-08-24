@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import {
   BookOpen, Braces, ChevronRight, CircleDot, CirclePlay, ExternalLink, FileText,
   GitBranch, GitCommitHorizontal, GripVertical, LayoutList, ListTree, LocateFixed,
@@ -206,7 +206,26 @@ export function NarrativeMap({ project, activate, commit, notify, requestText }:
   const beginPan = (event: ReactPointerEvent<HTMLDivElement>) => { if ((event.target as HTMLElement).closest('.narrative-node,.map-path-hit,.narrative-map-tools')) return; event.currentTarget.setPointerCapture(event.pointerId); panRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originX: viewport.x, originY: viewport.y }; setSelectedEdgeId(null); };
   const movePan = (event: ReactPointerEvent<HTMLDivElement>) => { const pan = panRef.current; if (!pan || pan.pointerId !== event.pointerId) return; setViewport((current) => ({ ...current, x: pan.originX + event.clientX - pan.startX, y: pan.originY + event.clientY - pan.startY })); };
   const endPan = (event: ReactPointerEvent<HTMLDivElement>) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); panRef.current = null; };
-  const wheelZoom = (event: WheelEvent<HTMLDivElement>) => { event.preventDefault(); const rect = canvasRef.current?.getBoundingClientRect(); if (!rect) return; const nextScale = Math.max(.35, Math.min(2, viewport.scale * (event.deltaY > 0 ? .9 : 1.1))); const cx = event.clientX - rect.left; const cy = event.clientY - rect.top; setViewport({ x: cx - (cx - viewport.x) * nextScale / viewport.scale, y: cy - (cy - viewport.y) * nextScale / viewport.scale, scale: nextScale }); };
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const wheelZoom = (event: WheelEvent) => {
+      event.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const cx = event.clientX - rect.left;
+      const cy = event.clientY - rect.top;
+      setViewport((current) => {
+        const nextScale = Math.max(.35, Math.min(2, current.scale * (event.deltaY > 0 ? .9 : 1.1)));
+        return {
+          x: cx - (cx - current.x) * nextScale / current.scale,
+          y: cy - (cy - current.y) * nextScale / current.scale,
+          scale: nextScale,
+        };
+      });
+    };
+    canvas.addEventListener('wheel', wheelZoom, { passive: false });
+    return () => canvas.removeEventListener('wheel', wheelZoom);
+  }, []);
   const beginDrag = (nodeId: string, event: ReactPointerEvent<HTMLDivElement>) => { event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId); const point = positions[nodeId]; dragRef.current = { pointerId: event.pointerId, nodeId, startX: event.clientX, startY: event.clientY, originX: point.x, originY: point.y }; };
   const moveDrag = (event: ReactPointerEvent<HTMLDivElement>) => { const drag = dragRef.current; if (!drag || drag.pointerId !== event.pointerId) return; event.stopPropagation(); setPositions((current) => { const next = { ...current, [drag.nodeId]: { x: Math.max(20, Math.round(drag.originX + (event.clientX - drag.startX) / viewport.scale)), y: Math.max(20, Math.round(drag.originY + (event.clientY - drag.startY) / viewport.scale)) } }; positionsRef.current = next; return next; }); };
   const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => { if (!dragRef.current) return; event.stopPropagation(); if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); dragRef.current = null; persistPositions(positionsRef.current); };
@@ -315,7 +334,7 @@ export function NarrativeMap({ project, activate, commit, notify, requestText }:
       </aside>
       <section className="narrative-flow-panel">
         <div className="narrative-map-tools"><div className="map-zoom"><button className="icon-button" title="缩小" onClick={() => setViewport((current) => ({ ...current, scale: Math.max(.35, current.scale - .1) }))}><Minus /></button><span>{Math.round(viewport.scale * 100)}%</span><button className="icon-button" title="放大" onClick={() => setViewport((current) => ({ ...current, scale: Math.min(2, current.scale + .1) }))}><Plus /></button></div><button className="button ghost" onClick={() => setLegendOpen((value) => !value)}><CircleDot />图例</button>{legendOpen && <div className="narrative-legend">{[['trunk','章节主干'],['structure','结构 / 归属'],['branch','选项跳转'],['condition','条件跳转'],['call','调用片段'],['variable','变量读写']].map(([kind, label]) => <span key={kind}><i className={kind} />{label}</span>)}</div>}</div>
-        <div className="map-canvas blueprint-canvas narrative-canvas" ref={canvasRef} tabIndex={0} onWheel={wheelZoom} onPointerDown={beginPan} onPointerMove={movePan} onPointerUp={endPan} onPointerCancel={endPan}>
+        <div className="map-canvas blueprint-canvas narrative-canvas" ref={canvasRef} tabIndex={0} onPointerDown={beginPan} onPointerMove={movePan} onPointerUp={endPan} onPointerCancel={endPan}>
           <div className="narrative-viewport" style={{ transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})` }}><div className="narrative-world"><svg className="map-lines" width="4000" height="1800"><defs><marker id="narrative-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" /></marker></defs>{graph.edges.map((edge) => { const path = edgePath(edge); const selected = selectedEdgeId === edge.id; const highlighted = isHighlightedEdge(edge); return <g key={edge.id} className={`${selected ? 'selected' : ''} ${highlighted ? 'causal-highlight' : ''} ${hasFocus && !highlighted ? 'causal-dim' : ''}`} onClick={(event) => { if (!edge.detachable) return; event.stopPropagation(); setSelectedEdgeId(edge.id); }}><path className="map-path-hit" d={path} /><path className={`map-path ${edge.kind}`} d={path} markerEnd="url(#narrative-arrow)" />{edge.label && <text x={(positions[edge.source]?.x + nodeWidth + (positions[edge.target]?.x ?? 0)) / 2} y={(positions[edge.source]?.y + (positions[edge.target]?.y ?? 0)) / 2 + 35}>{edge.label}</text>}</g>; })}{wireDraft && <path className="map-path draft" d={edgePath({ id: 'draft', source: wireDraft.source, target: '', kind: 'jump' }, wireDraft)} />}</svg>{graph.nodes.map((node) => { const point = positions[node.id]; if (!point) return null; const highlighted = isHighlightedNode(node); const isFragment = node.kind === 'fragment'; return <article className={`narrative-node kind-${node.kind} ${node.fragmentId === project.activeFragmentId ? 'active' : ''} ${highlighted ? 'causal-highlight' : ''} ${hasFocus && !highlighted ? 'causal-dim' : ''}`} style={{ left: point.x, top: point.y }} key={node.id}>{isFragment && <button className={`narrative-port in ${wireTargetId === node.fragmentId ? 'snap-target' : ''}`} data-fragment-id={node.fragmentId} aria-label={`连接到 ${node.title}`} />}<div className="node-header" onPointerDown={(event) => beginDrag(node.id, event)} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}><GripVertical />{node.kind === 'chapter' ? <GitCommitHorizontal /> : node.kind === 'write' ? <Braces /> : <GitBranch />}<span>{node.title}</span>{node.fragmentId && <button title="在剧本中打开" onPointerDown={(event) => event.stopPropagation()} onClick={() => activate(node.fragmentId!, node.blockIndex)}><ExternalLink /></button>}</div><div className="node-body"><span>{node.subtitle}</span><small>{node.kind === 'chapter' ? '章节主干' : node.kind === 'fragment' ? 'Fragment' : node.kind === 'write' ? '变量写入' : node.kind === 'condition' ? '变量读取 / 条件' : '流程控制'}</small></div>{isFragment && <button className="narrative-port out" aria-label={`从 ${node.title} 创建连线`} onPointerDown={(event) => beginWire(node.fragmentId!, event)} />}</article>; })}</div></div>
         </div>
         <div className="narrative-map-status"><span>拖动平移 · 滚轮缩放 · F 适应视图</span><button onClick={resetLayout}><RotateCcw />默认</button></div>

@@ -576,6 +576,7 @@ export function Preview({
           <option value="1280x720">1280 × 720</option>
           <option value="1920x1080">1920 × 1080</option>
         </Select>
+        <span className="toolbar-sep" aria-hidden="true" />
         <button
           className="icon-button small"
           title="回到当前 Block"
@@ -609,6 +610,7 @@ export function Preview({
         >
           <RotateCcw />
         </button>
+        <span className="toolbar-sep" aria-hidden="true" />
         <button
           className="icon-button small"
           title="快速存档"
@@ -638,13 +640,16 @@ export function Preview({
           <History />
         </button>
         {!standalone && (
-          <button
-            className="icon-button small"
-            title="独立窗口"
-            onClick={() => void openStandalone()}
-          >
-            <ExternalLink />
-          </button>
+          <>
+            <span className="toolbar-sep" aria-hidden="true" />
+            <button
+              className="icon-button small"
+              title="独立窗口"
+              onClick={() => void openStandalone()}
+            >
+              <ExternalLink />
+            </button>
+          </>
         )}
       </div>
       <div className="stage-wrap">

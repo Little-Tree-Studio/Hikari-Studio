@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import logging
 import os
 import re
 import shutil
@@ -14,10 +15,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from .native_asset_worker import scan_assets
+from .native_asset_worker import inspect_assets, scan_assets
 
 
 PROJECT_VERSION = 3
+LOGGER = logging.getLogger(__name__)
 
 
 def default_production_memory() -> dict[str, Any]:
@@ -172,6 +174,10 @@ class ProjectStore:
         folder = self.state_dir / "runtime-storage"
         folder.mkdir(parents=True, exist_ok=True)
         return folder
+
+    @property
+    def asset_hash_cache_path(self) -> Path:
+        return self.state_dir / "cache" / "asset-hashes-v1.json"
 
     def _runtime_value_path(self, key: str) -> Path:
         if not isinstance(key, str) or not key or len(key) > 1024:
@@ -560,24 +566,47 @@ class ProjectStore:
         return {"ok": True, "path": str(self.project_path), "bytes": sum(path.stat().st_size for path in expected if path.exists()), "version": PROJECT_VERSION}
 
     def import_assets(self, source_paths: list[str], audio_category: str | None = None) -> list[dict[str, Any]]:
+        sources = list(dict.fromkeys(
+            Path(source_text).expanduser().resolve()
+            for source_text in source_paths
+            if Path(source_text).expanduser().resolve().is_file()
+        ))
+        native_result = inspect_assets(sources, hash_files=True, cache_path=self.asset_hash_cache_path)
+        native_files = {item.path: item for item in native_result.files} if native_result else {}
+        if native_result:
+            for warning in native_result.warnings:
+                LOGGER.warning("Rust asset inspection warning [%s] %s: %s", warning.code, warning.path or "", warning.message)
         imported: list[dict[str, Any]] = []
-        for source_text in source_paths:
-            source = Path(source_text).expanduser().resolve()
-            if not source.is_file():
-                continue
+        destination_hashes: dict[Path, str] = {}
+        for source in sources:
+            native_file = native_files.get(source)
+            source_size = native_file.size if native_file else source.stat().st_size
+            source_hash = native_file.sha256 if native_file and native_file.sha256 else _sha256(source)
             extension = source.suffix.lower()
             kind = "image" if extension in IMAGE_EXTENSIONS else "audio" if extension in AUDIO_EXTENSIONS else "video" if extension in VIDEO_EXTENSIONS else "font" if extension in FONT_EXTENSIONS else "file"
             destination = self.asset_dir / source.name
             counter = 2
-            while destination.exists() and destination.read_bytes() != source.read_bytes():
+            while destination.exists():
+                destination_size = destination.stat().st_size
+                if destination_size == source_size:
+                    destination_hash = destination_hashes.get(destination)
+                    if destination_hash is None:
+                        destination_hash = _sha256(destination)
+                        destination_hashes[destination] = destination_hash
+                    if destination_hash == source_hash:
+                        break
                 destination = self.asset_dir / f"{source.stem}-{counter}{source.suffix}"
                 counter += 1
             if not destination.exists():
                 shutil.copy2(source, destination)
+            content_hash = source_hash
+            destination_size = destination.stat().st_size
+            if native_file is None or destination_size != source_size:
+                content_hash = _sha256(destination)
             item = {
                 "id": new_id("asset"), "kind": kind, "name": destination.stem,
-                "path": destination.name, "uri": destination.as_uri(), "size": destination.stat().st_size,
-                "contentHash": _sha256(destination),
+                "path": destination.name, "uri": destination.as_uri(), "size": destination_size,
+                "contentHash": content_hash,
             }
             if kind == "audio":
                 item["audioCategory"] = audio_category if audio_category in {"bgm", "sfx", "voice"} else "bgm"
@@ -606,8 +635,13 @@ class ProjectStore:
             for issue in issues
             if str(issue.get("contentHash") or "")
         }
-        native_files = scan_assets(root, SUPPORTED_ASSET_EXTENSIONS, hash_files=bool(expected_hashes))
-        if native_files is None:
+        native_result = scan_assets(
+            root,
+            SUPPORTED_ASSET_EXTENSIONS,
+            hash_files=bool(expected_hashes),
+            cache_path=self.asset_hash_cache_path,
+        )
+        if native_result is None:
             candidates = sorted(
                 (path for path in root.rglob("*") if path.is_file() and path.suffix.lower() in SUPPORTED_ASSET_EXTENSIONS),
                 key=lambda path: str(path).casefold(),
@@ -615,9 +649,11 @@ class ProjectStore:
             sizes: dict[Path, int] = {}
             hashes: dict[Path, str] = {}
         else:
-            candidates = [item.path for item in native_files]
-            sizes = {item.path: item.size for item in native_files}
-            hashes = {item.path: item.sha256 for item in native_files if item.sha256}
+            candidates = [item.path for item in native_result.files]
+            sizes = {item.path: item.size for item in native_result.files}
+            hashes = {item.path: item.sha256 for item in native_result.files if item.sha256}
+            for warning in native_result.warnings:
+                LOGGER.warning("Rust asset scan warning [%s] %s: %s", warning.code, warning.path or "", warning.message)
 
         def candidate_hash(path: Path) -> str:
             if path not in hashes:
@@ -686,6 +722,11 @@ class ProjectStore:
         return {
             "folder": str(root), "scannedFiles": len(candidates),
             "matches": matches, "ambiguous": ambiguous, "unmatched": unmatched,
+            "scanWarnings": [
+                {"code": warning.code, "path": str(warning.path) if warning.path else None, "message": warning.message}
+                for warning in native_result.warnings
+            ] if native_result else [],
+            "hashCacheHits": native_result.stats.cache_hits if native_result else 0,
         }
 
     def apply_asset_folder_repair(self, matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
