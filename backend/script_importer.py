@@ -10,7 +10,7 @@ from typing import Any
 from .project_store import new_id
 
 
-SUPPORTED_BLOCK_TYPES = {"scene", "sound", "characterShow", "characterHide", "camera", "narration", "dialogue", "branch", "setVariable", "condition", "jump", "call", "return"}
+SUPPORTED_BLOCK_TYPES = {"scene", "sound", "characterShow", "characterHide", "camera", "narration", "dialogue", "branch", "setVariable", "modifyVariable", "condition", "jump", "call", "return"}
 SCENE_PATTERN = re.compile(r"^\[?(?:场景|scene)\s*[：:]\s*(.+?)\]?$", re.IGNORECASE)
 SLIDE_BLOCK_PREFIX = "SLIDE_BLOCKS_V1\n"
 MAX_SCRIPT_TEXT_BYTES = 4 * 1024 * 1024

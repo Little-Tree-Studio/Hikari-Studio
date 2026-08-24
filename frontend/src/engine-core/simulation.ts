@@ -28,6 +28,11 @@ function candidateValues(project: Project): Map<string, Scalar[]> {
   for (const [name, value] of Object.entries(project.variables)) add(name, value);
   for (const blocks of Object.values(project.scripts)) for (const block of blocks) {
     if (block.type === 'setVariable') add(block.variable, block.value);
+    if (block.type === 'modifyVariable' && block.variable && typeof block.operand === 'number' && Number.isFinite(block.operand)) {
+      const base = Number(project.variables[block.variable]) || 0;
+      add(block.variable, base + block.operand);
+      add(block.variable, base - block.operand);
+    }
     if (block.type === 'condition') {
       add(block.variable, block.compareValue);
       if (typeof block.compareValue === 'number') {
@@ -35,6 +40,15 @@ function candidateValues(project: Project): Map<string, Scalar[]> {
         add(block.variable, block.compareValue + 1);
       } else if (typeof block.compareValue === 'boolean') add(block.variable, !block.compareValue);
       else if (typeof block.compareValue === 'string') add(block.variable, `${block.compareValue}__other`);
+      if (block.compareVariable) {
+        const other = project.variables[block.compareVariable];
+        add(block.variable, other);
+        if (typeof other === 'number') {
+          add(block.variable, other - 1);
+          add(block.variable, other + 1);
+        } else if (typeof other === 'boolean') add(block.variable, !other);
+        else if (typeof other === 'string') add(block.variable, `${other}__other`);
+      }
     }
   }
   return candidates;

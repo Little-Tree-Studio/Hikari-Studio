@@ -9,14 +9,14 @@ import {
 } from '../blockConformance';
 import { ENGINE_VERSION } from '../runtime';
 
-describe('13 Block runtime conformance matrix', () => {
+describe('14 Block runtime conformance matrix', () => {
   it('has one versioned row for every registered Block type', () => {
     const registered = Object.keys(blockRegistry).sort();
     const declared = [...BLOCK_CONFORMANCE_TYPES].sort();
     const matrix = BLOCK_CONFORMANCE_MATRIX.map((item) => item.id).sort();
 
     expect(BLOCK_CONFORMANCE_MATRIX_VERSION).toMatch(/^\d{4}\.\d{2}\.\d{2}\.\d+$/);
-    expect(new Set(matrix).size).toBe(13);
+    expect(new Set(matrix).size).toBe(14);
     expect(matrix).toEqual(registered);
     expect(declared).toEqual(registered);
     expect(runtimeContract.matrixVersion).toBe(BLOCK_CONFORMANCE_MATRIX_VERSION);

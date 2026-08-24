@@ -24,9 +24,9 @@ class WindowsBuilderTests(unittest.TestCase):
             (runtime / "player.css").write_text("runtime css", encoding="utf-8")
             (runtime / "runtime-contract.json").write_text(json.dumps({
                 "schemaVersion": 1,
-                "matrixVersion": "2026.08.02.1",
+                "matrixVersion": "2026.08.25.1",
                 "engineVersion": 3,
-                "blockTypes": ["scene", "sound", "characterShow", "characterHide", "camera", "narration", "dialogue", "branch", "setVariable", "condition", "jump", "call", "return"],
+                "blockTypes": ["scene", "sound", "characterShow", "characterHide", "camera", "narration", "dialogue", "branch", "setVariable", "modifyVariable", "condition", "jump", "call", "return"],
             }), encoding="utf-8")
             cefsharp_dist = launcher_dist / "cefsharp"
             cefsharp_dist.mkdir()
@@ -79,9 +79,9 @@ class WindowsBuilderTests(unittest.TestCase):
             (runtime / "player.css").write_text("runtime css", encoding="utf-8")
             (runtime / "runtime-contract.json").write_text(json.dumps({
                 "schemaVersion": 1,
-                "matrixVersion": "2026.08.02.1",
+                "matrixVersion": "2026.08.25.1",
                 "engineVersion": 3,
-                "blockTypes": ["scene", "sound", "characterShow", "characterHide", "camera", "narration", "dialogue", "branch", "setVariable", "condition", "jump", "call", "return"],
+                "blockTypes": ["scene", "sound", "characterShow", "characterHide", "camera", "narration", "dialogue", "branch", "setVariable", "modifyVariable", "condition", "jump", "call", "return"],
             }), encoding="utf-8")
             (launcher_dist / "system" / "Slide.GameLauncher.exe").write_bytes(b"small-launcher")
             (launcher_dist / "cefsharp" / "Slide.GameLauncher.exe").write_bytes(b"cef-launcher")

@@ -513,7 +513,7 @@ class AgentToolRegistry:
                 raise ValueError(f"Block Fragment 引用不存在：{target}")
 
     def _validated_blocks(self, value: Any) -> list[dict[str, Any]]:
-        allowed = {"scene", "sound", "characterShow", "characterHide", "camera", "narration", "dialogue", "branch", "setVariable", "condition", "jump", "call", "return"}
+        allowed = {"scene", "sound", "characterShow", "characterHide", "camera", "narration", "dialogue", "branch", "setVariable", "modifyVariable", "condition", "jump", "call", "return"}
         if not isinstance(value, list):
             raise ValueError("blocks 必须是数组")
         blocks: list[dict[str, Any]] = []

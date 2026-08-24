@@ -68,6 +68,51 @@ describe('engine control flow', () => {
     expect(project).toEqual(before);
   });
 
+  it('applies modifyVariable operations on the current value', () => {
+    const project = testProject({
+      start: [
+        { id: 'inc', type: 'modifyVariable', variable: 'affection', operation: 'add', operand: 2 },
+        { id: 'dec', type: 'modifyVariable', variable: 'affection', operation: 'subtract', operand: 1 },
+        { id: 'mul', type: 'modifyVariable', variable: 'affection', operation: 'multiply', operand: 3 },
+        { id: 'div', type: 'modifyVariable', variable: 'affection', operation: 'divide', operand: 4 },
+        { id: 'line', type: 'narration', text: 'after' },
+      ],
+    }, { affection: 5 });
+
+    const state = createEngineState(project);
+    expect(state.variables.affection).toBe(((5 + 2 - 1) * 3) / 4);
+    expect(currentBlock(project, state)?.id).toBe('line');
+  });
+
+  it('keeps the value untouched when dividing by zero or reading a non-number', () => {
+    const project = testProject({
+      start: [
+        { id: 'zero', type: 'modifyVariable', variable: 'score', operation: 'divide', operand: 0 },
+        { id: 'text', type: 'modifyVariable', variable: 'mood', operation: 'add', operand: 1 },
+        { id: 'line', type: 'narration', text: 'after' },
+      ],
+    }, { score: 3, mood: '晴天' });
+
+    const state = createEngineState(project);
+    expect(state.variables.score).toBe(3);
+    expect(state.variables.mood).toBe(1);
+  });
+
+  it('compares a condition against another variable', () => {
+    const project = testProject({
+      start: [{ id: 'condition', type: 'condition', variable: 'score', compareVariable: 'threshold', operator: 'gte', trueTarget: 'passed', falseTarget: 'failed' }],
+      passed: [{ id: 'passed-line', type: 'narration', text: 'passed' }],
+      failed: [{ id: 'failed-line', type: 'narration', text: 'failed' }],
+    }, { score: 7, threshold: 5 });
+
+    const passed = createEngineState(project);
+    expect(currentBlock(project, passed)?.id).toBe('passed-line');
+
+    const failedProject = { ...project, variables: { score: 4, threshold: 5 } };
+    const failed = createEngineState(failedProject);
+    expect(currentBlock(failedProject, failed)?.id).toBe('failed-line');
+  });
+
   it('stops deterministic infinite loops with a runtime error', () => {
     const project = testProject({ start: [{ id: 'loop', type: 'jump', target: 'start' }] });
     const state = createEngineState(project);

@@ -106,6 +106,20 @@ function applySideEffect(state: EngineState, block: StoryBlock, project: Project
   if (block.type === 'setVariable' && block.variable) {
     return { ...state, variables: { ...state.variables, [block.variable]: block.value ?? '' } };
   }
+  if (block.type === 'modifyVariable' && block.variable) {
+    const current = toComparable(state.variables[block.variable]);
+    const base = typeof current === 'number' ? current : 0;
+    const operand = Number(block.operand);
+    const safeOperand = Number.isFinite(operand) ? operand : 1;
+    let next: number;
+    switch (block.operation) {
+      case 'subtract': next = base - safeOperand; break;
+      case 'multiply': next = base * safeOperand; break;
+      case 'divide': next = safeOperand === 0 ? base : base / safeOperand; break;
+      default: next = base + safeOperand;
+    }
+    return { ...state, variables: { ...state.variables, [block.variable]: next } };
+  }
   return state;
 }
 
@@ -211,12 +225,13 @@ function settle(project: Project, initial: EngineState, options: ExecutionOption
       return appendTrace(visibleState, [traceLocation(visibleState, current)], options.cloneSnapshots);
     }
     const location = traceLocation(state, current);
-    if (current.type === 'scene' || current.type === 'sound' || current.type === 'characterShow' || current.type === 'characterHide' || current.type === 'camera' || current.type === 'setVariable') {
+    if (current.type === 'scene' || current.type === 'sound' || current.type === 'characterShow' || current.type === 'characterHide' || current.type === 'camera' || current.type === 'setVariable' || current.type === 'modifyVariable') {
       state = { ...applySideEffect(state, current, project), instructionPointer: state.instructionPointer + 1, stepsExecuted: state.stepsExecuted + 1 };
     } else if (current.type === 'jump') {
       state = goTo(project, { ...state, stepsExecuted: state.stepsExecuted + 1 }, current.target);
     } else if (current.type === 'condition') {
-      const passed = compareValues(state.variables[current.variable ?? ''], current.operator, current.compareValue);
+      const right = current.compareVariable ? state.variables[current.compareVariable] : current.compareValue;
+      const passed = compareValues(state.variables[current.variable ?? ''], current.operator, right);
       const target = passed ? current.trueTarget : current.falseTarget;
       state = target ? goTo(project, state, target) : { ...state, instructionPointer: state.instructionPointer + 1 };
       state = { ...state, stepsExecuted: state.stepsExecuted + 1 };

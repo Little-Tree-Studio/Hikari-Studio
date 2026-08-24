@@ -10,7 +10,7 @@ interface Props {
 const READING_CHARS_PER_MINUTE = 300;
 const BLOCK_LABELS: Record<string, string> = {
   scene: '场景', sound: '音频', characterShow: '角色登场', characterHide: '角色退场', camera: '镜头',
-  narration: '旁白', dialogue: '对白', branch: '选项分支', setVariable: '变量赋值', condition: '条件判断',
+  narration: '旁白', dialogue: '对白', branch: '选项分支', setVariable: '变量赋值', modifyVariable: '变量增减', condition: '条件判断',
   jump: '跳转', call: '调用', return: '返回',
 };
 

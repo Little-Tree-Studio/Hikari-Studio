@@ -5,10 +5,11 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirro
 import { HighlightStyle, StreamLanguage, bracketMatching, foldGutter, indentOnInput, indentUnit, syntaxHighlighting } from '@codemirror/language';
 import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap, snippetCompletion, type Completion, type CompletionContext, type CompletionResult } from '@codemirror/autocomplete';
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search';
-import { lintGutter, linter } from '@codemirror/lint';
+import { lintGutter, linter, type Diagnostic } from '@codemirror/lint';
 import { json, jsonParseLinter } from '@codemirror/lang-json';
 import { tags } from '@lezer/highlight';
 import { AlignLeft, CircleAlert, WrapText } from 'lucide-react';
+import { parseRenpyConditionLine, parseRenpySetLine } from '../core/scriptTextCodec';
 
 export type ScriptCodeLanguage = 'json' | 'renpy';
 
@@ -43,7 +44,7 @@ const renpyLanguage = StreamLanguage.define({
     }
     if (stream.eatSpace()) return null;
     if (stream.eat('#')) { stream.skipToEnd(); return 'comment'; }
-    if (stream.eat('=')) return 'operator';
+    if (stream.match(/^(==|!=|>=|<=|[+\-*/%]=|=|>|<)/)) return 'operator';
     if (stream.match(/^"(?:[^"\\]|\\.)*"?/)) return 'string';
     if (stream.match(/^'(?:[^'\\]|\\.)*'?/)) return 'string';
     if (stream.match(/^\d+(?:\.\d+)?/)) return 'number';
@@ -94,6 +95,35 @@ function renpyCompletionSource(data: RenpyCompletionData) {
         validFor: /^[\w一-鿿]*$/,
       };
     }
+    if (/^if\s+[\w一-鿿]*$/.test(beforeCursor)) {
+      return {
+        from: word.from,
+        options: data.variables.map((variable) => ({ label: variable, type: 'variable', detail: '变量' })),
+        validFor: /^[\w一-鿿]*$/,
+      };
+    }
+    if (/^if\s+[\w一-鿿]+\s+(?:==|!=|>=|<=|>|<)\s*\$?[\w一-鿿]*$/.test(beforeCursor)) {
+      const options: Completion[] = [
+        { label: 'true', type: 'atom', detail: '布尔值' },
+        { label: 'false', type: 'atom', detail: '布尔值' },
+        ...data.variables.map((variable) => ({ label: `$${variable}`, type: 'variable', detail: '比较变量' })),
+      ];
+      return { from: word.from, options, validFor: /^\$?[\w一-鿿]*$/ };
+    }
+    if (/^if\s+.*\belse\s+(?:jump\s+)?[\w-]*$/.test(beforeCursor)) {
+      return {
+        from: word.from,
+        options: data.fragments.map((fragment) => ({ label: fragment.id, type: 'constant', detail: `片段 · ${fragment.name}` })),
+        validFor: /^[\w-]*$/,
+      };
+    }
+    if (/^if\s+.*\bjump\s+[\w-]*$/.test(beforeCursor)) {
+      return {
+        from: word.from,
+        options: data.fragments.map((fragment) => ({ label: fragment.id, type: 'constant', detail: `片段 · ${fragment.name}` })),
+        validFor: /^[\w-]*$/,
+      };
+    }
     if (/^\s*[\w一-鿿$]*$/.test(beforeCursor)) {
       const options: Completion[] = [
         snippetCompletion('scene ${}', { label: 'scene', type: 'keyword', detail: '切换场景' }),
@@ -104,12 +134,48 @@ function renpyCompletionSource(data: RenpyCompletionData) {
         snippetCompletion('stop ${}', { label: 'stop', type: 'keyword', detail: '停止音频' }),
         { label: 'return', type: 'keyword', detail: '返回调用处' },
         snippetCompletion('$ ${} = ${}', { label: '$', type: 'keyword', detail: '设置变量' }),
+        snippetCompletion('$ ${} += ${}', { label: '$ 增减', type: 'keyword', detail: '变量加减乘除' }),
+        snippetCompletion('if ${} >= ${} jump ${} else jump ${}', { label: 'if', type: 'keyword', detail: '条件判断分支' }),
         snippetCompletion('"${}"', { label: '"旁白"', type: 'text', detail: '旁白文本' }),
         ...data.characters.map((name) => snippetCompletion(`${name} "\${}"`, { label: name, type: 'class', detail: '角色对白' })),
       ];
       return { from: word.from, options, validFor: /^[\w一-鿿$]*$/ };
     }
     return null;
+  };
+}
+
+/** Ren'Py 视图的静态检查：未声明变量（读取）与不存在的跳转目标。 */
+function renpyLinterSource(data: () => RenpyCompletionData) {
+  return (view: EditorView): Diagnostic[] => {
+    const { variables, fragments } = data();
+    const declared = new Set(variables);
+    const fragmentIds = new Set(fragments.map((fragment) => fragment.id));
+    const diagnostics: Diagnostic[] = [];
+    const jumpTargetIssue = (target: string, line: { from: number; to: number }) => {
+      if (!fragmentIds.has(target)) diagnostics.push({ from: line.from, to: line.to, severity: 'error', message: `目标片段不存在：${target}` });
+    };
+    for (let index = 1; index <= view.state.doc.lines; index += 1) {
+      const line = view.state.doc.line(index);
+      const text = line.text.trim();
+      if (!text || text.startsWith('#')) continue;
+      const flow = /^(?:jump|call)\s+(\S+)/.exec(text);
+      if (flow) { jumpTargetIssue(flow[1], line); continue; }
+      const set = parseRenpySetLine(text);
+      if (set) {
+        if (!declared.has(set.variable)) diagnostics.push({ from: line.from, to: line.to, severity: 'warning', message: `变量“${set.variable}”未在叙事地图的变量面板中声明` });
+        continue;
+      }
+      const condition = parseRenpyConditionLine(text);
+      if (condition) {
+        if (!declared.has(condition.variable)) diagnostics.push({ from: line.from, to: line.to, severity: 'warning', message: `条件使用了未声明变量：${condition.variable}` });
+        if (condition.compareVariable && !declared.has(condition.compareVariable)) diagnostics.push({ from: line.from, to: line.to, severity: 'warning', message: `条件比较引用了未声明变量：${condition.compareVariable}` });
+        if (condition.trueTarget) jumpTargetIssue(condition.trueTarget, line);
+        if (condition.falseTarget) jumpTargetIssue(condition.falseTarget, line);
+        if (!condition.trueTarget && !condition.falseTarget) diagnostics.push({ from: line.from, to: line.to, severity: 'warning', message: '条件没有配置跳转目标，将始终继续执行下一行' });
+      }
+    }
+    return diagnostics;
   };
 }
 
@@ -184,7 +250,7 @@ function buildExtensions(language: ScriptCodeLanguage, completionData: () => Ren
   if (language === 'json') {
     return [json(), linter(jsonParseLinter()), lintGutter(), foldGutter(), indentUnit.of('  '), EditorState.tabSize.of(2), autocompletion({ activateOnTyping: true, maxRenderedOptions: 60 }), ...base];
   }
-  return [renpyLanguage, autocompletion({ override: [renpyCompletionSource(completionData())], activateOnTyping: true, maxRenderedOptions: 60 }), ...base];
+  return [renpyLanguage, linter(renpyLinterSource(completionData)), lintGutter(), autocompletion({ override: [renpyCompletionSource(completionData())], activateOnTyping: true, maxRenderedOptions: 60 }), ...base];
 }
 
 export const ScriptCodeEditor = memo(function ScriptCodeEditor({ language, value, onChange, onFormat, characters = [], fragments = [], variables = [] }: ScriptCodeEditorProps) {

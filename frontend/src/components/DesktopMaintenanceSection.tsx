@@ -22,7 +22,7 @@ const componentLabels: Record<ComponentRenderSurface, string> = {
 };
 const blockTypeLabels: Record<BlockType, string> = {
   scene: '场景', sound: '音频', characterShow: '显示角色', characterHide: '隐藏角色', camera: '摄像机',
-  narration: '旁白', dialogue: '对白', branch: '分支', setVariable: '设置变量', condition: '条件',
+  narration: '旁白', dialogue: '对白', branch: '分支', setVariable: '设置变量', modifyVariable: '增减变量', condition: '条件',
   jump: '跳转', call: '调用片段', return: '返回',
 };
 const dialogueRegionLabels: Record<DialogueStoryCardRegion, string> = { speaker: '角色与显示名', expression: '表情选择', body: '正文与语音' };

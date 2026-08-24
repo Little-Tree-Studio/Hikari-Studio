@@ -42,7 +42,17 @@ export function diagnoseProject(project: Project): ProjectDiagnostic[] {
         if (!assignedTypes.has(block.variable)) assignedTypes.set(block.variable, new Set([valueType(project.variables[block.variable])]));
         assignedTypes.get(block.variable)?.add(valueType(block.value));
       }
-      if (block.type === 'condition' && block.variable && !(block.variable in project.variables)) diagnostics.push({ severity: 'warning', code: 'UNDECLARED_VARIABLE', message: `条件使用了未声明变量：${block.variable}`, fragmentId, blockId: block.id, blockIndex });
+      if (block.type === 'modifyVariable' && block.variable) {
+        if (!(block.variable in project.variables)) diagnostics.push({ severity: 'warning', code: 'UNDECLARED_VARIABLE', message: `增减变量读取了未声明变量：${block.variable}`, fragmentId, blockId: block.id, blockIndex });
+        if (!assignedTypes.has(block.variable)) assignedTypes.set(block.variable, new Set([valueType(project.variables[block.variable])]));
+        assignedTypes.get(block.variable)?.add('number');
+      }
+      if (block.type === 'condition') {
+        if (block.variable && !(block.variable in project.variables)) diagnostics.push({ severity: 'warning', code: 'UNDECLARED_VARIABLE', message: `条件使用了未声明变量：${block.variable}`, fragmentId, blockId: block.id, blockIndex });
+        if (block.compareVariable && !(block.compareVariable in project.variables)) diagnostics.push({ severity: 'warning', code: 'UNDECLARED_VARIABLE', message: `条件比较引用了未声明变量：${block.compareVariable}`, fragmentId, blockId: block.id, blockIndex });
+        if (block.compareVariable ? block.variable === block.compareVariable : block.compareValue === undefined || block.compareValue === '') diagnostics.push({ severity: 'warning', code: 'CONDITION_MISSING_COMPARE', message: '条件缺少比较值：请填写比较值或选择比较变量', fragmentId, blockId: block.id, blockIndex });
+        if (!block.trueTarget && !block.falseTarget) diagnostics.push({ severity: 'warning', code: 'CONDITION_NO_BRANCH', message: '条件判断没有配置任何跳转目标，将始终继续执行', fragmentId, blockId: block.id, blockIndex });
+      }
       if (block.type === 'return' && !Object.values(project.scripts).flat().some((candidate) => candidate.type === 'call' && candidate.target === fragmentId)) diagnostics.push({ severity: 'warning', code: 'ORPHAN_RETURN', message: '此返回指令所在片段没有被任何调用指令引用', fragmentId, blockId: block.id, blockIndex });
     });
   }

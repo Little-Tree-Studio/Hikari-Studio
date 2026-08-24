@@ -16,9 +16,9 @@ class ExporterTests(unittest.TestCase):
         (runtime / "player.css").write_text("/* runtime styles */", encoding="utf-8")
         (runtime / "runtime-contract.json").write_text(json.dumps({
             "schemaVersion": 1,
-            "matrixVersion": "2026.08.02.1",
+            "matrixVersion": "2026.08.25.1",
             "engineVersion": 3,
-            "blockTypes": ["scene", "sound", "characterShow", "characterHide", "camera", "narration", "dialogue", "branch", "setVariable", "condition", "jump", "call", "return"],
+            "blockTypes": ["scene", "sound", "characterShow", "characterHide", "camera", "narration", "dialogue", "branch", "setVariable", "modifyVariable", "condition", "jump", "call", "return"],
         }), encoding="utf-8")
         return runtime
 
@@ -44,8 +44,8 @@ class ExporterTests(unittest.TestCase):
             self.assertIn("engine-core shared runtime", (root / "build" / "player.js").read_text(encoding="utf-8"))
             self.assertIn("SLIDE_PROJECT", (root / "build" / "project.js").read_text(encoding="utf-8"))
             contract = json.loads((root / "build" / "runtime-contract.json").read_text(encoding="utf-8"))
-            self.assertEqual(contract["matrixVersion"], "2026.08.02.1")
-            self.assertEqual(len(contract["blockTypes"]), 13)
+            self.assertEqual(contract["matrixVersion"], "2026.08.25.1")
+            self.assertEqual(len(contract["blockTypes"]), 14)
             self.assertEqual(set(contract["bundles"]), {"player.js", "player.css", "project.js"})
             self.assertEqual(contract["bundles"]["player.js"]["bytes"], (root / "build" / "player.js").stat().st_size)
             self.assertTrue((root / "build" / "assets" / "lake.jpg").exists())

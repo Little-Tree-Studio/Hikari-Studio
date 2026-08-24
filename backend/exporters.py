@@ -27,8 +27,8 @@ def _write_runtime_contract(runtime_dist: Path, output_dir: Path) -> Path:
     except (OSError, json.JSONDecodeError) as error:
         raise ValueError("Runtime conformance metadata is invalid") from error
     block_types = contract.get("blockTypes")
-    if contract.get("schemaVersion") != 1 or not contract.get("matrixVersion") or not isinstance(block_types, list) or len(block_types) != 13:
-        raise ValueError("Runtime conformance metadata does not describe the 13 Block matrix")
+    if contract.get("schemaVersion") != 1 or not contract.get("matrixVersion") or not isinstance(block_types, list) or len(block_types) != 14:
+        raise ValueError("Runtime conformance metadata does not describe the 14 Block matrix")
     contract["bundles"] = {
         name: {"sha256": _sha256_file(output_dir / name), "bytes": (output_dir / name).stat().st_size}
         for name in ("player.js", "player.css", "project.js")
@@ -106,10 +106,18 @@ def export_renpy(project: dict[str, Any], output_dir: Path) -> Path:
                         lines.append(f"            {'call ' + target if target else 'pass'}")
                 elif block_type == "setVariable":
                     lines.append(f"    $ _slide_vars[{quote(block.get('variable'))}] = {python_literal(block.get('value'))}")
+                elif block_type == "modifyVariable":
+                    operations = {"add": "+", "subtract": "-", "multiply": "*", "divide": "/"}
+                    operation = operations.get(block.get("operation"), "+")
+                    name = quote(block.get("variable"))
+                    operand = python_literal(block.get("operand", 1))
+                    lines.append(f"    $ _slide_vars[{name}] = _slide_vars.get({name}, 0) {operation} {operand}")
                 elif block_type == "condition":
                     operators = {"eq": "==", "neq": "!=", "gt": ">", "gte": ">=", "lt": "<", "lte": "<="}
                     operator = operators.get(block.get("operator"), "==")
-                    lines.append(f"    if _slide_vars.get({quote(block.get('variable'))}) {operator} {python_literal(block.get('compareValue'))}:")
+                    compare_variable = block.get("compareVariable")
+                    right = f"_slide_vars.get({quote(compare_variable)})" if compare_variable else python_literal(block.get("compareValue"))
+                    lines.append(f"    if _slide_vars.get({quote(block.get('variable'))}) {operator} {right}:")
                     true_target = fragment_names.get(block.get("trueTarget"))
                     lines.append(f"        {'jump ' + true_target if true_target else 'pass'}")
                     false_target = fragment_names.get(block.get("falseTarget"))

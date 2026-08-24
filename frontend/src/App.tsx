@@ -7,7 +7,7 @@ import {
   ExternalLink, FilePlus2, FileText, FileUp, Flag, FolderOpen, FolderPlus,
   GitBranch, GitFork, GripVertical, HardDrive, History, Image, Languages, LocateFixed, Maximize2,
   LogOut, Menu, MessageSquareText, Minus, Music2, NotebookPen, PackageCheck, Palette, Plus,
-  Pin, PinOff, Redo2, Rocket, Save, Search, Settings2,
+  Pin, PinOff, Redo2, Rocket, Save, Search, Settings2, Sigma,
   Sparkles, Trash2, Undo2, UserPlus, UserRound, Users, X, PanelBottom, PanelRight, PictureInPicture2, LoaderCircle,
 } from 'lucide-react';
 import {
@@ -48,7 +48,7 @@ import { defaultEditorSession, loadEditorSession, saveEditorSession, type Editor
 import { projectScenes, sceneBlockSnapshot } from './core/scenes';
 import { useEditorAppearance } from './core/editorAppearance';
 import { defaultLanguage, projectLanguages } from './core/localization';
-import { parseJsonBlocks, parsePlainBlocks, parseRenpyBlocks, serializePlain, serializeRenpy, formatJsonBlocksText, formatRenpyText } from './core/scriptTextCodec';
+import { parseJsonBlocks, parsePlainBlocks, parseRenpyBlocks, serializePlain, serializeRenpy, formatJsonBlocksText, formatRenpyText, parseRenpyScalar } from './core/scriptTextCodec';
 import { remapTimeline } from './core/timeline';
 import { buildKindLabel, completeBuildProgress, createBuildProgressTask, failBuildProgress, updateBuildProgress, type BuildProgressTask } from './core/buildProgress';
 import { createBlock } from './engine-core/blocks';
@@ -56,7 +56,7 @@ import { diagnosticSummary } from './engine-core/diagnostics';
 import { useCommandHistory, type CommandRestoreStrategies, type CommandSnapshotEntry, type PersistedCommandHistory } from './hooks/useCommandHistory';
 import { useFixedVirtualList, useMeasuredVirtualList } from './hooks/useVirtualList';
 import { beginComponentRenderProfile, cancelComponentRenderProfile, finishComponentRenderProfile, recordComponentRender } from './performance/renderProfiler';
-import type { AgentOperation, AppNotification, Asset, AudioCategory, BlockType, BrowserMode, BuildPreflightReport, BuildTarget, CommandHistoryStorageStats, ConditionOperator, InspectorDock, Project, ProjectCreationOptions, ProjectLoadPerformance, ProjectReloadFrontendPerformance, ProjectReloadPerformance, RecoverySnapshot, RecoverySnapshotStatus, ScriptImportPreview, ScriptImportRules, StoryBlock, StoryBlockPatch } from './types';
+import type { AgentOperation, AppNotification, Asset, AudioCategory, BlockType, BrowserMode, BuildPreflightReport, BuildTarget, CommandHistoryStorageStats, ConditionOperator, InspectorDock, Project, ProjectCreationOptions, ProjectLoadPerformance, ProjectReloadFrontendPerformance, ProjectReloadPerformance, RecoverySnapshot, RecoverySnapshotStatus, ScriptImportPreview, ScriptImportRules, StoryBlock, StoryBlockPatch, VariableOperation } from './types';
 
 const SaveAs = Copy;
 
@@ -145,12 +145,20 @@ const blockMeta = {
   narration: { name: '旁白', icon: AlignLeft, description: '叙述和内心独白' },
   dialogue: { name: '角色对白', icon: MessageSquareText, description: '角色、表情与语音' },
   branch: { name: '选项分支', icon: GitFork, description: '玩家选择与跳转' },
-  setVariable: { name: '设置变量', icon: Braces, description: '修改剧情变量' },
+  setVariable: { name: '设置变量', icon: Braces, description: '直接写入剧情变量' },
+  modifyVariable: { name: '增减变量', icon: Sigma, description: '在当前值上加减乘除' },
   condition: { name: '条件判断', icon: GitBranch, description: '按变量决定流程' },
   jump: { name: '跳转片段', icon: Flag, description: '切换到目标片段' },
   call: { name: '调用片段', icon: Code2, description: '执行子片段后返回' },
   return: { name: '返回', icon: CornerDownRight, description: '返回调用位置' },
 } satisfies Record<BlockType, { name: string; icon: typeof Image; description: string }>;
+
+const conditionOperatorLabels: Record<ConditionOperator, string> = { eq: '等于', neq: '不等于', gt: '大于', gte: '大于等于', lt: '小于', lte: '小于等于' };
+const variableOperationLabels: Record<VariableOperation, string> = { add: '加上', subtract: '减去', multiply: '乘以', divide: '除以' };
+const variableOperationSymbols: Record<VariableOperation, string> = { add: '+', subtract: '−', multiply: '×', divide: '÷' };
+/** 检查器里标量输入的统一转换：数字 / 布尔按类型保存，其余按文本。 */
+const coerceScalarInput = parseRenpyScalar;
+const fragmentNamesOf = (project: Project) => new Map(project.chapters.flatMap((chapter) => chapter.fragments.map((fragment) => [fragment.id, fragment.name] as const)));
 
 function useToast() {
   const [toast, setToast] = useState<Toast>(null);
@@ -252,6 +260,7 @@ const StoryCard = memo(function StoryCard({ index, project, block, selected, ass
   const meta = blockMeta[block.type];
   const Icon = meta.icon;
   const characters = project.characters;
+  const fragmentNamesById = useMemo(() => fragmentNamesOf(project), [project.chapters]);
   const hasSceneBackground = block.type === 'scene' && Boolean(asset?.uri);
   const cardDragOriginRef = useRef<{ x: number; y: number } | null>(null);
   const suppressCardClickRef = useRef(false);
@@ -298,7 +307,8 @@ const StoryCard = memo(function StoryCard({ index, project, block, selected, ass
       {block.type === 'dialogue' && <DialogueStoryCard index={index} block={block} characters={characters} selected={selected} voiceAsset={voiceAsset} onChange={onChange} />}
       {block.type === 'branch' && <><div className="block-text"><strong>{block.title}</strong></div><div className="branch-options">{block.options?.map((option) => <div className="branch-option" key={option.text}><span>{option.text}</span><span>{option.target} →</span></div>)}</div></>}
       {block.type === 'setVariable' && <div className="control-summary"><Braces /><strong>{block.variable}</strong><span>= {String(block.value ?? '')}</span></div>}
-      {block.type === 'condition' && <div className="control-summary"><GitBranch /><strong>{block.variable}</strong><span>{block.operator ?? 'eq'} {String(block.compareValue ?? '')}</span><em>{block.trueTarget ?? '继续'} / {block.falseTarget ?? '继续'}</em></div>}
+      {block.type === 'modifyVariable' && <div className="control-summary"><Sigma /><strong>{block.variable}</strong><span>{variableOperationSymbols[block.operation ?? 'add']} {block.operand ?? 1}</span></div>}
+      {block.type === 'condition' && <div className="control-summary"><GitBranch /><strong>{block.variable}</strong><span>{conditionOperatorLabels[block.operator ?? 'eq']} {block.compareVariable ? `变量 ${block.compareVariable}` : String(block.compareValue ?? '')}</span><em>{block.trueTarget ? fragmentNamesById.get(block.trueTarget) ?? block.trueTarget : '继续'} / {block.falseTarget ? fragmentNamesById.get(block.falseTarget) ?? block.falseTarget : '继续'}</em></div>}
       {(block.type === 'jump' || block.type === 'call') && <div className="control-summary"><Flag /><strong>{block.target ?? '未设置目标'}</strong></div>}
       {block.type === 'return' && <div className="control-summary"><CornerDownRight /><strong>返回上一个调用位置</strong></div>}
     </div>
@@ -341,8 +351,9 @@ function Inspector({ project, block, update, dock, setDock, notify, standalone =
     {block.type === 'characterHide' && <><div className="field"><label>角色</label><Select value={block.characterId ?? ''} onChange={(value) => update({ characterId: value })}>{project.characters.map((character) => <option key={character.id} value={character.id}>{character.name}</option>)}</Select></div><div className="field"><label>退场动画</label><Select value={block.animation ?? 'fade'} onChange={(value) => update({ animation: value as StoryBlockPatch['animation'] })}><option value="none">无</option><option value="fade">淡出</option><option value="slideLeft">向左滑出</option><option value="slideRight">向右滑出</option><option value="zoom">缩放</option></Select></div></>}
     {block.type === 'camera' && <><div className="field"><label>水平偏移</label><input type="number" value={block.cameraX ?? 0} onChange={(e) => update({ cameraX: Number(e.target.value) })} /></div><div className="field"><label>垂直偏移</label><input type="number" value={block.cameraY ?? 0} onChange={(e) => update({ cameraY: Number(e.target.value) })} /></div><div className="field"><label>缩放</label><input type="number" min=".1" max="5" step=".1" value={block.zoom ?? 1} onChange={(e) => update({ zoom: Number(e.target.value) })} /></div><div className="field"><label>震动强度</label><input type="number" min="0" max="100" value={block.shake ?? 0} onChange={(e) => update({ shake: Number(e.target.value) })} /></div><div className="field full"><label>滤镜</label><Select value={block.filter ?? 'none'} onChange={(value) => update({ filter: value as StoryBlockPatch['filter'] })}><option value="none">无</option><option value="monochrome">黑白</option><option value="sepia">怀旧</option><option value="blur">模糊</option><option value="vignette">暗角</option></Select></div></>}
     {block.type === 'branch' && <><div className="field full"><label>问题</label><input value={block.title ?? ''} onChange={(e) => update({ title: e.target.value })} /></div>{block.options?.map((option, index) => <div className="branch-edit full" key={index}><input value={option.text} onChange={(e) => update({ options: block.options?.map((item, i) => i === index ? { ...item, text: e.target.value } : item) })} /><Select value={option.target} onChange={(value) => update({ options: block.options?.map((item, i) => i === index ? { ...item, target: value } : item) })}>{fragmentOptions.map((fragment) => <option key={fragment.id} value={fragment.id}>{fragment.name}</option>)}</Select><button className="icon-button" onClick={() => update({ options: block.options?.filter((_, i) => i !== index) })}><Trash2 /></button></div>)}<button className="button full" onClick={() => update({ options: [...(block.options ?? []), { text: '新选项', target: project.activeFragmentId }] })}><Plus />添加选项</button></>}
-    {block.type === 'setVariable' && <><div className="field"><label>变量名</label><input value={block.variable ?? ''} onChange={(e) => update({ variable: e.target.value })} /></div><div className="field"><label>设置为</label><input value={String(block.value ?? '')} onChange={(e) => update({ value: e.target.value })} /></div></>}
-    {block.type === 'condition' && <><div className="field"><label>变量名</label><input value={block.variable ?? ''} onChange={(e) => update({ variable: e.target.value })} /></div><div className="field"><label>比较方式</label><Select value={block.operator ?? 'eq'} onChange={(value) => update({ operator: value as ConditionOperator })}><option value="eq">等于</option><option value="neq">不等于</option><option value="gt">大于</option><option value="gte">大于等于</option><option value="lt">小于</option><option value="lte">小于等于</option></Select></div><div className="field full"><label>比较值</label><input value={String(block.compareValue ?? '')} onChange={(e) => update({ compareValue: e.target.value })} /></div><div className="field"><label>条件成立</label><Select value={block.trueTarget ?? ''} onChange={(value) => update({ trueTarget: value || undefined })}><option value="">继续执行</option>{fragmentOptions.map((fragment) => <option key={fragment.id} value={fragment.id}>{fragment.name}</option>)}</Select></div><div className="field"><label>条件不成立</label><Select value={block.falseTarget ?? ''} onChange={(value) => update({ falseTarget: value || undefined })}><option value="">继续执行</option>{fragmentOptions.map((fragment) => <option key={fragment.id} value={fragment.id}>{fragment.name}</option>)}</Select></div></>}
+    {block.type === 'setVariable' && <><div className="field"><label>变量名</label><Select value={block.variable ?? ''} onChange={(value) => update({ variable: value })}>{Object.keys(project.variables).map((name) => <option key={name} value={name}>{name}</option>)}{block.variable && !(block.variable in project.variables) && <option value={block.variable}>{block.variable}（未声明）</option>}</Select></div><div className="field full"><label>设置为</label><input value={String(block.value ?? '')} onChange={(e) => update({ value: coerceScalarInput(e.target.value) })} /></div><small className="control-help full">输入数字或 true / false 会按对应类型保存，其余内容按文本处理；未声明的变量可在叙事地图中登记。</small></>}
+    {block.type === 'modifyVariable' && <><div className="field"><label>变量名</label><Select value={block.variable ?? ''} onChange={(value) => update({ variable: value })}>{Object.keys(project.variables).map((name) => <option key={name} value={name}>{name}</option>)}{block.variable && !(block.variable in project.variables) && <option value={block.variable}>{block.variable}（未声明）</option>}</Select></div><div className="field"><label>运算</label><Select value={block.operation ?? 'add'} onChange={(value) => update({ operation: value as VariableOperation })}><option value="add">加上（+）</option><option value="subtract">减去（−）</option><option value="multiply">乘以（×）</option><option value="divide">除以（÷）</option></Select></div><div className="field"><label>数值</label><input type="number" step="any" value={block.operand ?? 1} onChange={(e) => update({ operand: Number(e.target.value) })} /></div><small className="control-help full">在变量当前值的基础上{variableOperationLabels[block.operation ?? 'add']}该数值，适合好感度、计数器等累计型变量。</small></>}
+    {block.type === 'condition' && <><div className="field"><label>变量名</label><Select value={block.variable ?? ''} onChange={(value) => update({ variable: value })}>{Object.keys(project.variables).map((name) => <option key={name} value={name}>{name}</option>)}{block.variable && !(block.variable in project.variables) && <option value={block.variable}>{block.variable}（未声明）</option>}</Select></div><div className="field"><label>比较方式</label><Select value={block.operator ?? 'eq'} onChange={(value) => update({ operator: value as ConditionOperator })}><option value="eq">等于</option><option value="neq">不等于</option><option value="gt">大于</option><option value="gte">大于等于</option><option value="lt">小于</option><option value="lte">小于等于</option></Select></div><div className="field"><label>比较变量</label><Select value={block.compareVariable ?? ''} onChange={(value) => update({ compareVariable: value || undefined })}><option value="">使用下方比较值</option>{Object.keys(project.variables).map((name) => <option key={name} value={name}>{name}</option>)}</Select></div><div className="field full"><label>比较值{block.compareVariable ? '（已改为比较变量）' : ''}</label><input disabled={Boolean(block.compareVariable)} value={String(block.compareValue ?? '')} onChange={(e) => update({ compareValue: coerceScalarInput(e.target.value) })} /></div><div className="field"><label>条件成立</label><Select value={block.trueTarget ?? ''} onChange={(value) => update({ trueTarget: value || undefined })}><option value="">继续执行</option>{fragmentOptions.map((fragment) => <option key={fragment.id} value={fragment.id}>{fragment.name}</option>)}</Select></div><div className="field"><label>条件不成立</label><Select value={block.falseTarget ?? ''} onChange={(value) => update({ falseTarget: value || undefined })}><option value="">继续执行</option>{fragmentOptions.map((fragment) => <option key={fragment.id} value={fragment.id}>{fragment.name}</option>)}</Select></div><small className="control-help full">选择“比较变量”后与另一个变量的当前值比较；数字串按数值比较，文本按字典序。</small></>}
     {(block.type === 'jump' || block.type === 'call') && <div className="field full"><label>目标片段</label><Select value={block.target ?? ''} onChange={(value) => update({ target: value })}>{fragmentOptions.map((fragment) => <option key={fragment.id} value={fragment.id}>{fragment.name}</option>)}</Select></div>}
     {block.type === 'return' && <div className="control-help full">运行到这里时返回最近一次“调用片段”的下一条指令。</div>}
   </div></section>;

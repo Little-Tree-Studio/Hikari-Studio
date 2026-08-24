@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "matrixVersion": "2026.08.02.1",
+  "matrixVersion": "2026.08.25.1",
   "engineVersion": 3,
   "blockTypes": [
     "scene",
@@ -12,6 +12,7 @@
     "dialogue",
     "branch",
     "setVariable",
+    "modifyVariable",
     "condition",
     "jump",
     "call",

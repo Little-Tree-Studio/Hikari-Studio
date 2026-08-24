@@ -33,7 +33,7 @@ async function runSurface(page: Page, url: string, caseId: string, surface: 'edi
   return observations;
 }
 
-test('editor Preview and exported Web runtime execute the 13 Block matrix identically', async ({ page }) => {
+test('editor Preview and exported Web runtime execute the 14 Block matrix identically', async ({ page }) => {
   for (const testCase of BLOCK_CONFORMANCE_MATRIX) {
     const editor = await runSurface(page, `/?block-conformance=${testCase.id}`, testCase.id, 'editor-preview', testCase.actions);
     const runtime = await runSurface(page, `/runtime/?block-conformance=${testCase.id}`, testCase.id, 'web-runtime', testCase.actions);

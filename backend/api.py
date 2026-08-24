@@ -320,7 +320,7 @@ class DesktopApi:
                         normalized_story_card_types: dict[str, dict[str, float | int]] = {}
                         for block_type in (
                             "scene", "sound", "characterShow", "characterHide", "camera", "narration", "dialogue",
-                            "branch", "setVariable", "condition", "jump", "call", "return",
+                            "branch", "setVariable", "modifyVariable", "condition", "jump", "call", "return",
                         ):
                             raw_card = raw_story_card_types.get(block_type)
                             if not isinstance(raw_card, dict):

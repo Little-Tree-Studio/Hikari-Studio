@@ -1,5 +1,6 @@
-export type BlockType = 'scene' | 'sound' | 'characterShow' | 'characterHide' | 'camera' | 'narration' | 'dialogue' | 'branch' | 'setVariable' | 'condition' | 'jump' | 'call' | 'return';
+export type BlockType = 'scene' | 'sound' | 'characterShow' | 'characterHide' | 'camera' | 'narration' | 'dialogue' | 'branch' | 'setVariable' | 'modifyVariable' | 'condition' | 'jump' | 'call' | 'return';
 export type ConditionOperator = 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte';
+export type VariableOperation = 'add' | 'subtract' | 'multiply' | 'divide';
 export type AudioChannel = 'bgm' | 'sfx' | 'voice';
 export type AudioAction = 'play' | 'stop';
 export type CharacterPosition = 'farLeft' | 'left' | 'center' | 'right' | 'farRight' | 'custom';
@@ -80,8 +81,11 @@ export interface StoryBlockData {
   options?: BranchOption[];
   variable?: string;
   value?: string | number | boolean;
+  operation?: VariableOperation;
+  operand?: number;
   operator?: ConditionOperator;
   compareValue?: string | number | boolean;
+  compareVariable?: string;
   trueTarget?: string;
   falseTarget?: string;
   target?: string;
@@ -115,12 +119,13 @@ export interface NarrationBlock extends BlockBase { type: 'narration'; text?: st
 export interface DialogueBlock extends BlockBase { type: 'dialogue'; text?: string; speaker?: string; expression?: string; displayNameSchemeId?: string; voice?: string }
 export interface BranchBlock extends BlockBase { type: 'branch'; title?: string; options?: BranchOption[] }
 export interface SetVariableBlock extends BlockBase { type: 'setVariable'; variable?: string; value?: string | number | boolean }
-export interface ConditionBlock extends BlockBase { type: 'condition'; variable?: string; operator?: ConditionOperator; compareValue?: string | number | boolean; trueTarget?: string; falseTarget?: string }
+export interface ModifyVariableBlock extends BlockBase { type: 'modifyVariable'; variable?: string; operation?: VariableOperation; operand?: number }
+export interface ConditionBlock extends BlockBase { type: 'condition'; variable?: string; operator?: ConditionOperator; compareValue?: string | number | boolean; compareVariable?: string; trueTarget?: string; falseTarget?: string }
 export interface JumpBlock extends BlockBase { type: 'jump'; target?: string }
 export interface CallBlock extends BlockBase { type: 'call'; target?: string }
 export interface ReturnBlock extends BlockBase { type: 'return' }
 
-export type StoryBlock = SceneBlock | SoundBlock | CharacterShowBlock | CharacterHideBlock | CameraBlock | NarrationBlock | DialogueBlock | BranchBlock | SetVariableBlock | ConditionBlock | JumpBlock | CallBlock | ReturnBlock;
+export type StoryBlock = SceneBlock | SoundBlock | CharacterShowBlock | CharacterHideBlock | CameraBlock | NarrationBlock | DialogueBlock | BranchBlock | SetVariableBlock | ModifyVariableBlock | ConditionBlock | JumpBlock | CallBlock | ReturnBlock;
 export type StoryBlockPatch = Partial<Omit<StoryBlockData, 'id' | 'type'>>;
 export type StoryBlockInput = Omit<StoryBlockData, 'id'> & { type: BlockType };
 

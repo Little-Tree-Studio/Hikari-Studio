@@ -11,7 +11,7 @@ const surfaces = new Set<ComponentRenderSurface>([
 ]);
 const storyCardTypes = new Set<BlockType>([
   'scene', 'sound', 'characterShow', 'characterHide', 'camera', 'narration', 'dialogue',
-  'branch', 'setVariable', 'condition', 'jump', 'call', 'return',
+  'branch', 'setVariable', 'modifyVariable', 'condition', 'jump', 'call', 'return',
 ]);
 const storyCardPrefix = 'story-card:';
 const dialogueRegions = new Set<DialogueStoryCardRegion>(['speaker', 'expression', 'body']);

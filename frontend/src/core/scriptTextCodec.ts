@@ -1,7 +1,59 @@
-import type { StoryBlock } from '../types';
+import type { ConditionOperator, StoryBlock, VariableOperation } from '../types';
 
 const quote = (value: unknown) => JSON.stringify(String(value ?? ''));
 const makeId = (index: number) => `block-${Date.now().toString(36)}-${index}-${Math.random().toString(36).slice(2, 7)}`;
+
+export const CONDITION_OPERATOR_SYMBOLS: Record<ConditionOperator, string> = { eq: '==', neq: '!=', gt: '>', gte: '>=', lt: '<', lte: '<=' };
+export const CONDITION_SYMBOL_OPERATORS: Record<string, ConditionOperator> = Object.fromEntries(Object.entries(CONDITION_OPERATOR_SYMBOLS).map(([operator, symbol]) => [symbol, operator as ConditionOperator]));
+export const VARIABLE_OPERATION_SYMBOLS: Record<VariableOperation, string> = { add: '+=', subtract: '-=', multiply: '*=', divide: '/=' };
+export const VARIABLE_SYMBOL_OPERATIONS: Record<string, VariableOperation> = Object.fromEntries(Object.entries(VARIABLE_OPERATION_SYMBOLS).map(([operation, symbol]) => [symbol, operation as VariableOperation]));
+
+/** 文本视图中标量的显示形式：布尔与数字原样，字符串加引号。 */
+export function formatRenpyScalar(value: string | number | boolean | undefined): string {
+  if (typeof value === 'string') return JSON.stringify(value);
+  return String(value ?? '');
+}
+
+/** 解析文本视图中的标量字面量：引号字符串、布尔、数字，其余按原始字符串处理。 */
+export function parseRenpyScalar(token: string): string | number | boolean {
+  if (/^".*"$/.test(token)) { try { return JSON.parse(token) as string; } catch { return token.slice(1, -1); } }
+  if (/^'.*'$/.test(token)) return token.slice(1, -1);
+  if (token === 'true') return true;
+  if (token === 'false') return false;
+  if (token.trim() !== '' && Number.isFinite(Number(token))) return Number(token);
+  return token;
+}
+
+export interface RenpySetLine { variable: string; operation?: VariableOperation; rawValue: string; value?: string | number | boolean }
+
+const SET_LINE = /^\$\s*([^\s=]+)\s*([+\-*/]?=)\s*(.+)$/;
+const CONDITION_LINE = /^if\s+([^\s=!<>"']+)\s*(==|!=|>=|<=|>|<)\s*(\$[^\s]+|"[^"]*"|'[^']*'|[^\s]+)\s*(?:jump\s+(\S+))?\s*(?:else\s+(?:jump\s+)?(\S+))?$/;
+
+/** 解析 `$ 变量 = 值` / `$ 变量 += 值` 行；parseValue 为 true 时把字面量转成布尔/数字。 */
+export function parseRenpySetLine(line: string, parseValue = false): RenpySetLine | null {
+  const match = SET_LINE.exec(line);
+  if (!match) return null;
+  const result: RenpySetLine = { variable: match[1], rawValue: match[3].trim() };
+  if (match[2] === '=') return parseValue ? { ...result, value: parseRenpyScalar(result.rawValue) } : result;
+  const operation = VARIABLE_SYMBOL_OPERATIONS[match[2]];
+  return operation ? { ...result, operation } : null;
+}
+
+export interface RenpyConditionLine { variable: string; operator: ConditionOperator; compareVariable?: string; compareValue?: string | number | boolean; trueTarget?: string; falseTarget?: string }
+
+/** 解析 `if 变量 >= 值 jump 片段 else jump 片段` 行；`$前缀` 表示与另一个变量比较。 */
+export function parseRenpyConditionLine(line: string): RenpyConditionLine | null {
+  const match = CONDITION_LINE.exec(line);
+  if (!match) return null;
+  const operator = CONDITION_SYMBOL_OPERATORS[match[2]] ?? 'eq';
+  const valueToken = match[3];
+  const result: RenpyConditionLine = { variable: match[1], operator };
+  if (valueToken.startsWith('$')) result.compareVariable = valueToken.slice(1);
+  else result.compareValue = parseRenpyScalar(valueToken);
+  if (match[4]) result.trueTarget = match[4];
+  if (match[5]) result.falseTarget = match[5];
+  return result;
+}
 
 /**
  * 合并旧 Block 的字段，仅用新解析出的字段覆盖可编辑部分。
@@ -26,7 +78,15 @@ export function serializeRenpy(blocks: StoryBlock[]): string {
       case 'call': return `call ${block.target ?? ''}`.trim();
       case 'return': return 'return';
       case 'branch': return `menu ${quote(block.title ?? '选择')}`;
-      case 'setVariable': return `$ ${block.variable ?? ''} = ${typeof block.value === 'string' ? quote(block.value) : String(block.value ?? '')}`.trim();
+      case 'setVariable': return `$ ${block.variable ?? ''} = ${formatRenpyScalar(block.value)}`.trim();
+      case 'modifyVariable': return `$ ${block.variable ?? ''} ${VARIABLE_OPERATION_SYMBOLS[block.operation ?? 'add']} ${Number.isFinite(block.operand) ? block.operand : 1}`.trim();
+      case 'condition': {
+        const value = block.compareVariable ? `$${block.compareVariable}` : formatRenpyScalar(block.compareValue);
+        const parts = [`if ${block.variable ?? ''} ${CONDITION_OPERATOR_SYMBOLS[block.operator ?? 'eq']} ${value}`];
+        if (block.trueTarget) parts.push(`jump ${block.trueTarget}`);
+        if (block.falseTarget) parts.push(`else jump ${block.falseTarget}`);
+        return parts.join(' ');
+      }
       default: return `# ${block.type}`;
     }
   }).join('\n');
@@ -71,9 +131,20 @@ export function formatRenpyText(text: string): string {
     const sound = /^(play|stop)\s+(\S+)\s*(.*)$/.exec(trimmed);
     if (sound) return `${sound[1]} ${sound[2]} ${sound[3]}`.trimEnd();
     if (trimmed === 'return') return 'return';
-    const set = /^\$\s*(\S+)\s*=\s*(.+)$/.exec(trimmed);
-    if (set) return `$ ${set[1]} = ${set[2].trim()}`;
+    const set = parseRenpySetLine(trimmed);
+    if (set) {
+      const symbol = set.operation ? VARIABLE_OPERATION_SYMBOLS[set.operation] : '=';
+      return `$ ${set.variable} ${symbol} ${set.rawValue}`.trimEnd();
+    }
     if (trimmed.startsWith('$')) return `$ ${trimmed.slice(1).trim()}`;
+    const condition = parseRenpyConditionLine(trimmed);
+    if (condition) {
+      const value = condition.compareVariable ? `$${condition.compareVariable}` : formatRenpyScalar(condition.compareValue);
+      const parts = [`if ${condition.variable} ${CONDITION_OPERATOR_SYMBOLS[condition.operator]} ${value}`];
+      if (condition.trueTarget) parts.push(`jump ${condition.trueTarget}`);
+      if (condition.falseTarget) parts.push(`else jump ${condition.falseTarget}`);
+      return parts.join(' ');
+    }
     const dialogue = /^([^\s"']+)\s+(["'])(.*)\2\s*$/.exec(trimmed);
     if (dialogue) return `${dialogue[1]} ${dialogue[2]}${dialogue[3]}${dialogue[2]}`;
     return trimmed;
@@ -137,12 +208,27 @@ export function parseRenpyBlocks(text: string, oldBlocks: StoryBlock[]): StoryBl
       result.push(mergeBlock(old, index, { type: 'branch', title: line.replace(/^menu\s+/, '').replace(/^["']|["']$/g, '') }));
       continue;
     }
-    if (/^\$\s*/.test(line)) {
-      const set = /^\$\s*(\S+)\s*=\s*(.+)$/.exec(line);
-      if (set) {
-        result.push(mergeBlock(old, index, { type: 'setVariable', variable: set[1], value: set[2].replace(/^["']|["']$/g, '') }));
-        continue;
-      }
+    const condition = parseRenpyConditionLine(line);
+    if (condition) {
+      result.push(mergeBlock(old, index, {
+        type: 'condition',
+        variable: condition.variable,
+        operator: condition.operator,
+        // 显式清空另一侧，避免旧 Block 的比较对象残留影响运行时语义。
+        ...(condition.compareVariable
+          ? { compareVariable: condition.compareVariable, compareValue: undefined }
+          : { compareValue: condition.compareValue ?? '', compareVariable: undefined }),
+        ...(condition.trueTarget ? { trueTarget: condition.trueTarget } : { trueTarget: undefined }),
+        ...(condition.falseTarget ? { falseTarget: condition.falseTarget } : { falseTarget: undefined }),
+      }));
+      continue;
+    }
+    const set = parseRenpySetLine(line, true);
+    if (set) {
+      result.push(mergeBlock(old, index, set.operation
+        ? { type: 'modifyVariable', variable: set.variable, operation: set.operation, operand: Number(set.rawValue) }
+        : { type: 'setVariable', variable: set.variable, value: set.value ?? set.rawValue }));
+      continue;
     }
     // 对白：speaker "text"（speaker 支持中文等非空白、非引号字符）。
     const dialogue = /^([^\s"']+)\s+(["'])(.*)\2$/.exec(line);

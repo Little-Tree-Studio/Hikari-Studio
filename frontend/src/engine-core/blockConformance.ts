@@ -188,8 +188,15 @@ export const BLOCK_CONFORMANCE_MATRIX: readonly BlockConformanceCase[] = [
     finalExpected: {},
   },
   {
+    id: 'modifyVariable',
+    project: projectFor({ start: [{ id: 'case-modify-variable', type: 'modifyVariable', variable: 'score', operation: 'add', operand: 5 }, end()] }, { score: 2 }),
+    actions: [],
+    initialExpected: { variables: { score: 7 }, trace: ['case-modify-variable', 'end'] },
+    finalExpected: {},
+  },
+  {
     id: 'condition',
-    project: projectFor({ start: [{ id: 'case-condition', type: 'condition', variable: 'score', operator: 'gte', compareValue: 5, trueTarget: 'passed', falseTarget: 'failed' }], passed: [end('passed-line', 'Passed')], failed: [end('failed-line', 'Failed')] }, { score: 7 }),
+    project: projectFor({ start: [{ id: 'case-condition', type: 'condition', variable: 'score', compareVariable: 'threshold', operator: 'gte', trueTarget: 'passed', falseTarget: 'failed' }], passed: [end('passed-line', 'Passed')], failed: [end('failed-line', 'Failed')] }, { score: 7, threshold: 5 }),
     actions: [],
     initialExpected: { location: { fragmentId: 'passed', instructionPointer: 0 }, current: { id: 'passed-line', type: 'narration' }, trace: ['case-condition', 'passed-line'] },
     finalExpected: {},
@@ -217,7 +224,7 @@ export const BLOCK_CONFORMANCE_MATRIX: readonly BlockConformanceCase[] = [
   },
 ] as const;
 
-export const BLOCK_CONFORMANCE_MATRIX_VERSION = '2026.08.02.1';
+export const BLOCK_CONFORMANCE_MATRIX_VERSION = '2026.08.25.1';
 export const BLOCK_CONFORMANCE_TYPES = [
   'scene',
   'sound',
@@ -228,6 +235,7 @@ export const BLOCK_CONFORMANCE_TYPES = [
   'dialogue',
   'branch',
   'setVariable',
+  'modifyVariable',
   'condition',
   'jump',
   'call',

@@ -49,7 +49,7 @@ const nodeWidth = 210;
 const makeId = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 const inferType = (value: string | number | boolean): VariableType => typeof value === 'boolean' ? 'boolean' : typeof value === 'number' ? 'number' : 'string';
 const defaultDefinition = (value: string | number | boolean): VariableDefinition => ({ type: inferType(value), scope: 'project', persistence: 'slot' });
-const blockTitle = (block: StoryBlock) => block.type === 'branch' ? block.title || '选项分支' : block.type === 'condition' ? `${block.variable || '变量'} 条件` : block.type === 'setVariable' ? `写入 ${block.variable || '变量'}` : block.type === 'call' ? '调用片段' : '跳转片段';
+const blockTitle = (block: StoryBlock) => block.type === 'branch' ? block.title || '选项分支' : block.type === 'condition' ? `${block.variable || '变量'} 条件` : block.type === 'setVariable' ? `写入 ${block.variable || '变量'}` : block.type === 'modifyVariable' ? `增减 ${block.variable || '变量'}` : block.type === 'call' ? '调用片段' : '跳转片段';
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const hasBinding = (value: string, name: string) => value.includes(`\${${name}}`) || value.includes(`{{${name}}}`) || new RegExp(`\\$${escapeRegExp(name)}(?![\\w\u4e00-\u9fff])`).test(value);
 const migrateBinding = (value: string, oldName: string, newName: string) => value
@@ -92,8 +92,8 @@ export function buildGraph(project: Project) {
 
       let logicIndex = 0;
       (project.scripts[fragment.id] ?? []).forEach((block, blockIndex) => {
-        if (!['branch', 'condition', 'setVariable', 'jump', 'call'].includes(block.type)) return;
-        const kind: NodeKind = block.type === 'setVariable' ? 'write' : block.type === 'branch' ? 'branch' : block.type === 'condition' ? 'condition' : block.type === 'call' ? 'call' : 'jump';
+        if (!['branch', 'condition', 'setVariable', 'modifyVariable', 'jump', 'call'].includes(block.type)) return;
+        const kind: NodeKind = block.type === 'setVariable' || block.type === 'modifyVariable' ? 'write' : block.type === 'branch' ? 'branch' : block.type === 'condition' ? 'condition' : block.type === 'call' ? 'call' : 'jump';
         const logicId = `logic:${block.id}`;
         nodes.push({ id: logicId, kind, title: blockTitle(block), subtitle: `Block ${blockIndex + 1}`, fragmentId: fragment.id, blockIndex, chapterId: chapter.id });
         defaults[logicId] = { x, y: 445 + logicIndex * 155 };
@@ -117,10 +117,10 @@ export function buildGraph(project: Project) {
   const reads = nodes.filter((node) => node.kind === 'condition');
   writes.forEach((write) => {
     const block = project.scripts[write.fragmentId ?? '']?.[write.blockIndex ?? -1];
-    if (!block || block.type !== 'setVariable' || !block.variable) return;
+    if (!block || (block.type !== 'setVariable' && block.type !== 'modifyVariable') || !block.variable) return;
     reads.forEach((read) => {
       const readBlock = project.scripts[read.fragmentId ?? '']?.[read.blockIndex ?? -1];
-      if (readBlock?.type === 'condition' && readBlock.variable === block.variable) edges.push({ id: `variable:${write.id}:${read.id}`, source: write.id, target: read.id, kind: 'variable', label: block.variable, variable: block.variable });
+      if (readBlock?.type === 'condition' && (readBlock.variable === block.variable || readBlock.compareVariable === block.variable)) edges.push({ id: `variable:${write.id}:${read.id}`, source: write.id, target: read.id, kind: 'variable', label: block.variable, variable: block.variable });
     });
   });
   return { nodes, edges, defaults };
@@ -241,14 +241,16 @@ export function NarrativeMap({ project, activate, commit, notify, requestText }:
     const refs = graph.nodes.filter((node) => {
       if (node.blockIndex === undefined || !node.fragmentId) return false;
       const block = project.scripts[node.fragmentId]?.[node.blockIndex];
-      return (block?.type === 'setVariable' || block?.type === 'condition') && block.variable === name;
+      return ((block?.type === 'setVariable' || block?.type === 'modifyVariable' || block?.type === 'condition') && block.variable === name)
+        || (block?.type === 'condition' && block.compareVariable === name);
     });
     return [name, refs];
   })), [project.variables, project.scripts, graph.nodes]) as Record<string, NarrativeNode[]>;
   const variableReferences = useMemo(() => Object.fromEntries(Object.keys(project.variables).map((name) => {
     const refs: Array<{ id: string; label: string; kind: 'read' | 'write' | 'binding'; fragmentId?: string; blockIndex?: number }> = [];
     Object.entries(project.scripts).forEach(([fragmentId, blocks]) => blocks.forEach((block, blockIndex) => {
-      if ((block.type === 'setVariable' || block.type === 'condition') && block.variable === name) refs.push({ id: `${block.id}:variable`, label: `${block.type === 'setVariable' ? '写入' : '读取'} · ${blockTitle(block)}`, kind: block.type === 'setVariable' ? 'write' : 'read', fragmentId, blockIndex });
+      if ((block.type === 'setVariable' || block.type === 'modifyVariable' || block.type === 'condition') && block.variable === name) refs.push({ id: `${block.id}:variable`, label: `${block.type === 'condition' ? '读取' : '写入'} · ${blockTitle(block)}`, kind: block.type === 'condition' ? 'read' : 'write', fragmentId, blockIndex });
+      if (block.type === 'condition' && block.compareVariable === name) refs.push({ id: `${block.id}:compare-variable`, label: `读取 · 比较变量 · Block ${blockIndex + 1}`, kind: 'read', fragmentId, blockIndex });
       const boundFields = [block.text, block.title, block.speaker].filter((value): value is string => typeof value === 'string' && hasBinding(value, name));
       if (boundFields.length) refs.push({ id: `${block.id}:binding`, label: `文本绑定 · Block ${blockIndex + 1}`, kind: 'binding', fragmentId, blockIndex });
     }));
@@ -371,7 +373,10 @@ export function NarrativeMap({ project, activate, commit, notify, requestText }:
       const variableDefinitions = Object.fromEntries(Object.entries(current.variableDefinitions ?? {}).map(([name, value]) => [name === oldName ? newName : name, value]));
       const scripts = Object.fromEntries(Object.entries(current.scripts).map(([fragmentId, blocks]) => [fragmentId, blocks.map((block) => {
         const migrated = migrateBindingsDeep(block, oldName, newName) as StoryBlock;
-        return (migrated.type === 'setVariable' || migrated.type === 'condition') && migrated.variable === oldName ? { ...migrated, variable: newName } : migrated;
+        let next = migrated;
+        if ((next.type === 'setVariable' || next.type === 'modifyVariable' || next.type === 'condition') && next.variable === oldName) next = { ...next, variable: newName };
+        if (next.type === 'condition' && next.compareVariable === oldName) next = { ...next, compareVariable: newName };
+        return next;
       })]));
       const characters = current.characters.map((character) => ({ ...character, name: character.name === oldName ? newName : migrateBinding(character.name, oldName, newName) }));
       return { ...current, variables, variableDefinitions, scripts, characters, ui: migrateBindingsDeep(current.ui, oldName, newName) as Project['ui'], translations: migrateBindingsDeep(current.translations, oldName, newName) as Project['translations'] };

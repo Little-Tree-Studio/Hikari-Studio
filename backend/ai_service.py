@@ -719,7 +719,7 @@ class AiService:
             "update_branch": ("fragmentId", "blockId", "title", "options"),
             "update_production_memory": ("memory",),
         }
-        allowed_blocks = {"scene", "sound", "characterShow", "characterHide", "camera", "narration", "dialogue", "branch", "setVariable", "condition", "jump", "call", "return"}
+        allowed_blocks = {"scene", "sound", "characterShow", "characterHide", "camera", "narration", "dialogue", "branch", "setVariable", "modifyVariable", "condition", "jump", "call", "return"}
         for operation in plan["operations"]:
             if not isinstance(operation, dict) or operation.get("type") not in allowed_operations:
                 raise ValueError("Agent 计划包含不受支持的操作")
