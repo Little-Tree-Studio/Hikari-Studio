@@ -244,12 +244,15 @@ html[data-editor-theme="high-contrast"] img { color-scheme: normal; }
   background: var(--panel);
   color: var(--ink);
 }
+.desktop-app .quick-composer textarea { background: transparent; color: var(--ink); }
 .desktop-app .composer-menu {
   border-color: var(--line);
   background: var(--panel);
   color: var(--ink);
 }
-.desktop-app :where(.composer-menu-grid button, .composer-characters button, .composer-menu-footer button) {
+.desktop-app .composer-menu-grid button,
+.desktop-app .composer-characters button,
+.desktop-app .composer-menu-footer button {
   border-color: var(--line);
   background: var(--panel);
   color: var(--ink);
