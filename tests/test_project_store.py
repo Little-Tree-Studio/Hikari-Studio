@@ -32,7 +32,7 @@ class ProjectStoreTests(unittest.TestCase):
 
             loaded = store.load()
 
-            self.assertEqual(store.asset_directory_reads, 1)
+            self.assertEqual(store.asset_directory_reads, 0)
             self.assertTrue(loaded["assets"][0]["uri"].endswith("/%E8%A7%92%E8%89%B2%20%E5%A4%B4%E5%83%8F%231.png"))
             self.assertTrue(loaded["assets"][1]["uri"].endswith("/b.png"))
 
@@ -669,7 +669,8 @@ class ProjectStoreTests(unittest.TestCase):
             asset = store.replace_asset_file("stable-id", str(replacement))
             self.assertIsNotNone(asset)
             self.assertEqual(asset["id"], "stable-id")
-            self.assertIn("?v=", asset["uri"])
+            self.assertFalse("?v=" in asset["uri"])
+            self.assertTrue(asset["uri"].endswith("/new-background.png"))
             self.assertTrue((store.asset_dir / "new-background.png").exists())
 
     def test_save_as_copies_project_and_assets(self) -> None:
