@@ -687,6 +687,7 @@ export interface DesktopApi {
   save_ai_settings(settings: AiSettingsInput): Promise<AiSettings>;
   clear_ai_key(): Promise<AiSettings>;
   discover_ai_models(settings: AiSettingsInput): Promise<AiModelDiscovery>;
+  optimize_block_text(text: string, kind: 'narration' | 'dialogue', context?: Record<string, unknown>): Promise<string>;
   start_ai_task(instruction: string, project: Project, context: AgentContext): Promise<AgentTask>;
   retry_ai_task_operations(taskId: string, operationIndexes: number[], project: Project): Promise<AgentTask>;
   check_ai_patch_preconditions(taskId: string, operationIndexes: number[], project: Project): Promise<AgentPatchPreconditionResult>;

@@ -770,6 +770,9 @@ class DesktopApi:
     def discover_ai_models(self, settings: dict[str, Any]) -> dict[str, Any]:
         return self._ai.discover_models(settings)
 
+    def optimize_block_text(self, text: str, kind: str, context: dict[str, Any] | None = None) -> str:
+        return self._ai.optimize_block_text(text, kind, context)
+
     def start_ai_task(self, instruction: str, project: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
         return self._agent_tasks.start_task(instruction, project, self._store.project_root, context)
 

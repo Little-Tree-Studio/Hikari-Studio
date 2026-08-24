@@ -359,6 +359,36 @@ class AiServiceTests(unittest.TestCase):
         self.assertIsNone(self.service._monitor_thread)
         self.assertFalse(thread.is_alive())
 
+    def test_optimize_block_text_polishes_dialogue_and_narration(self) -> None:
+        self.secret_store.value = "api-key"
+        self.service.save_settings({"url": "https://example.com/v1", "model": "test-model"})
+
+        class FakeProvider:
+            def __init__(self) -> None:
+                self.messages: list[dict[str, object]] = []
+
+            def complete(self, messages: list[dict[str, object]], tools: list[object], on_delta: object = None, cancellation: object = None) -> ProviderResponse:
+                self.messages = messages
+                return ProviderResponse("优化后的文本。", [], {}, {"role": "assistant", "content": "优化后的文本。"})
+
+        fake = FakeProvider()
+        self.service.provider_factory = lambda settings, key: fake
+
+        self.assertEqual(self.service.optimize_block_text("你好。", "dialogue", {"speaker": "林澄", "expression": "微笑"}), "优化后的文本。")
+        self.assertIn("林澄", str(fake.messages[1]["content"]))
+
+        self.assertEqual(self.service.optimize_block_text("风吹过湖面。", "narration"), "优化后的文本。")
+
+    def test_optimize_block_text_requires_key_and_text(self) -> None:
+        self.secret_store.value = None
+        with self.assertRaisesRegex(ValueError, "API Key"):
+            self.service.optimize_block_text("你好。", "narration")
+
+        self.secret_store.value = "api-key"
+        self.service.save_settings({"url": "https://example.com/v1", "model": "test-model"})
+        with self.assertRaisesRegex(ValueError, "为空"):
+            self.service.optimize_block_text("   ", "narration")
+
 
 if __name__ == "__main__":
     unittest.main()
