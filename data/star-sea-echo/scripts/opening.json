@@ -1,8 +1,59 @@
 [
   {
     "id": "op1",
+    "type": "scene",
+    "title": "远山晴空",
+    "assetId": "mountain",
+    "transition": "dissolve",
+    "duration": 1.6,
+    "version": 1,
+    "layers": [],
+    "sceneId": "scene-mountain"
+  },
+  {
+    "id": "op2",
+    "type": "sound",
+    "title": "opening_theme.ogg",
+    "volume": 0.6,
+    "loop": true,
+    "version": 1,
+    "channel": "bgm",
+    "action": "play",
+    "fadeDuration": 1.2
+  },
+  {
+    "id": "op3",
+    "type": "camera",
+    "cameraX": 0,
+    "cameraY": 0,
+    "zoom": 1.06,
+    "shake": 0,
+    "filter": "none",
+    "duration": 3.2,
+    "version": 1
+  },
+  {
+    "id": "op4",
+    "type": "narration",
+    "text": "汐见町的夏天总是结束得很慢，海风把七月一直吹到八月底。",
+    "version": 1
+  },
+  {
+    "id": "op5",
     "type": "narration",
     "text": "星海回声",
+    "version": 1
+  },
+  {
+    "id": "op6",
+    "type": "narration",
+    "text": "八月倒数第二天，我在信箱里收到一封没有署名的信。信上只有一行字：黎明前，老码头。",
+    "version": 1
+  },
+  {
+    "id": "op7",
+    "type": "jump",
+    "target": "lake-meeting",
     "version": 1
   }
 ]

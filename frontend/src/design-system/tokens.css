@@ -8,14 +8,35 @@
   --space-5: 20px;
   --control-height: 36px;
   --control-height-compact: 32px;
-  --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
   --motion-fast: 140ms;
   --motion-base: 190ms;
   --motion-panel: 260ms;
   --motion-ease: cubic-bezier(.2, .8, .2, 1);
+}
+
+/* Unified radius scale. The whole editor derives corner radii from these four
+   tokens; the scale itself follows the user's corner-style preference so the
+   visual language stays consistent across every workspace. */
+:root,
+html[data-corner-style="soft"] {
+  --radius-xs: 3px;
+  --radius-sm: 5px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+}
+
+html[data-corner-style="sharp"] {
+  --radius-xs: 0;
+  --radius-sm: 0;
+  --radius-md: 2px;
+  --radius-lg: 2px;
+}
+
+html[data-corner-style="rounded"] {
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
 }
 
 html[data-editor-theme="slide-light"] {
@@ -39,7 +60,6 @@ html[data-editor-theme="slide-light"] {
   --shadow-sm: 0 2px 8px rgba(22, 34, 40, .08);
   --shadow: 0 16px 44px rgba(22, 34, 40, .14);
   --shadow-lg: 0 28px 80px rgba(15, 24, 29, .2);
-  --radius: var(--radius-sm);
 }
 
 html[data-editor-theme="graphite"] {
@@ -63,7 +83,6 @@ html[data-editor-theme="graphite"] {
   --shadow-sm: 0 3px 10px rgba(0, 0, 0, .25);
   --shadow: 0 18px 48px rgba(0, 0, 0, .38);
   --shadow-lg: 0 30px 90px rgba(0, 0, 0, .56);
-  --radius: var(--radius-sm);
 }
 
 html[data-editor-theme="sakura-studio"] {
@@ -87,7 +106,6 @@ html[data-editor-theme="sakura-studio"] {
   --shadow-sm: 0 2px 9px rgba(54, 33, 42, .08);
   --shadow: 0 16px 46px rgba(54, 33, 42, .14);
   --shadow-lg: 0 28px 80px rgba(47, 27, 35, .21);
-  --radius: var(--radius-md);
 }
 
 html[data-editor-theme="high-contrast"] {
@@ -111,5 +129,4 @@ html[data-editor-theme="high-contrast"] {
   --shadow-sm: 0 0 0 1px #7a8985;
   --shadow: 0 0 0 1px #aebbb7, 0 22px 55px rgba(0, 0, 0, .72);
   --shadow-lg: 0 0 0 2px #ffffff, 0 32px 90px #000000;
-  --radius: var(--radius-xs);
 }

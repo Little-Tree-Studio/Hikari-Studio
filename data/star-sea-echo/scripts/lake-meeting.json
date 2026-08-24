@@ -13,49 +13,154 @@
   {
     "id": "b2",
     "type": "sound",
-    "title": "summer_memory.mp3",
-    "volume": 0.68,
+    "title": "morning_pier.ogg",
+    "volume": 0.5,
     "loop": true,
     "version": 1,
     "channel": "bgm",
     "action": "play",
-    "fadeDuration": 0
+    "fadeDuration": 0.8
   },
   {
     "id": "b3",
-    "type": "narration",
-    "text": "薄雾沿着湖面缓慢散开，夏日的第一束阳光落在旧码头上。",
+    "type": "camera",
+    "cameraX": -36,
+    "cameraY": 0,
+    "zoom": 1.08,
+    "shake": 0,
+    "filter": "none",
+    "duration": 2.6,
     "version": 1
   },
   {
     "id": "b4",
-    "type": "dialogue",
-    "speaker": "1",
-    "text": "你果然还是来了。",
-    "expression": "微笑",
-    "voice": "lc_001.ogg",
+    "type": "narration",
+    "text": "清晨五点四十分，雾还没有散。旧码头的木板上凝着露水，踩上去比想象中安静。",
     "version": 1
   },
   {
     "id": "b5",
-    "type": "dialogue",
-    "speaker": "苏芮",
-    "text": "因为有人在信里说，错过今天就再也见不到这片星海了。",
+    "type": "characterShow",
+    "characterId": "character-mrzu199d-qs17r",
     "expression": "平静",
-    "voice": "sr_014.ogg",
-    "version": 1
+    "position": "left",
+    "scale": 1,
+    "opacity": 1,
+    "layer": 0,
+    "animation": "fade",
+    "duration": 0.4,
+    "version": 1,
+    "assetId": "asset-5555a4b3"
   },
   {
     "id": "b6",
+    "type": "dialogue",
+    "speaker": "真琴",
+    "text": "这么早？海屋七点才开门，现在连锅炉都是凉的。",
+    "expression": "平静",
+    "version": 1
+  },
+  {
+    "id": "b7",
+    "type": "dialogue",
+    "speaker": "林澄",
+    "text": "真琴？你怎么在这儿。",
+    "expression": "惊讶",
+    "version": 1
+  },
+  {
+    "id": "b8",
+    "type": "dialogue",
+    "speaker": "真琴",
+    "text": "帮爷爷收渔网。倒是你，拿着一封信站了半天，在等人？",
+    "expression": "微笑",
+    "version": 1
+  },
+  {
+    "id": "b9",
+    "type": "dialogue",
+    "speaker": "林澄",
+    "text": "……嗯。一个很多年没联系的人。",
+    "expression": "默认",
+    "version": 1
+  },
+  {
+    "id": "b10",
+    "type": "dialogue",
+    "speaker": "真琴",
+    "text": "那祝你顺利。要是她没来，就来店里喝杯热的，我给你多加一块冰。",
+    "expression": "微笑",
+    "version": 1
+  },
+  {
+    "id": "b11",
+    "type": "characterHide",
+    "characterId": "character-mrzu199d-qs17r",
+    "animation": "slideLeft",
+    "duration": 0.4,
+    "version": 1
+  },
+  {
+    "id": "b12",
+    "type": "narration",
+    "text": "六点整，雾里传来脚步声。不急，也不重，和记忆里一模一样。",
+    "version": 1
+  },
+  {
+    "id": "b13",
+    "type": "characterShow",
+    "characterId": "su",
+    "expression": "平静",
+    "position": "center",
+    "scale": 1,
+    "opacity": 1,
+    "layer": 0,
+    "animation": "fade",
+    "duration": 0.5,
+    "version": 1
+  },
+  {
+    "id": "b14",
+    "type": "dialogue",
+    "speaker": "苏芮",
+    "text": "我以为你不会来。",
+    "expression": "平静",
+    "version": 1
+  },
+  {
+    "id": "b15",
+    "type": "dialogue",
+    "speaker": "林澄",
+    "text": "信上写着「错过今天就再也见不到」，谁敢不来。",
+    "expression": "浅笑",
+    "version": 1
+  },
+  {
+    "id": "b16",
+    "type": "dialogue",
+    "speaker": "苏芮",
+    "text": "那句话不是夸张。今晚有流星雨，汐见町下一次能看到，是十一年后。",
+    "expression": "犹豫",
+    "version": 1
+  },
+  {
+    "id": "b17",
+    "type": "setVariable",
+    "variable": "好感度",
+    "value": 1,
+    "version": 1
+  },
+  {
+    "id": "b18",
     "type": "branch",
-    "title": "如何回应？",
+    "title": "如何回应她的邀请？",
     "options": [
       {
-        "text": "相信她",
-        "target": "opening"
+        "text": "答应今晚一起看流星雨",
+        "target": "pier-talk"
       },
       {
-        "text": "转移话题",
+        "text": "先问清楚当年为什么不辞而别",
         "target": "old-school"
       }
     ],

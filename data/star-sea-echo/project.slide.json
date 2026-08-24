@@ -3,12 +3,12 @@
   "meta": {
     "id": "demo",
     "name": "星海回声",
-    "author": "",
+    "author": "Slide Studio",
     "resolution": [
       1280,
       720
     ],
-    "updatedAt": "2026-07-26T06:36:12.761421+00:00",
+    "updatedAt": "2026-08-24T03:40:00.000000+00:00",
     "gameVersion": "1.0.0"
   },
   "activeFragmentId": "lake-meeting",
@@ -17,6 +17,8 @@
   },
   "variableDefinitions": {
     "好感度": {
+      "displayName": "好感度",
+      "description": "苏芮对林澄的信任程度,影响第二章的对话与结局",
       "type": "number",
       "scope": "project",
       "persistence": "slot"
@@ -31,7 +33,8 @@
   },
   "chapterOrder": [
     "start",
-    "c1"
+    "c1",
+    "c2"
   ],
   "characterOrder": [
     "lin",
@@ -40,12 +43,7 @@
   ],
   "sceneOrder": [
     "scene-lake",
-    "scene-mountain",
-    "scene-asset-c8f4afee39",
-    "scene-asset-167279e040",
-    "scene-asset-a9f29e2c37",
-    "scene-asset-5555a4b4b3",
-    "scene-asset-420dde491f"
+    "scene-mountain"
   ],
   "sceneGroups": []
 }

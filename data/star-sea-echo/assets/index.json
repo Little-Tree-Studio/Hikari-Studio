@@ -14,43 +14,43 @@
     "forceBundle": false
   },
   {
-    "id": "asset-c8f4afee39",
-    "kind": "scene",
-    "name": "真琴裤袜外套眼镜闭眼A",
-    "path": "真琴裤袜外套眼镜闭眼A.png",
-    "size": 2876889,
-    "forceBundle": false
-  },
-  {
-    "id": "asset-167279e040",
-    "kind": "scene",
-    "name": "真琴裤袜外套眼镜害羞A",
-    "path": "真琴裤袜外套眼镜害羞A.png",
-    "size": 2892459,
-    "forceBundle": false
-  },
-  {
-    "id": "asset-a9f29e2c37",
-    "kind": "scene",
-    "name": "真琴裤袜外套眼镜惊讶A",
-    "path": "真琴裤袜外套眼镜惊讶A.png",
-    "size": 2883023,
-    "forceBundle": false
-  },
-  {
-    "id": "asset-5555a4b4b3",
-    "kind": "scene",
-    "name": "真琴裤袜外套眼镜平静A",
+    "id": "asset-5555a4b3",
+    "kind": "character",
+    "name": "真琴 · 平静",
     "path": "真琴裤袜外套眼镜平静A.png",
     "size": 2851271,
     "forceBundle": false
   },
   {
     "id": "asset-420dde491f",
-    "kind": "scene",
-    "name": "真琴裤袜外套眼镜微笑A",
+    "kind": "character",
+    "name": "真琴 · 微笑",
     "path": "真琴裤袜外套眼镜微笑A.png",
     "size": 2873675,
+    "forceBundle": false
+  },
+  {
+    "id": "asset-167279e040",
+    "kind": "character",
+    "name": "真琴 · 害羞",
+    "path": "真琴裤袜外套眼镜害羞A.png",
+    "size": 2892459,
+    "forceBundle": false
+  },
+  {
+    "id": "asset-a9f29e2c37",
+    "kind": "character",
+    "name": "真琴 · 惊讶",
+    "path": "真琴裤袜外套眼镜惊讶A.png",
+    "size": 2883023,
+    "forceBundle": false
+  },
+  {
+    "id": "asset-c8f4afee39",
+    "kind": "character",
+    "name": "真琴 · 闭眼",
+    "path": "真琴裤袜外套眼镜闭眼A.png",
+    "size": 2876889,
     "forceBundle": false
   }
 ]

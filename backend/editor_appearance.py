@@ -11,11 +11,13 @@ from typing import Any
 LOGGER = logging.getLogger(__name__)
 
 THEME_IDS = {"slide-light", "graphite", "sakura-studio", "high-contrast"}
+CORNER_STYLES = {"sharp", "soft", "rounded"}
 DEFAULT_EDITOR_APPEARANCE: dict[str, Any] = {
     "version": 1,
     "mode": "system",
     "themeId": "slide-light",
     "motion": "system",
+    "cornerStyle": "soft",
 }
 
 
@@ -28,6 +30,8 @@ def normalize_editor_appearance(value: Any) -> dict[str, Any]:
         result["themeId"] = source["themeId"]
     if source.get("motion") in {"system", "full", "reduced"}:
         result["motion"] = source["motion"]
+    if source.get("cornerStyle") in CORNER_STYLES:
+        result["cornerStyle"] = source["cornerStyle"]
     accent = source.get("accentColor")
     if isinstance(accent, str) and len(accent) == 7 and accent.startswith("#"):
         try:

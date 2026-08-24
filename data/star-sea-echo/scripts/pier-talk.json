@@ -1,0 +1,68 @@
+[
+  {
+    "id": "pt1",
+    "type": "dialogue",
+    "speaker": "苏芮",
+    "text": "好。……谢谢你没有追问。",
+    "expression": "平静",
+    "version": 1
+  },
+  {
+    "id": "pt2",
+    "type": "narration",
+    "text": "两个人在码头坐到雾散。苏芮说起这几年在外地的工作，说到一半忽然停住。",
+    "version": 1
+  },
+  {
+    "id": "pt3",
+    "type": "dialogue",
+    "speaker": "苏芮",
+    "text": "其实那年离开，是因为我拿到了外地学校的录取，家里却连房租都付不起了。我不想让任何人看到我为这种事哭。",
+    "expression": "犹豫",
+    "version": 1
+  },
+  {
+    "id": "pt4",
+    "type": "dialogue",
+    "speaker": "林澄",
+    "text": "你可以说出来的。我们都会帮你。",
+    "expression": "惊讶",
+    "version": 1
+  },
+  {
+    "id": "pt5",
+    "type": "dialogue",
+    "speaker": "苏芮",
+    "text": "我知道。所以现在说出来，也不晚。",
+    "expression": "平静",
+    "version": 1
+  },
+  {
+    "id": "pt6",
+    "type": "setVariable",
+    "variable": "好感度",
+    "value": 2,
+    "version": 1
+  },
+  {
+    "id": "pt7",
+    "type": "condition",
+    "variable": "好感度",
+    "operator": "gte",
+    "compareValue": 2,
+    "trueTarget": "night-mail",
+    "version": 1
+  },
+  {
+    "id": "pt8",
+    "type": "narration",
+    "text": "苏芮笑了笑，把话头岔开了。有些话，她显然还想再留一留。",
+    "version": 1
+  },
+  {
+    "id": "pt9",
+    "type": "jump",
+    "target": "night-mail",
+    "version": 1
+  }
+]

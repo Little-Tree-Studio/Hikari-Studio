@@ -1,0 +1,24 @@
+[
+  {
+    "id": "es1",
+    "type": "dialogue",
+    "speaker": "林澄",
+    "text": "苏芮，十一年后的流星雨，还在这儿看。",
+    "expression": "浅笑",
+    "version": 1
+  },
+  {
+    "id": "es2",
+    "type": "dialogue",
+    "speaker": "苏芮",
+    "text": "好。这次换我先写信。",
+    "expression": "平静",
+    "version": 1
+  },
+  {
+    "id": "es3",
+    "type": "narration",
+    "text": "星星一颗一颗沉进海里。夏天终于开始结束了。",
+    "version": 1
+  }
+]

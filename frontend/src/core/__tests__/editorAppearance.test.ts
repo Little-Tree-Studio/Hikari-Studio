@@ -3,7 +3,11 @@ import { accentVariables, normalizeEditorAppearance, resolveEditorTheme, resolve
 
 describe('editor appearance', () => {
   it('normalizes invalid configuration', () => {
-    expect(normalizeEditorAppearance({ themeId: 'missing' as never, accentColor: 'red' })).toEqual({ version: 1, mode: 'system', themeId: 'slide-light', motion: 'system' });
+    expect(normalizeEditorAppearance({ themeId: 'missing' as never, accentColor: 'red' })).toEqual({ version: 1, mode: 'system', themeId: 'slide-light', motion: 'system', cornerStyle: 'soft' });
+  });
+  it('keeps a valid corner style and falls back to soft', () => {
+    expect(normalizeEditorAppearance({ cornerStyle: 'rounded' }).cornerStyle).toBe('rounded');
+    expect(normalizeEditorAppearance({ cornerStyle: 'wavy' as never }).cornerStyle).toBe('soft');
   });
   it('follows system theme only in system mode', () => {
     expect(resolveEditorTheme(normalizeEditorAppearance(null), true)).toBe('graphite');

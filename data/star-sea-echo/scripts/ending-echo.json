@@ -1,0 +1,30 @@
+[
+  {
+    "id": "ee1",
+    "type": "narration",
+    "text": "两个人谁都没有说话。海浪声一层一层地推过来，又退回去。",
+    "version": 1
+  },
+  {
+    "id": "ee2",
+    "type": "dialogue",
+    "speaker": "苏芮",
+    "text": "……其实你不说，我也知道你想说什么。",
+    "expression": "犹豫",
+    "version": 1
+  },
+  {
+    "id": "ee3",
+    "type": "dialogue",
+    "speaker": "林澄",
+    "text": "那就下次再说。反正，我们有十一年。",
+    "expression": "默认",
+    "version": 1
+  },
+  {
+    "id": "ee4",
+    "type": "narration",
+    "text": "流星落尽之后，海面上还留着光。有些话不急着说完，就像星海的回声。",
+    "version": 1
+  }
+]

@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { getEditorAppearance, saveEditorAppearance } from '../api';
 import type { EditorAppearance, EditorThemeId } from '../types';
 
-export const DEFAULT_EDITOR_APPEARANCE: EditorAppearance = { version: 1, mode: 'system', themeId: 'slide-light', motion: 'system' };
+export const DEFAULT_EDITOR_APPEARANCE: EditorAppearance = { version: 1, mode: 'system', themeId: 'slide-light', motion: 'system', cornerStyle: 'soft' };
 
 export interface EditorThemeDefinition {
   id: EditorThemeId;
@@ -28,6 +28,7 @@ export function normalizeEditorAppearance(value?: Partial<EditorAppearance> | nu
     mode: value?.mode === 'fixed' ? 'fixed' : 'system',
     themeId: value?.themeId && THEME_IDS.has(value.themeId) ? value.themeId : 'slide-light',
     motion: value?.motion === 'full' || value?.motion === 'reduced' ? value.motion : 'system',
+    cornerStyle: value?.cornerStyle === 'sharp' || value?.cornerStyle === 'rounded' ? value.cornerStyle : 'soft',
     ...(accentColor ? { accentColor } : {}),
   };
 }
@@ -78,8 +79,20 @@ export function EditorAppearanceProvider({ children }: { children: ReactNode }) 
 
   useEffect(() => {
     const stored = localStorage.getItem('slide-editor-appearance');
-    if (stored) try { setAppearance(normalizeEditorAppearance(JSON.parse(stored))); } catch { localStorage.removeItem('slide-editor-appearance'); }
-    void getEditorAppearance().then((value) => value && setAppearance(normalizeEditorAppearance(value))).catch(() => undefined);
+    if (stored) {
+      try {
+        setAppearance(normalizeEditorAppearance(JSON.parse(stored)));
+        return;
+      } catch {
+        localStorage.removeItem('slide-editor-appearance');
+      }
+    }
+    void getEditorAppearance().then((value) => {
+      if (!value) return;
+      const normalized = normalizeEditorAppearance(value);
+      setAppearance(normalized);
+      localStorage.setItem('slide-editor-appearance', JSON.stringify(normalized));
+    }).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -96,12 +109,13 @@ export function EditorAppearanceProvider({ children }: { children: ReactNode }) 
   useEffect(() => {
     const root = document.documentElement;
     root.dataset.editorTheme = activeTheme;
+    root.dataset.cornerStyle = appearance.cornerStyle || 'soft';
     root.dataset.motion = reducedMotion ? 'reduced' : 'full';
     root.style.colorScheme = activeDefinition.dark ? 'dark' : 'light';
     const defaults = EDITOR_THEMES.find((theme) => theme.id === activeTheme)!.preview[2];
     const variables = accentVariables(appearance.accentColor ?? defaults, activeDefinition.dark) as Record<string, string>;
     Object.entries(variables).forEach(([name, value]) => root.style.setProperty(name, value));
-  }, [activeDefinition.dark, activeTheme, appearance.accentColor, reducedMotion]);
+  }, [activeDefinition.dark, activeTheme, appearance.accentColor, appearance.cornerStyle, reducedMotion]);
 
   const updateAppearance = useCallback(async (next: EditorAppearance) => {
     const normalized = normalizeEditorAppearance(next);

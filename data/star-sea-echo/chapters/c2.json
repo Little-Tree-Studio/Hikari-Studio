@@ -1,0 +1,19 @@
+{
+  "id": "c2",
+  "name": "第二章 · 星海之夜",
+  "fragments": [
+    {
+      "id": "night-mail",
+      "name": "夜航"
+    },
+    {
+      "id": "ending-star",
+      "name": "结局 · 约定"
+    },
+    {
+      "id": "ending-echo",
+      "name": "结局 · 回声"
+    }
+  ],
+  "disabled": false
+}

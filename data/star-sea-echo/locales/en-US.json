@@ -1,26 +1,143 @@
 {
-  "opening::op1": {
+  "opening::op4": {
+    "text": "Summer in Shiomi Town always ends slowly; the sea wind carries July all the way into late August."
+  },
+  "opening::op5": {
     "text": "Echoes of the Star Sea"
   },
-  "lake-meeting::b3": {
-    "text": "Morning mist drifts slowly across the lake as the first summer light settles on the old pier."
+  "opening::op6": {
+    "text": "On the second-to-last day of August, an unsigned letter appeared in my mailbox. One line only: before dawn, the old pier."
   },
   "lake-meeting::b4": {
-    "speaker": "Lin Cheng",
-    "text": "So you really did come."
-  },
-  "lake-meeting::b5": {
-    "speaker": "Su Rui",
-    "text": "Because someone wrote in a letter that missing today meant losing this sea of stars forever."
+    "text": "5:40 in the morning. The mist had not lifted. Dew sat on the old pier planks, quieter underfoot than I remembered."
   },
   "lake-meeting::b6": {
-    "title": "How do you answer?",
+    "speaker": "Makoto",
+    "text": "This early? Umiya opens at seven. Even the boiler is still cold."
+  },
+  "lake-meeting::b7": {
+    "speaker": "Lin Cheng",
+    "text": "Makoto? What are you doing here?"
+  },
+  "lake-meeting::b8": {
+    "speaker": "Makoto",
+    "text": "Helping Grandpa with the nets. You're the one holding a letter for ages. Waiting for someone?"
+  },
+  "lake-meeting::b9": {
+    "speaker": "Lin Cheng",
+    "text": "...Yeah. Someone I haven't spoken to in years."
+  },
+  "lake-meeting::b10": {
+    "speaker": "Makoto",
+    "text": "Good luck, then. If she doesn't show, come in for something hot. I'll sneak you an extra ice cube."
+  },
+  "lake-meeting::b12": {
+    "text": "At six sharp, footsteps came through the mist. Unhurried, light, exactly as I remembered."
+  },
+  "lake-meeting::b14": {
+    "speaker": "Su Rui",
+    "text": "I didn't think you'd come."
+  },
+  "lake-meeting::b15": {
+    "speaker": "Lin Cheng",
+    "text": "The letter said \"miss today and you'll never see it again.\" Who would dare skip it?"
+  },
+  "lake-meeting::b16": {
+    "speaker": "Su Rui",
+    "text": "That wasn't an exaggeration. There's a meteor shower tonight. The next one visible from Shiomi is eleven years away."
+  },
+  "lake-meeting::b18": {
+    "title": "How do you answer her invitation?",
     "options": [
-      "Believe her",
-      "Change the subject"
+      "Say yes to watching tonight",
+      "Ask why she left back then"
     ]
   },
-  "old-school::school1": {
-    "text": "Dust drifts through the beams of light in the corridor."
+  "pier-talk::pt1": {
+    "speaker": "Su Rui",
+    "text": "Okay. ...Thank you for not pressing."
+  },
+  "pier-talk::pt2": {
+    "text": "They sat on the pier until the mist cleared. Su Rui talked about her years away, then stopped mid-sentence."
+  },
+  "pier-talk::pt3": {
+    "speaker": "Su Rui",
+    "text": "The truth is, I left because I'd been admitted to a school far away, and my family couldn't even pay the rent. I didn't want anyone to see me cry over that."
+  },
+  "pier-talk::pt4": {
+    "speaker": "Lin Cheng",
+    "text": "You could have told us. Any of us would have helped."
+  },
+  "pier-talk::pt5": {
+    "speaker": "Su Rui",
+    "text": "I know. So saying it now isn't too late."
+  },
+  "pier-talk::pt8": {
+    "text": "She smiled and changed the subject. Some words, it seemed, she wanted to keep a while longer."
+  },
+  "old-school::school2": {
+    "text": "They walked the embankment to the abandoned elementary school. The iron gate had rusted shut and let out a long cry when pushed."
+  },
+  "old-school::school3": {
+    "speaker": "Su Rui",
+    "text": "This is where the club held its last event. You wrote on the back of that group photo for me."
+  },
+  "old-school::school4": {
+    "speaker": "Lin Cheng",
+    "text": "\"Before summer ends, we watch the stars together one more time.\" Terrible handwriting. You actually kept it?"
+  },
+  "old-school::school5": {
+    "speaker": "Su Rui",
+    "text": "It's been in my pencil case ever since. That's why, coming back this time, you were the first person I thought of."
+  },
+  "night-mail::nm3": {
+    "text": "At night a few lamps lit the pier. Makoto carried out folding chairs from the shop and declared that nobody was allowed to help before the shower began."
+  },
+  "night-mail::nm5": {
+    "speaker": "Makoto",
+    "text": "The chairs are for you two. The cocoa is on me. Consider it thanks for being regulars."
+  },
+  "night-mail::nm6": {
+    "speaker": "Lin Cheng",
+    "text": "Thanks, Makoto. I'll bring you some oranges from home."
+  },
+  "night-mail::nm8": {
+    "speaker": "Su Rui",
+    "text": "Look. It's starting."
+  },
+  "night-mail::nm9": {
+    "text": "When the first meteor crossed the sea, the mist was gone for good. The stars fell into the water, as if someone had turned the whole sky upside down."
+  },
+  "night-mail::nm10": {
+    "title": "What do you want to say tonight?",
+    "options": [
+      "Finish the old promise",
+      "Watch quietly until the end"
+    ]
+  },
+  "ending-star::es1": {
+    "speaker": "Lin Cheng",
+    "text": "Su Rui. Eleven years from now, same place, same shower."
+  },
+  "ending-star::es2": {
+    "speaker": "Su Rui",
+    "text": "Deal. This time I'll write the letter first."
+  },
+  "ending-star::es3": {
+    "text": "The stars sank into the sea one by one. Summer finally began to end."
+  },
+  "ending-echo::ee1": {
+    "text": "Neither of them said a word. The waves pushed in, layer by layer, then pulled back out."
+  },
+  "ending-echo::ee2": {
+    "speaker": "Su Rui",
+    "text": "...Even if you don't say it, I know what you want to say."
+  },
+  "ending-echo::ee3": {
+    "speaker": "Lin Cheng",
+    "text": "Then next time. We have eleven years, after all."
+  },
+  "ending-echo::ee4": {
+    "text": "After the last meteor fell, light lingered on the sea. Some words keep, like echoes of a sea of stars."
   }
 }

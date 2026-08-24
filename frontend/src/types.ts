@@ -414,12 +414,14 @@ export interface BuildResult {
 }
 
 export type EditorThemeId = 'slide-light' | 'graphite' | 'sakura-studio' | 'high-contrast';
+export type EditorCornerStyle = 'sharp' | 'soft' | 'rounded';
 export interface EditorAppearance {
   version: 1;
   mode: 'system' | 'fixed';
   themeId: EditorThemeId;
   accentColor?: string;
   motion: 'system' | 'full' | 'reduced';
+  cornerStyle: EditorCornerStyle;
 }
 
 export interface RecoverySnapshot {

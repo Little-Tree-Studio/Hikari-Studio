@@ -1,16 +1,21 @@
 {
   "id": "character-mrzu199d-qs17r",
-  "name": "1",
-  "color": "#3478c5",
+  "name": "真琴",
+  "color": "#4a90c4",
   "expressions": [
+    "默认",
+    "微笑",
+    "平静",
     "害羞",
-    "高兴",
-    "平静"
+    "惊讶",
+    "闭眼"
   ],
   "portraits": {
-    "默认": "",
+    "默认": "asset-5555a4b3",
+    "微笑": "asset-420dde491f",
+    "平静": "asset-5555a4b3",
     "害羞": "asset-167279e040",
-    "高兴": "asset-420dde491f",
-    "平静": "asset-5555a4b4b3"
+    "惊讶": "asset-a9f29e2c37",
+    "闭眼": "asset-c8f4afee39"
   }
 }

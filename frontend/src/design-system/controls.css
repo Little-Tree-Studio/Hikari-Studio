@@ -37,7 +37,6 @@ html[data-motion="full"] .ds-select-content[data-state="open"] { animation: ds-p
 .ds-slider[data-disabled] { cursor: not-allowed; opacity: .45; }
 .ds-slider-track { position: relative; flex: 1; height: 4px; border-radius: 2px; background: var(--panel-3); }
 .ds-slider-range { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: var(--accent); }
-.ds-slider-thumb { position: relative; display: block; width: 14px; height: 14px; border: 2px solid var(--accent); border-radius: 50%; background: var(--panel); box-shadow: var(--shadow-sm); transition: transform var(--motion-fast) var(--motion-ease); }
-.ds-slider-thumb:hover { transform: scale(1.12); }
+.ds-slider-thumb { position: relative; display: block; width: 14px; height: 14px; border: 2px solid var(--accent); border-radius: 50%; background: var(--panel); box-shadow: var(--shadow-sm); }
 .ds-slider-thumb:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 .ds-slider-thumb::after { content: ""; position: absolute; inset: -6px; }

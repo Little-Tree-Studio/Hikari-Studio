@@ -10,10 +10,15 @@ from backend.editor_appearance import DEFAULT_EDITOR_APPEARANCE, EditorAppearanc
 
 class EditorAppearanceTests(unittest.TestCase):
     def test_normalizes_known_values_and_rejects_invalid_accent(self) -> None:
-        self.assertEqual(normalize_editor_appearance({"mode": "fixed", "themeId": "graphite", "motion": "reduced", "accentColor": "#12ABef"}), {
-            "version": 1, "mode": "fixed", "themeId": "graphite", "motion": "reduced", "accentColor": "#12abef",
+        self.assertEqual(normalize_editor_appearance({"mode": "fixed", "themeId": "graphite", "motion": "reduced", "cornerStyle": "sharp", "accentColor": "#12ABef"}), {
+            "version": 1, "mode": "fixed", "themeId": "graphite", "motion": "reduced", "cornerStyle": "sharp", "accentColor": "#12abef",
         })
         self.assertNotIn("accentColor", normalize_editor_appearance({"accentColor": "red"}))
+
+    def test_corner_style_falls_back_to_soft(self) -> None:
+        self.assertEqual(normalize_editor_appearance({"cornerStyle": "rounded"})["cornerStyle"], "rounded")
+        self.assertEqual(normalize_editor_appearance({"cornerStyle": "wavy"})["cornerStyle"], "soft")
+        self.assertEqual(normalize_editor_appearance({})["cornerStyle"], "soft")
 
     def test_missing_or_corrupt_configuration_uses_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -1,0 +1,98 @@
+[
+  {
+    "id": "nm1",
+    "type": "scene",
+    "title": "晨雾湖畔",
+    "assetId": "lake",
+    "transition": "fade",
+    "duration": 1.4,
+    "version": 1,
+    "layers": [],
+    "sceneId": "scene-lake"
+  },
+  {
+    "id": "nm2",
+    "type": "camera",
+    "cameraX": 0,
+    "cameraY": 0,
+    "zoom": 1.05,
+    "shake": 0,
+    "filter": "vignette",
+    "duration": 1.6,
+    "version": 1
+  },
+  {
+    "id": "nm3",
+    "type": "narration",
+    "text": "晚上，码头亮着几盏灯。真琴把店里的折叠椅搬了出来，说流星雨开始之前谁也不许帮忙。",
+    "version": 1
+  },
+  {
+    "id": "nm4",
+    "type": "characterShow",
+    "characterId": "character-mrzu199d-qs17r",
+    "expression": "害羞",
+    "position": "right",
+    "scale": 1,
+    "opacity": 1,
+    "layer": 0,
+    "animation": "fade",
+    "duration": 0.4,
+    "version": 1,
+    "assetId": "asset-167279e040"
+  },
+  {
+    "id": "nm5",
+    "type": "dialogue",
+    "speaker": "真琴",
+    "text": "椅子是给二位的。热可可算我请的，就当谢谢你们常来店里。",
+    "expression": "害羞",
+    "version": 1
+  },
+  {
+    "id": "nm6",
+    "type": "dialogue",
+    "speaker": "林澄",
+    "text": "谢了，真琴。回头给你带点家里的橘子。",
+    "expression": "浅笑",
+    "version": 1
+  },
+  {
+    "id": "nm7",
+    "type": "characterHide",
+    "characterId": "character-mrzu199d-qs17r",
+    "animation": "slideRight",
+    "duration": 0.4,
+    "version": 1
+  },
+  {
+    "id": "nm8",
+    "type": "dialogue",
+    "speaker": "苏芮",
+    "text": "看，开始了。",
+    "expression": "平静",
+    "version": 1
+  },
+  {
+    "id": "nm9",
+    "type": "narration",
+    "text": "第一颗流星划过海面时，雾彻底散了。星星落进水里，像有人把整片天空翻了过来。",
+    "version": 1
+  },
+  {
+    "id": "nm10",
+    "type": "branch",
+    "title": "今晚想说什么？",
+    "options": [
+      {
+        "text": "把当年的约定说完",
+        "target": "ending-star"
+      },
+      {
+        "text": "就这样安静地看完",
+        "target": "ending-echo"
+      }
+    ],
+    "version": 1
+  }
+]

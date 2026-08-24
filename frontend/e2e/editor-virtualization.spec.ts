@@ -58,7 +58,7 @@ test('StoryCard mounts lightweight summaries and reveals controls on selection',
   await dialogue.getByLabel('对白角色').click();
   const speakerOptions = dialogue.getByRole('listbox', { name: '对白角色选项' });
   await expect(speakerOptions).toBeVisible();
-  await expect(speakerOptions.getByRole('option')).toHaveCount(2);
+  await expect(speakerOptions.getByRole('option')).toHaveCount(3);
   await speakerOptions.getByRole('option', { name: '苏芮' }).click();
   await expect(dialogue.getByLabel('对白角色')).toHaveText('苏芮');
   await expect(dialogue.getByLabel('对白表情')).toHaveText('默认');
@@ -162,7 +162,7 @@ test('the inline plus inserts a Block at its exact card position and remains und
   await page.locator('.blocks-area').evaluate((element) => { element.scrollTop = element.scrollHeight; });
   await page.locator('.palette-item').filter({ hasText: '旁白' }).click();
 
-  await expect(page.locator('.editor-title small')).toHaveText('7 Blocks');
+  await expect(page.locator('.editor-title small')).toHaveText('8 Blocks');
   await expect(page.locator('[data-block-index="2"] .block-card.narration')).toBeVisible();
   await expect(page.locator('[data-block-index="2"] .block-text[contenteditable="true"]')).toBeFocused();
   await expect(page.locator('[data-block-index="2"]').locator('xpath=..')).toHaveClass(/block-just-inserted/);
@@ -175,13 +175,13 @@ test('the inline plus inserts a Block at its exact card position and remains und
 
   await page.locator('[data-block-index="2"] .block-handle').focus();
   await page.keyboard.press('Control+Z');
-  await expect(page.locator('.editor-title small')).toHaveText('6 Blocks');
+  await expect(page.locator('.editor-title small')).toHaveText('7 Blocks');
   await expect(page.locator('[data-block-index="2"] .block-card')).toContainText(originalThirdText?.trim() ?? '');
 
   await page.locator('[data-block-index="0"] .insert-button').click();
   await page.keyboard.press('Escape');
   await expect(page.getByText('添加 Block', { exact: true })).toHaveCount(0);
-  await expect(page.locator('.editor-title small')).toHaveText('6 Blocks');
+  await expect(page.locator('.editor-title small')).toHaveText('7 Blocks');
 });
 
 test('chapter tree mounts only visible rows and can reach a distant Fragment', async ({ page }) => {
@@ -215,11 +215,11 @@ test('card and plain Block views virtualize measured rows across selection bound
   }, insertedBlocks);
   await page.locator('.blocks-area').focus();
   await page.keyboard.press('Control+V');
-  await expect(page.locator('.editor-title small')).toHaveText(`${insertedBlocks + 6} Blocks`);
+  await expect(page.locator('.editor-title small')).toHaveText(`${insertedBlocks + 7} Blocks`);
 
   expect(await page.locator('.virtual-block-row').count()).toBeLessThan(80);
   await page.locator('.blocks-area').evaluate((element) => { element.scrollTop = element.scrollHeight; });
-  await expect(page.locator(`[data-block-index="${insertedBlocks + 5}"]`)).toBeVisible();
+  await expect(page.locator(`[data-block-index="${insertedBlocks + 6}"]`)).toBeVisible();
   expect(await page.locator('.virtual-block-row').count()).toBeLessThan(80);
 
   await page.locator('.blocks-area').evaluate((element) => { element.scrollTop = 0; });
@@ -231,13 +231,13 @@ test('card and plain Block views virtualize measured rows across selection bound
     const row = document.querySelector(`[data-block-index="${index}"]`)?.getBoundingClientRect();
     const composer = document.querySelector('.quick-composer')?.getBoundingClientRect();
     return row && composer ? Math.round(row.bottom - composer.top) : 9999;
-  }, insertedBlocks + 5)).toBeLessThanOrEqual(0);
-  await page.locator(`[data-block-index="${insertedBlocks + 5}"] .block-card`).dispatchEvent('click', { shiftKey: true });
+  }, insertedBlocks + 6)).toBeLessThanOrEqual(0);
+  await page.locator(`[data-block-index="${insertedBlocks + 6}"] .block-card`).dispatchEvent('click', { shiftKey: true });
   await page.locator('.block-card.selected').first().dispatchEvent('contextmenu');
-  await expect(page.locator('.block-context-menu strong')).toHaveText(`已选择 ${insertedBlocks + 6} 个 Block`);
+  await expect(page.locator('.block-context-menu strong')).toHaveText(`已选择 ${insertedBlocks + 7} 个 Block`);
 
   await page.getByRole('button', { name: '纯文本' }).click();
   await page.locator('.plain-script-editor').evaluate((element) => { element.scrollTop = element.scrollHeight; });
-  await expect(page.locator(`[data-block-index="${insertedBlocks + 5}"]`)).toBeVisible();
+  await expect(page.locator(`[data-block-index="${insertedBlocks + 6}"]`)).toBeVisible();
   expect(await page.locator('.virtual-plain-row').count()).toBeLessThan(100);
 });

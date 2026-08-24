@@ -1,8 +1,56 @@
 [
   {
     "id": "school1",
+    "type": "scene",
+    "title": "远山晴空",
+    "assetId": "mountain",
+    "transition": "fade",
+    "duration": 1,
+    "version": 1,
+    "layers": [],
+    "sceneId": "scene-mountain"
+  },
+  {
+    "id": "school2",
     "type": "narration",
-    "text": "尘埃在走廊的光束中缓缓飘落。",
+    "text": "两人沿着堤坝走到废弃的小学。铁门锈住了，推开时发出很长的一声。",
+    "version": 1
+  },
+  {
+    "id": "school3",
+    "type": "dialogue",
+    "speaker": "苏芮",
+    "text": "这里是社团最后一次办活动的地方。你还在那张合影背面写了字给我。",
+    "expression": "犹豫",
+    "version": 1
+  },
+  {
+    "id": "school4",
+    "type": "dialogue",
+    "speaker": "林澄",
+    "text": "「夏天结束之前，一定要再一起看一次星星。」字迹那么丑，你居然还留着。",
+    "expression": "浅笑",
+    "version": 1
+  },
+  {
+    "id": "school5",
+    "type": "dialogue",
+    "speaker": "苏芮",
+    "text": "一直放在铅笔盒里。所以这次回来，第一个想到的就是你。",
+    "expression": "平静",
+    "version": 1
+  },
+  {
+    "id": "school6",
+    "type": "setVariable",
+    "variable": "好感度",
+    "value": 2,
+    "version": 1
+  },
+  {
+    "id": "school7",
+    "type": "jump",
+    "target": "night-mail",
     "version": 1
   }
 ]
