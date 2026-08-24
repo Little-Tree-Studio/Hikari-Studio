@@ -572,9 +572,12 @@ class AgentTaskManager:
         if kind == "update_project": return ["meta"]
         if kind in {"add_blocks", "insert_blocks", "update_blocks", "move_blocks", "update_branch"}: return [f"script:{operation.get('fragmentId')}"]
         if kind == "create_fragment": return ["chapters"]
+        if kind == "create_chapter": return ["chapters"]
         if kind == "upsert_character": return [f"character:{operation['characterId']}"] if operation.get("characterId") else ["characters"]
+        if kind == "upsert_scene": return [f"scene:{operation['sceneId']}"] if operation.get("sceneId") else ["scenes"]
         if kind == "update_asset": return [f"asset:{operation.get('assetId')}"]
         if kind == "upsert_variable": return [f"variable:{operation.get('name')}"]
+        if kind == "update_narrative_map": return ["meta"]
         if kind == "update_production_memory": return ["production-memory"]
         return ["meta"]
 
@@ -585,7 +588,7 @@ class AgentTaskManager:
 
     @staticmethod
     def _conflict_message(operation: dict[str, Any], scope: str) -> str:
-        labels = {"add_blocks": "目标 Fragment 的剧本", "insert_blocks": "目标 Fragment 的剧本", "update_blocks": "目标 Fragment 的剧本", "move_blocks": "目标 Fragment 的剧本", "update_branch": "目标分支所在剧本", "create_fragment": "章节结构", "upsert_character": "目标角色配置", "update_asset": "目标素材配置", "upsert_variable": "目标变量", "update_project": "项目基本信息", "update_production_memory": "制作记忆"}
+        labels = {"add_blocks": "目标 Fragment 的剧本", "insert_blocks": "目标 Fragment 的剧本", "update_blocks": "目标 Fragment 的剧本", "move_blocks": "目标 Fragment 的剧本", "update_branch": "目标分支所在剧本", "create_fragment": "章节结构", "create_chapter": "章节结构", "upsert_character": "目标角色配置", "upsert_scene": "目标场景配置", "update_asset": "目标素材配置", "upsert_variable": "目标变量", "update_narrative_map": "叙事地图布局", "update_project": "项目基本信息", "update_production_memory": "制作记忆"}
         return f"{labels.get(str(operation.get('type')), scope)}在 Patch 生成后已被修改"
 
     @staticmethod
@@ -702,6 +705,32 @@ class AgentTaskManager:
                 options = operation.get("options")
                 if block is None or not isinstance(options, list) or any(str(option.get("target") or "") not in fragment_ids for option in options):
                     raise ValueError("Agent Patch 的分支引用无效")
+            elif kind == "create_chapter":
+                if not isinstance(operation.get("name"), str) or not operation["name"].strip():
+                    raise ValueError("Agent Patch 的章节名称无效")
+                if any(str(chapter.get("name")) == operation["name"] for chapter in chapters):
+                    raise ValueError("Agent Patch 的章节名称重复")
+                if "blocks" in operation and not isinstance(operation.get("blocks"), list):
+                    raise ValueError("Agent Patch 的章节 Block 无效")
+                for block in operation.get("blocks") or []:
+                    validate_block_references(block)
+            elif kind == "upsert_scene":
+                scene_id = operation.get("sceneId")
+                if scene_id and str(scene_id) not in scene_ids:
+                    raise ValueError("Agent Patch 引用了不存在的场景")
+                layers = operation.get("layers")
+                if layers is not None:
+                    if not isinstance(layers, list) or any(not isinstance(layer, dict) or (layer.get("assetId") and str(layer["assetId"]) not in asset_ids) for layer in layers):
+                        raise ValueError("Agent Patch 的场景图层引用无效")
+            elif kind == "update_narrative_map":
+                positions = operation.get("positions")
+                if positions is not None and (not isinstance(positions, dict) or any(not isinstance(point, dict) or not isinstance(point.get("x"), (int, float)) or not isinstance(point.get("y"), (int, float)) for point in positions.values())):
+                    raise ValueError("Agent Patch 的叙事地图坐标无效")
+                if operation.get("viewMode") is not None and operation.get("viewMode") not in {"graph", "flow"}:
+                    raise ValueError("Agent Patch 的叙事地图视图模式无效")
+                connections = operation.get("connections")
+                if connections is not None and (not isinstance(connections, list) or any(str(item.get("from") or "") not in fragment_ids or str(item.get("to") or "") not in fragment_ids or item.get("kind") not in {"jump", "call"} for item in connections)):
+                    raise ValueError("Agent Patch 的叙事地图连线无效")
             elif kind == "update_production_memory":
                 memory = operation.get("memory")
                 if not isinstance(memory, dict) or int(memory.get("version", 0)) != 1:
@@ -776,6 +805,42 @@ class AgentTaskManager:
             elif kind == "update_branch":
                 fragment_id = operation["fragmentId"]
                 scripts[fragment_id] = [{**block, "title": operation["title"], "options": deepcopy(operation["options"])} if block.get("id") == operation["blockId"] and block.get("type") == "branch" else block for block in scripts[fragment_id]]
+            elif kind == "create_chapter":
+                chapter_id = f"chapter-{uuid.uuid4().hex[:10]}"
+                chapter = {"id": chapter_id, "name": operation["name"], "entry": bool(operation.get("entry")), "fragments": []}
+                if operation.get("fragmentName"):
+                    fragment_id = f"fragment-{uuid.uuid4().hex[:10]}"
+                    chapter["fragments"].append({"id": fragment_id, "name": operation["fragmentName"]})
+                    scripts[fragment_id] = [{**block, "id": f"block-{uuid.uuid4().hex[:10]}"} for block in operation.get("blocks") or []]
+                    fragment_ids.add(fragment_id)
+                chapters.append(chapter)
+                chapter_ids.add(chapter_id)
+            elif kind == "upsert_scene":
+                scenes = next_project.setdefault("scenes", [])
+                existing = next((item for item in scenes if item.get("id") == operation.get("sceneId")), None) if operation.get("sceneId") else next((item for item in scenes if item.get("name") == operation.get("name")), None)
+                scene = deepcopy(existing) if existing else {"id": f"scene-{uuid.uuid4().hex[:10]}", "name": operation.get("name"), "layers": []}
+                if operation.get("name"):
+                    scene["name"] = operation["name"]
+                if operation.get("groupId"):
+                    scene["groupId"] = operation["groupId"]
+                if "layers" in operation:
+                    scene["layers"] = [{**layer, "id": f"layer-{uuid.uuid4().hex[:10]}"} for layer in operation["layers"]]
+                if existing:
+                    scenes[scenes.index(existing)] = scene
+                else:
+                    scenes.append(scene)
+                    scene_ids.add(str(scene["id"]))
+            elif kind == "update_narrative_map":
+                settings = next_project.setdefault("settings", {})
+                narrative_map = settings.setdefault("narrativeMap", {})
+                if operation.get("positions"):
+                    narrative_map.setdefault("positions", {}).update(deepcopy(operation["positions"]))
+                if operation.get("viewMode"):
+                    narrative_map["viewMode"] = operation["viewMode"]
+                for connection in operation.get("connections") or []:
+                    source = connection["from"]
+                    block = {"id": f"block-{uuid.uuid4().hex[:10]}", "type": connection["kind"], "version": 1, "target": connection["to"]}
+                    scripts.setdefault(source, []).append(block)
             elif kind == "update_production_memory":
                 next_project["productionMemory"] = deepcopy(operation["memory"])
         return next_project
@@ -827,6 +892,20 @@ class AgentTaskManager:
             if kind == "update_branch":
                 options = operation.get("options") or []
                 return "变量与分支", f"修改分支 {operation.get('blockId', '未知 Block')}（{len(options)} 个选项）", {"kind": "fragment", "id": operation.get("fragmentId")}
+            if kind == "create_chapter":
+                blocks = operation.get("blocks") or []
+                return "章节与 Fragment", f"创建章节 {operation.get('name', '未命名')}{'（含初始 Fragment）' if operation.get('fragmentName') else ''}（{len(blocks)} Blocks）", {"kind": "chapter", "id": None}
+            if kind == "upsert_scene":
+                layers = operation.get("layers") or []
+                return "场景配置", f"配置场景 {operation.get('name', operation.get('sceneId', '未命名'))}（{len(layers)} 个图层）", {"kind": "scene", "id": operation.get("sceneId")}
+            if kind == "update_narrative_map":
+                connections = operation.get("connections") or []
+                positions = operation.get("positions") or {}
+                parts = []
+                if positions: parts.append(f"{len(positions)} 个节点位置")
+                if connections: parts.append(f"{len(connections)} 条连线")
+                if operation.get("viewMode"): parts.append("视图模式")
+                return "叙事地图", f"更新{'、'.join(parts) or '叙事地图'}", {"kind": "chapter", "id": None}
             if kind == "update_production_memory":
                 memory = operation.get("memory") or {}
                 count = sum(len(memory.get(section) or []) for section in ("characterRules", "styleRules", "facts", "restrictions"))

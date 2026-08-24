@@ -71,6 +71,37 @@ class AgentToolRegistryTests(unittest.TestCase):
         self.assertFalse(registry.invoke("propose_insert_blocks", {"fragmentId": "opening", "position": "end", "blocks": [{"type": "scene", "sceneId": "missing"}]})["ok"])
         self.assertFalse(registry.invoke("propose_insert_blocks", {"fragmentId": "opening", "position": "end", "blocks": [{"type": "sound", "assetId": "missing"}]})["ok"])
 
+    def test_module_and_narrative_map_tools_create_valid_proposals(self) -> None:
+        project = sample_project()
+        project["chapters"][0]["fragments"].append({"id": "second", "name": "第二段"})
+        project["scripts"]["second"] = []
+        original = copy.deepcopy(project)
+        registry = AgentToolRegistry(project)
+
+        narrative = registry.invoke("get_narrative_map", {})
+        self.assertTrue(narrative["ok"])
+        self.assertEqual(len(narrative["fragments"]), 2)
+        self.assertEqual(narrative["viewMode"], "graph")
+
+        chapter = registry.invoke("propose_create_chapter", {"name": "第二章", "fragmentName": "序章", "blocks": [{"type": "narration", "text": "新的开始。"}]})
+        scene = registry.invoke("propose_upsert_scene", {"name": "雨夜", "layers": [{"name": "背景", "assetId": "lake", "opacity": 0.8}]})
+        layout = registry.invoke("propose_update_narrative_map", {"positions": {"fragment:opening": {"x": 100, "y": 200}}, "viewMode": "flow", "connections": [{"from": "opening", "to": "second", "kind": "jump"}]})
+        self.assertTrue(all(result["ok"] and result["requiresConfirmation"] for result in (chapter, scene, layout)))
+        self.assertEqual([operation["type"] for operation in registry.proposed_operations], ["create_chapter", "upsert_scene", "update_narrative_map"])
+        self.assertEqual(project, original)
+
+    def test_module_and_narrative_map_tools_reject_invalid_input(self) -> None:
+        project = sample_project()
+        project["chapters"][0]["fragments"].append({"id": "second", "name": "第二段"})
+        project["scripts"]["second"] = []
+        registry = AgentToolRegistry(project)
+        self.assertFalse(registry.invoke("propose_create_chapter", {"name": "开始"})["ok"])  # 重名章节
+        self.assertFalse(registry.invoke("propose_upsert_scene", {"sceneId": "missing", "name": "新场景"})["ok"])
+        self.assertFalse(registry.invoke("propose_upsert_scene", {"name": "雨夜", "layers": [{"assetId": "missing"}]})["ok"])
+        self.assertFalse(registry.invoke("propose_update_narrative_map", {"connections": [{"from": "opening", "to": "missing", "kind": "jump"}]})["ok"])
+        self.assertFalse(registry.invoke("propose_update_narrative_map", {"connections": [{"from": "opening", "to": "opening", "kind": "jump"}]})["ok"])
+        self.assertFalse(registry.invoke("propose_update_narrative_map", {})["ok"])  # 至少提供一项
+
     def test_simulation_memory_and_director_tools_use_structured_proposals(self) -> None:
         project = sample_project()
         project["productionMemory"] = {"version": 1, "world": "近未来湖城", "characterRules": [], "styleRules": [], "facts": [], "restrictions": [], "updatedAt": ""}

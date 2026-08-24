@@ -70,6 +70,10 @@ class AgentToolRegistry:
             AgentTool("propose_update_asset", "提出更新已有素材的名称、打包策略或音频归属；不能创建或读取本地文件。", "edit", object_schema({"assetId": {"type": "string"}, "name": {"type": "string"}, "forceBundle": {"type": "boolean"}, "audioCategory": {"type": "string", "enum": ["bgm", "sfx", "voice"]}, "voiceCharacterId": {"type": "string"}}, ("assetId",)), self._propose_update_asset, True),
             AgentTool("propose_upsert_variable", "提出新增或更新项目变量及类型、显示名、说明和持久化设置。", "edit", object_schema({"name": {"type": "string"}, "defaultValue": {"oneOf": [{"type": "string"}, {"type": "number"}, {"type": "boolean"}]}, "displayName": {"type": "string"}, "description": {"type": "string"}, "valueType": {"type": "string", "enum": ["boolean", "number", "string"]}, "persistence": {"type": "string", "enum": ["slot", "shared"]}}, ("name", "defaultValue")), self._propose_upsert_variable, True),
             AgentTool("propose_update_branch", "提出修改已有分支 Block 的标题和选项，每个目标必须是有效 Fragment。", "edit", object_schema({"fragmentId": {"type": "string"}, "blockId": {"type": "string"}, "title": {"type": "string"}, "options": {"type": "array", "items": {"type": "object", "properties": {"text": {"type": "string"}, "target": {"type": "string"}}, "required": ["text", "target"], "additionalProperties": False}}}, ("fragmentId", "blockId", "options")), self._propose_update_branch, True),
+            AgentTool("get_narrative_map", "读取叙事地图的章节与 Fragment 节点、它们之间的跳转/分支连线，以及节点位置和视图模式。", "read", object_schema({}), self._narrative_map, False),
+            AgentTool("propose_create_chapter", "提出创建新章节（可带一个初始 Fragment 及其 Block）的结构化修改。修改只会进入待确认差异。", "edit", object_schema({"name": {"type": "string"}, "entry": {"type": "boolean"}, "fragmentName": {"type": "string"}, "blocks": {"type": "array", "items": {"type": "object"}}}, ("name",)), self._propose_create_chapter, True),
+            AgentTool("propose_upsert_scene", "提出新增场景或更新场景图层；每个图层可引用一个场景/图片素材。修改只会进入待确认差异。", "edit", object_schema({"sceneId": {"type": "string"}, "name": {"type": "string"}, "groupId": {"type": "string"}, "layers": {"type": "array", "items": {"type": "object", "properties": {"name": {"type": "string"}, "assetId": {"type": "string"}, "opacity": {"type": "number"}, "blendMode": {"type": "string", "enum": ["normal", "multiply", "screen", "overlay"]}, "offsetX": {"type": "number"}, "offsetY": {"type": "number"}, "scale": {"type": "number"}, "distance": {"type": "number"}, "visible": {"type": "boolean"}}, "additionalProperties": False}}}, ("name",)), self._propose_upsert_scene, True),
+            AgentTool("propose_update_narrative_map", "提出更新叙事地图：移动节点、切换结构图/流程图模式，或在两个 Fragment 之间新增跳转/调用连线。修改只会进入待确认差异。", "edit", object_schema({"positions": {"type": "object", "additionalProperties": {"type": "object", "properties": {"x": {"type": "number"}, "y": {"type": "number"}}, "required": ["x", "y"], "additionalProperties": False}}, "viewMode": {"type": "string", "enum": ["graph", "flow"]}, "connections": {"type": "array", "items": {"type": "object", "properties": {"from": {"type": "string"}, "to": {"type": "string"}, "kind": {"type": "string", "enum": ["jump", "call"]}, "label": {"type": "string"}}, "required": ["from", "to", "kind"], "additionalProperties": False}}}), self._propose_update_narrative_map, True),
             AgentTool("validate_patch", "验证当前待确认修改中的引用和 Block 类型。", "validate", object_schema({}), self._validate_patch, False),
             AgentTool("request_build", "请求在用户单独确认后构建 Web、Windows 或 Ren'Py 测试包。", "build", object_schema({"target": {"type": "string", "enum": ["web", "windows", "renpy"]}}, ("target",)), self._request_build, False),
         ]
@@ -310,6 +314,141 @@ class AgentToolRegistry:
         operation = {"type": "update_branch", "fragmentId": fragment_id, "blockId": block_id, "title": str(args.get("title") or block.get("title") or "").strip(), "options": clean_options}
         self.proposed_operations.append(operation)
         return {"proposalIndex": len(self.proposed_operations) - 1, "optionCount": len(clean_options), "requiresConfirmation": True}
+
+    def _narrative_map(self, _: dict[str, Any]) -> dict[str, Any]:
+        chapters = self.project.get("chapters", [])
+        fragments: list[dict[str, Any]] = []
+        for chapter in chapters:
+            for fragment in chapter.get("fragments", []):
+                fragments.append({"id": str(fragment.get("id")), "name": fragment.get("name"), "chapterId": str(chapter.get("id"))})
+        fragment_ids = {item["id"] for item in fragments}
+        edges: list[dict[str, Any]] = []
+        for fragment_id, blocks in self.project.get("scripts", {}).items():
+            if fragment_id not in fragment_ids:
+                continue
+            for block in blocks:
+                block_type = block.get("type")
+                if block_type == "branch":
+                    for option in block.get("options", []):
+                        if option.get("target") in fragment_ids:
+                            edges.append({"from": fragment_id, "to": option["target"], "kind": "branch", "blockId": block.get("id"), "label": option.get("text", "")})
+                elif block_type == "condition":
+                    for slot in ("trueTarget", "falseTarget"):
+                        if block.get(slot) in fragment_ids:
+                            edges.append({"from": fragment_id, "to": block[slot], "kind": "condition", "blockId": block.get("id"), "label": "成立" if slot == "trueTarget" else "否则"})
+                elif block_type in {"jump", "call"}:
+                    if block.get("target") in fragment_ids:
+                        edges.append({"from": fragment_id, "to": block["target"], "kind": block_type, "blockId": block.get("id"), "label": "调用并返回" if block_type == "call" else "跳转"})
+        narrative = self.project.get("settings", {}).get("narrativeMap") or {}
+        return {
+            "chapters": [{"id": str(item.get("id")), "name": item.get("name"), "entry": bool(item.get("entry")), "disabled": bool(item.get("disabled"))} for item in chapters],
+            "fragments": fragments,
+            "edges": edges,
+            "positions": narrative.get("positions") or {},
+            "viewMode": narrative.get("viewMode", "graph"),
+        }
+
+    def _propose_create_chapter(self, args: dict[str, Any]) -> dict[str, Any]:
+        name = str(args["name"]).strip()
+        if not name:
+            raise ValueError("章节名称不能为空")
+        if any(str(chapter.get("name")) == name for chapter in self.project.get("chapters", [])):
+            raise ValueError(f"已存在同名章节：{name}")
+        blocks = self._validated_blocks(args.get("blocks") or [])
+        operation: dict[str, Any] = {"type": "create_chapter", "name": name, "entry": bool(args.get("entry", False))}
+        fragment_name = str(args.get("fragmentName") or "").strip()
+        if fragment_name:
+            operation["fragmentName"] = fragment_name
+        if blocks:
+            operation["blocks"] = blocks
+        self.proposed_operations.append(operation)
+        return {"proposalIndex": len(self.proposed_operations) - 1, "requiresConfirmation": True, "blockCount": len(blocks)}
+
+    def _propose_upsert_scene(self, args: dict[str, Any]) -> dict[str, Any]:
+        scene_id = str(args.get("sceneId") or "").strip()
+        scenes = self.project.get("scenes", [])
+        if scene_id and not any(item.get("id") == scene_id for item in scenes):
+            raise ValueError(f"场景不存在：{scene_id}")
+        name = str(args.get("name") or "").strip()
+        if not scene_id and not name:
+            raise ValueError("创建场景必须提供名称")
+        group_id = str(args.get("groupId") or "").strip() or None
+        if group_id and not any(group.get("id") == group_id for group in self.project.get("sceneGroups", [])):
+            raise ValueError(f"场景分组不存在：{group_id}")
+        asset_ids = {str(item.get("id")) for item in self.project.get("assets", [])}
+        layers = args.get("layers")
+        clean_layers: list[dict[str, Any]] = []
+        if layers is not None:
+            if not isinstance(layers, list):
+                raise ValueError("layers 必须是数组")
+            for layer in layers:
+                if not isinstance(layer, dict):
+                    raise ValueError("场景图层格式无效")
+                asset_id = str(layer.get("assetId") or "").strip()
+                if asset_id and asset_id not in asset_ids:
+                    raise ValueError(f"场景图层素材不存在：{asset_id}")
+                clean_layers.append({
+                    "name": str(layer.get("name") or "").strip() or "背景",
+                    "assetId": asset_id or None,
+                    "opacity": float(layer.get("opacity", 1)),
+                    "blendMode": str(layer.get("blendMode", "normal")),
+                    "offsetX": float(layer.get("offsetX", 0)),
+                    "offsetY": float(layer.get("offsetY", 0)),
+                    "scale": float(layer.get("scale", 1)),
+                    "distance": float(layer.get("distance", 1)),
+                    "visible": bool(layer.get("visible", True)),
+                })
+        operation: dict[str, Any] = {"type": "upsert_scene", "name": name}
+        if scene_id:
+            operation["sceneId"] = scene_id
+        if group_id:
+            operation["groupId"] = group_id
+        if clean_layers:
+            operation["layers"] = clean_layers
+        self.proposed_operations.append(operation)
+        return {"proposalIndex": len(self.proposed_operations) - 1, "requiresConfirmation": True, "layerCount": len(clean_layers)}
+
+    def _propose_update_narrative_map(self, args: dict[str, Any]) -> dict[str, Any]:
+        operation: dict[str, Any] = {"type": "update_narrative_map"}
+        positions = args.get("positions")
+        if positions is not None:
+            if not isinstance(positions, dict):
+                raise ValueError("positions 必须是节点到坐标的对象")
+            clean_positions: dict[str, dict[str, float]] = {}
+            for node_id, point in positions.items():
+                if not isinstance(point, dict) or not isinstance(point.get("x"), (int, float)) or not isinstance(point.get("y"), (int, float)):
+                    raise ValueError("节点坐标必须包含数值 x 和 y")
+                clean_positions[str(node_id)] = {"x": float(point["x"]), "y": float(point["y"])}
+            if clean_positions:
+                operation["positions"] = clean_positions
+        view_mode = args.get("viewMode")
+        if view_mode is not None:
+            if view_mode not in {"graph", "flow"}:
+                raise ValueError("viewMode 必须是 graph 或 flow")
+            operation["viewMode"] = view_mode
+        connections = args.get("connections")
+        fragment_ids = {str(fragment.get("id")) for chapter in self.project.get("chapters", []) for fragment in chapter.get("fragments", [])}
+        if connections is not None:
+            if not isinstance(connections, list):
+                raise ValueError("connections 必须是数组")
+            clean_connections: list[dict[str, Any]] = []
+            for connection in connections:
+                if not isinstance(connection, dict):
+                    raise ValueError("连线格式无效")
+                source = str(connection.get("from") or "")
+                target = str(connection.get("to") or "")
+                kind = str(connection.get("kind") or "")
+                if kind not in {"jump", "call"}:
+                    raise ValueError("连线类型必须是 jump 或 call")
+                if source not in fragment_ids or target not in fragment_ids or source == target:
+                    raise ValueError(f"连线端点无效：{source} → {target}")
+                clean_connections.append({"from": source, "to": target, "kind": kind, "label": str(connection.get("label") or "").strip()})
+            if clean_connections:
+                operation["connections"] = clean_connections
+        if len(operation) == 1:
+            raise ValueError("至少提供 positions、viewMode 或 connections 之一")
+        self.proposed_operations.append(operation)
+        return {"proposalIndex": len(self.proposed_operations) - 1, "requiresConfirmation": True, "connectionCount": len(operation.get("connections", [])), "positionCount": len(operation.get("positions", {}))}
 
     def _validate_patch(self, _: dict[str, Any]) -> dict[str, Any]:
         return {"valid": True, "operationCount": len(self.proposed_operations), "diagnostics": self._collect_diagnostics()[:30]}
