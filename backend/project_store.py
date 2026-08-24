@@ -626,7 +626,7 @@ class ProjectStore:
                 content_hash = _sha256(destination)
             item = {
                 "id": new_id("asset"), "kind": kind, "name": destination.stem,
-                "path": destination.name, "uri": destination.as_uri(), "size": destination_size,
+                "path": destination.name, "uri": f"./project-assets/{quote(destination.name, safe='')}", "size": destination_size,
                 "contentHash": content_hash,
             }
             if kind == "audio":
@@ -642,8 +642,8 @@ class ProjectStore:
             return None
         replacement = imported[0]
         replacement["id"] = asset_id
-        destination = self.asset_dir / Path(str(replacement["path"])).name
-        replacement["uri"] = f'{replacement["uri"]}?v={destination.stat().st_mtime_ns}'
+        # 与 _load_v3 一致，用 http 可访问的相对路径。file:// URI 会被 http 页面拦截。
+        replacement["uri"] = f"./project-assets/{quote(Path(str(replacement['path'])).name, safe='')}"
         return replacement
 
     def match_missing_assets(self, folder: str, issues: list[dict[str, Any]]) -> dict[str, Any]:
@@ -779,15 +779,12 @@ class ProjectStore:
             if (root / "timelines" / f"{_component_id(fragment_id)}.json").is_file()
         }
         assets = self._read_json(root / "assets" / "index.json")
-        asset_directory_uri: str | None = None
         for asset in assets:
             path_value = str(asset.get("path", ""))
             if path_value.startswith("builtin/"):
                 asset["uri"] = f"./assets/{Path(path_value).name}"
             elif path_value:
-                if asset_directory_uri is None:
-                    asset_directory_uri = self.asset_dir.as_uri().rstrip("/")
-                asset["uri"] = f"{asset_directory_uri}/{quote(Path(path_value).name, safe='')}"
+                asset["uri"] = f"./project-assets/{quote(Path(path_value).name, safe='')}"
         locale_config = manifest.get("locale", {"default": "zh-CN", "languages": ["zh-CN"]})
         if not isinstance(locale_config, dict) or not isinstance(locale_config.get("languages"), list):
             locale_config = {"default": locale_config.get("default", "zh-CN") if isinstance(locale_config, dict) else "zh-CN", "languages": ["zh-CN"]}

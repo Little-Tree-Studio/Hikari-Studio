@@ -221,9 +221,20 @@ class QtWebHost:
         if not application.windowIcon().isNull():
             self.window.setWindowIcon(application.windowIcon())
         self.window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
-        # Use the native Windows titlebar so DWM owns dragging, resizing,
-        # maximize bounds, system buttons, and Win11 rounded corners.
-        self.window.setWindowFlag(Qt.WindowType.Window, True)
+        # Use a real top-level window. Do not rely on the WebEngine popup
+        # defaults: those can produce a frameless child surface that cannot be
+        # dragged or minimized on Windows.
+        self.window.setParent(None)
+        self.window.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
+        self.window.setWindowFlags(
+            Qt.WindowType.Window
+            | Qt.WindowType.CustomizeWindowHint
+            | Qt.WindowType.WindowTitleHint
+            | Qt.WindowType.WindowSystemMenuHint
+            | Qt.WindowType.WindowMinimizeButtonHint
+            | Qt.WindowType.WindowMaximizeButtonHint
+            | Qt.WindowType.WindowCloseButtonHint
+        )
         self.window.setMinimumSize(760, 520)
         if parent is not None:
             self.window.setMinimumSize(320, 240)
@@ -231,6 +242,7 @@ class QtWebHost:
         self.view = QWebEngineView(self.window)
         self.page = QtWebPage(self.view, self)
         self.view.setPage(self.page)
+        self.page.titleChanged.connect(self.window.setWindowTitle)
         self.window.setCentralWidget(self.view)
         if self.window_id != "main":
             register = getattr(self.api, "_register_popup_window", None)

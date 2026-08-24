@@ -470,6 +470,12 @@ export async function discoverAiModels(settings: AiSettingsInput): Promise<AiMod
   return withTimeout(api.discover_ai_models({ ...settings, probe: true, probeLimit: 4 }), 120000);
 }
 
+export async function optimizeBlockText(text: string, kind: 'narration' | 'dialogue', context?: Record<string, unknown>): Promise<string> {
+  const api = await waitForDesktopApi();
+  if (!api) throw new Error('AI 文本优化仅在桌面应用中可用');
+  return withTimeout(api.optimize_block_text(text, kind, context), 60000);
+}
+
 export async function startAiTask(instruction: string, project: Project, context: AgentContext): Promise<AgentTask> {
   const api = await waitForDesktopApi();
   if (!api) throw new Error('AI Agent 任务仅在桌面应用中可用');

@@ -73,3 +73,26 @@ class FastApiRpcTests(unittest.TestCase):
                 self.assertEqual(payload, "<html>ok</html>")
             finally:
                 server.stop()
+
+    def test_project_asset_route_serves_files_and_blocks_path_traversal(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            pathlib = __import__("pathlib")
+            asset_dir = pathlib.Path(directory) / "assets" / "files"
+            asset_dir.mkdir(parents=True)
+            (asset_dir / "bg.jpg").write_bytes(b"fake-image-bytes")
+
+            class AssetDispatcher(FakeDispatcher):
+                def __init__(self, asset_dir: object) -> None:
+                    super().__init__()
+                    self._api = type("Api", (), {"_store": type("Store", (), {"asset_dir": asset_dir})()})()
+
+            server = RpcServer(AssetDispatcher(asset_dir))
+            server.start()
+            try:
+                status, payload = self.request(server, "GET", "/project-assets/bg.jpg")
+                self.assertEqual(status, 200)
+                self.assertEqual(payload, "fake-image-bytes")
+                status, _ = self.request(server, "GET", "/project-assets/..%2F..%2Fsecret.txt")
+                self.assertEqual(status, 404)
+            finally:
+                server.stop()

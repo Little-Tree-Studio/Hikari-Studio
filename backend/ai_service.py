@@ -262,6 +262,42 @@ class AiService:
     def _create_provider(self, settings: dict[str, Any], api_key: str) -> AiProvider:
         return OpenAiCompatibleProvider(self._endpoint(settings["url"]), api_key, settings["model"], settings.get("temperature", 0.4))
 
+    def optimize_block_text(self, text: str, kind: str, context: dict[str, Any] | None = None) -> str:
+        """润色单个旁白/对白 Block 的文本，返回优化后的纯文本。"""
+        settings = self._read_settings()
+        api_key = self.secret_store.read()
+        if not api_key:
+            raise ValueError("请先在 AI Agent 设置中配置 API Key")
+        source = (text or "").strip()
+        if not source:
+            raise ValueError("文本内容为空，无法优化")
+        context = context or {}
+        speaker = str(context.get("speaker") or "").strip()
+        expression = str(context.get("expression") or "").strip()
+        if kind == "dialogue":
+            role_hint = f"角色：{speaker or '未指定'}"
+            if expression:
+                role_hint += f"，表情：{expression}"
+            task = (
+                "请优化下面这条视觉小说角色对白的措辞，使其更自然、生动、贴合角色口吻。"
+                f"保持原意与大致长度，不要改变说话人。{role_hint}。"
+                "只输出优化后的对白正文，不要任何解释、引号或角色名前缀。"
+            )
+        else:
+            task = (
+                "请优化下面这条视觉小说旁白，使其更流畅、更有画面感。"
+                "保持原意、文风和大致长度。只输出优化后的旁白正文，不要任何解释或引号。"
+            )
+        messages = [
+            {"role": "system", "content": "你是一位专业的视觉小说剧本编辑，擅长润色对白与旁白。"},
+            {"role": "user", "content": f"{task}\n\n原文本：\n{source}"},
+        ]
+        response = self.provider_factory(settings, api_key).complete(messages, tools=[])
+        result = (response.content or "").strip()
+        if not result:
+            raise RuntimeError("AI 未返回可用的优化文本")
+        return result
+
     def _run_tool_loop(
         self,
         provider: AiProvider,

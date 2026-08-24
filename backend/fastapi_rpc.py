@@ -5,13 +5,14 @@ import logging
 import secrets
 import threading
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable
 
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -180,6 +181,21 @@ class RpcServer:
                     },
                     status_code=500,
                 )
+
+        # 编辑器页面通过 http:// 加载，Chromium 会拦截 http 页面里的 file:// 资源
+        # （“Not allowed to load local resource”）。这里把当前项目的素材目录以
+        # /project-assets/{filename} 暴露出来，让项目素材也能通过 http 加载。
+        @app.get("/project-assets/{filename}", include_in_schema=False)
+        def project_asset(filename: str) -> Any:
+            try:
+                asset_dir = self.dispatcher._api._store.asset_dir.resolve()
+            except Exception:
+                return JSONResponse({"detail": "Not found"}, status_code=404)
+            safe_name = Path(filename).name
+            path = (asset_dir / safe_name).resolve()
+            if path.parent != asset_dir or not path.is_file():
+                return JSONResponse({"detail": "Not found"}, status_code=404)
+            return FileResponse(path)
 
         if static_root is not None:
             app.mount("/", StaticFiles(directory=str(static_root), html=True), name="frontend")

@@ -135,6 +135,20 @@ button{color:inherit}
 .block-commands button:hover{background:#edf1f3;color:var(--ink)}
 .block-commands button:last-child:hover{background:#f9e7e7;color:var(--danger)}
 .block-commands svg{width:12px;height:12px}
+.block-ai-polish{display:grid;place-items:center;width:22px;height:22px;border:0;background:transparent;color:var(--accent-strong);cursor:pointer;border-radius:var(--radius-xs);opacity:.5;transition:.15s;margin-left:2px;flex:0 0 auto}
+.block-ai-polish:hover{background:var(--accent-soft);opacity:1}
+.block-ai-polish:disabled{opacity:.4;cursor:default}
+.block-ai-polish svg{width:12px;height:12px}
+.block-card.scene.has-scene-background .block-ai-polish{color:#cfe3de}
+.block-card.scene.has-scene-background .block-ai-polish:hover{background:#1d2c31;color:#fff}
+.block-card.ai-polishing{position:relative;animation:ai-polish-pulse 1s ease-in-out infinite}
+.block-card.ai-polishing::after{content:"";position:absolute;z-index:6;inset:0;pointer-events:none;border-radius:inherit;background:linear-gradient(100deg,transparent 20%,var(--accent) 50%,transparent 80%);opacity:.32;background-size:220% 100%;animation:ai-polish-sweep 1.1s linear infinite}
+.block-card.ai-polishing .block-text,.block-card.ai-polishing .dialogue-line{opacity:.7}
+.block-card.ai-polishing .block-ai-polish{opacity:1;background:var(--accent-soft);color:var(--accent-strong);animation:ai-polish-btn .8s ease-in-out infinite}
+@keyframes ai-polish-pulse{0%,100%{box-shadow:0 0 0 2px var(--accent)}50%{box-shadow:0 0 0 5px var(--focus-ring)}}
+@keyframes ai-polish-sweep{0%{background-position:130% 0}100%{background-position:-130% 0}}
+@keyframes ai-polish-btn{0%,100%{transform:scale(1)}50%{transform:scale(1.12)}}
+@media(prefers-reduced-motion:reduce){.block-card.ai-polishing,.block-card.ai-polishing::after,.block-card.ai-polishing .block-ai-polish{animation:none}.block-card.ai-polishing{box-shadow:0 0 0 2px var(--accent)}.block-card.ai-polishing .block-ai-polish{background:var(--accent-soft)}}
 .preview-inspector{display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;background:#eef1f3}
 .preview-inspector .preview-pane{flex:0 0 auto}
 .preview-inspector .inspector{min-height:220px}
