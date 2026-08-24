@@ -9,19 +9,23 @@ test('editor appearance switches themes and keeps game theme separate', async ({
   await expect(page.getByRole('dialog', { name: '编辑器外观' })).toBeVisible();
   await page.getByRole('button', { name: /Graphite/ }).click();
   await page.getByRole('button', { name: '完整动效' }).click();
-  await page.getByRole('button', { name: '应用外观' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-editor-theme', 'graphite');
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'full');
 
-  await page.getByRole('button', { name: '个性化' }).click();
   await page.getByRole('button', { name: '减少动效' }).click();
-  await page.getByRole('button', { name: '应用外观' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduced');
 
-  await page.getByRole('button', { name: '个性化' }).click();
   await page.getByRole('button', { name: /大圆角/ }).click();
-  await page.getByRole('button', { name: '应用外观' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-corner-style', 'rounded');
+
+  const appearanceDialog = page.getByRole('dialog', { name: '编辑器外观' });
+  await appearanceDialog.getByRole('button', { name: '展开颜色选择面板' }).click();
+  await appearanceDialog.getByRole('button', { name: '预设颜色 #DC2626' }).click();
+  await expect(page.locator('html')).toHaveAttribute('style', /--accent:\s*#dc2626/);
+  await appearanceDialog.getByRole('button', { name: '恢复默认' }).click();
+  await expect(page.locator('html')).toHaveAttribute('style', /--accent:\s*#45bda8/);
+
+  await appearanceDialog.getByRole('button', { name: '关闭', exact: true }).click();
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-corner-style', 'rounded');
 
@@ -74,15 +78,13 @@ test('legacy desktop echo cannot revert a freshly applied appearance', async ({ 
   await page.getByRole('button', { name: '个性化' }).click();
   await page.getByRole('button', { name: /Graphite/ }).click();
   await page.getByRole('button', { name: /大圆角/ }).click();
-  await page.getByRole('button', { name: '应用外观' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-editor-theme', 'graphite');
   await expect(page.locator('html')).toHaveAttribute('data-corner-style', 'rounded');
 
-  await page.getByRole('button', { name: '个性化' }).click();
   const dialog = page.getByRole('dialog', { name: '编辑器外观' });
   await expect(dialog.getByRole('button', { name: /大圆角/ })).toHaveClass(/selected/);
   await expect(dialog.getByRole('button', { name: /Graphite/ })).toHaveClass(/selected/);
-  await dialog.getByRole('button', { name: '取消' }).click();
+  await dialog.getByRole('button', { name: '关闭', exact: true }).click();
 
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-editor-theme', 'graphite');
