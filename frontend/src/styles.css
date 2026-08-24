@@ -39,7 +39,7 @@ button{color:inherit}
 .topbar,.module-nav{display:flex;align-items:center;background:#fff;border-bottom:1px solid var(--line);z-index:20}
 .topbar{position:relative;z-index:60;overflow:visible;padding:0 14px;gap:10px}
 .brand-lockup{display:flex;align-items:center;gap:9px;min-width:236px}.brand-lockup>div:last-child{display:flex;flex-direction:column;line-height:1.25}.brand-lockup strong{font-size:14px}.brand-lockup span{font-size:10px;color:var(--muted)}
-.brand-mark{display:grid;place-items:center;width:30px;height:30px;border-radius:var(--radius-md);background:var(--accent);color:#fff;font-family:Georgia,serif;font-size:19px;font-weight:700}
+.brand-mark{display:grid;place-items:center;width:30px;height:30px;border-radius:var(--radius-md)}.brand-mark img{width:100%;height:100%;object-fit:contain;border-radius:var(--radius-md)}
 .history-controls{display:flex;gap:2px;border-left:1px solid var(--line);padding-left:8px}
 .icon-button{border:0;background:transparent;width:32px;height:32px;display:grid;place-items:center;border-radius:var(--radius-sm);cursor:pointer}.icon-button:hover{background:#edf1f3}.icon-button.small{width:28px;height:28px}.icon-button.tiny{width:24px;height:24px}.icon-button svg{width:16px;height:16px}.mobile-menu{display:none}
 .search-trigger{margin:auto;width:min(440px,40vw);height:32px;border:1px solid var(--line);background:#f6f8f9;border-radius:var(--radius-sm);display:flex;align-items:center;padding:0 10px;color:var(--muted);gap:8px;cursor:pointer}.search-trigger svg{width:15px}.search-trigger span{flex:1;text-align:left}.search-trigger kbd{font-size:10px;border:1px solid #cdd4d9;background:#fff;padding:2px 5px;border-radius:var(--radius-xs)}
