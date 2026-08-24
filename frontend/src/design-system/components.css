@@ -367,10 +367,14 @@ html[data-editor-theme="high-contrast"] img { color-scheme: normal; }
 }
 .desktop-app .asset-warning-banner small { color: color-mix(in srgb, var(--danger) 66%, var(--ink)); }
 .desktop-app .asset-warning-banner button { color: var(--danger); }
-.desktop-app .asset-inspector > header,
-.desktop-app .asset-search {
+.desktop-app .asset-inspector > header {
   border-color: var(--line);
   background: var(--panel);
+  color: var(--ink);
+}
+.desktop-app .asset-search {
+  border-color: var(--line);
+  background: var(--control-bg);
   color: var(--ink);
 }
 .desktop-app .asset-search input { background: transparent; color: var(--ink); }
@@ -385,12 +389,12 @@ html[data-editor-theme="high-contrast"] img { color-scheme: normal; }
 .desktop-app .scene-stage-panel { background: var(--panel-2); color: var(--ink); }
 .desktop-app .scene-browser > footer,
 .desktop-app .scene-reference-strip > button,
-.desktop-app .scene-layer-tabs button.active,
-.desktop-app .scene-browser-toolbar .asset-search {
+.desktop-app .scene-layer-tabs button.active {
   border-color: var(--line);
   background: var(--panel);
   color: var(--ink);
 }
+.desktop-app .scene-browser-toolbar .asset-search { border-color: var(--line); background: var(--control-bg); color: var(--ink); }
 .desktop-app .scene-layer-tabs,
 .desktop-app .scene-layer-tabs button,
 .desktop-app .offset-picker { border-color: var(--line); background-color: var(--panel-2); color: var(--muted-strong); }
@@ -403,12 +407,12 @@ html[data-editor-theme="high-contrast"] img { color-scheme: normal; }
 .desktop-app .expression-gallery,
 .desktop-app .character-preview-toolbar,
 .desktop-app .expression-gallery > div > button,
-.desktop-app .character-list-toolbar .asset-search,
 .desktop-app .color-field code {
   border-color: var(--line);
   background: var(--panel);
   color: var(--ink);
 }
+.desktop-app .character-list-toolbar .asset-search { border-color: var(--line); background: var(--control-bg); color: var(--ink); }
 .desktop-app .character-list-panel,
 .desktop-app .character-expression-panel,
 .desktop-app :where(.display-name-schemes article, .character-overlays article, .crop-editor, .resource-reference) {
@@ -437,12 +441,12 @@ html[data-editor-theme="high-contrast"] img { color-scheme: normal; }
 .desktop-app .audio-workspace,
 .desktop-app .audio-list-panel,
 .desktop-app .audio-detail-panel > header,
-.desktop-app .audio-list-toolbar .asset-search,
 .desktop-app .audio-detail-panel section > button {
   border-color: var(--line);
   background: var(--panel);
   color: var(--ink);
 }
+.desktop-app .audio-list-toolbar .asset-search { border-color: var(--line); background: var(--control-bg); color: var(--ink); }
 .desktop-app .audio-detail-panel { border-color: var(--line); background: var(--panel-2); color: var(--ink); }
 .desktop-app .audio-category-tabs > button { color: var(--muted-strong); }
 .desktop-app .audio-category-tabs > button:hover { background: var(--panel-3); }
@@ -456,12 +460,12 @@ html[data-editor-theme="high-contrast"] img { color-scheme: normal; }
 .desktop-app .narrative-tabs,
 .desktop-app .variable-table article,
 .desktop-app .variable-summary,
-.desktop-app .narrative-panel-toolbar .asset-search,
 .desktop-app .branch-list > button {
   border-color: var(--line);
   background: var(--panel);
   color: var(--ink);
 }
+.desktop-app .narrative-panel-toolbar .asset-search { border-color: var(--line); background: var(--control-bg); color: var(--ink); }
 .desktop-app .variable-summary:hover { background: var(--panel-3); }
 .desktop-app .variable-editor { border-color: var(--line); background: var(--panel-2); }
 .desktop-app .variable-editor input,
