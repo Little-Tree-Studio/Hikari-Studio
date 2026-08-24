@@ -30,7 +30,7 @@ class EditorAppearanceTests(unittest.TestCase):
     def test_save_is_normalized_and_persistent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = EditorAppearanceStore(Path(directory))
-            saved = store.save({"mode": "fixed", "themeId": "sakura-studio", "motion": "full", "unknown": True})
+            saved = store.save({"mode": "fixed", "themeId": "sakura-studio", "motion": "full", "cornerStyle": "rounded", "unknown": True})
             self.assertEqual(store.load(), saved)
             self.assertEqual(json.loads(store.path.read_text(encoding="utf-8")), saved)
 

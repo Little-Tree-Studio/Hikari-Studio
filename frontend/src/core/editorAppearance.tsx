@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { getEditorAppearance, saveEditorAppearance } from '../api';
 import type { EditorAppearance, EditorThemeId } from '../types';
 
@@ -20,6 +20,36 @@ export const EDITOR_THEMES: EditorThemeDefinition[] = [
 ];
 
 const THEME_IDS = new Set(EDITOR_THEMES.map((theme) => theme.id));
+
+const hasNonDefaultAppearance = (appearance: EditorAppearance) => (
+  appearance.cornerStyle !== DEFAULT_EDITOR_APPEARANCE.cornerStyle
+  || appearance.mode !== DEFAULT_EDITOR_APPEARANCE.mode
+  || appearance.themeId !== DEFAULT_EDITOR_APPEARANCE.themeId
+  || appearance.motion !== DEFAULT_EDITOR_APPEARANCE.motion
+  || Boolean(appearance.accentColor)
+);
+
+const appearancesMatch = (left: EditorAppearance, right: EditorAppearance) => (
+  left.version === right.version
+  && left.mode === right.mode
+  && left.themeId === right.themeId
+  && left.motion === right.motion
+  && left.cornerStyle === right.cornerStyle
+  && left.accentColor === right.accentColor
+);
+
+const cornerVariables = (cornerStyle: EditorAppearance['cornerStyle']): Record<string, string> => {
+  if (cornerStyle === 'sharp') return { '--radius-xs': '0px', '--radius-sm': '0px', '--radius-md': '2px', '--radius-lg': '2px' };
+  if (cornerStyle === 'rounded') return { '--radius-xs': '6px', '--radius-sm': '10px', '--radius-md': '14px', '--radius-lg': '18px' };
+  return { '--radius-xs': '3px', '--radius-sm': '5px', '--radius-md': '6px', '--radius-lg': '8px' };
+};
+
+const themeVariables = (theme: EditorThemeDefinition, dark: boolean): Record<string, string> => ({
+  '--bg': theme.preview[0],
+  '--panel': theme.preview[1],
+  '--panel-2': dark ? '#232b2f' : '#f6f8f9',
+  '--panel-3': dark ? '#2c3539' : '#e9eef0',
+});
 
 export function normalizeEditorAppearance(value?: Partial<EditorAppearance> | null): EditorAppearance {
   const accentColor = typeof value?.accentColor === 'string' && /^#[0-9a-f]{6}$/i.test(value.accentColor) ? value.accentColor.toLowerCase() : undefined;
@@ -72,6 +102,7 @@ const EditorAppearanceContext = createContext<EditorAppearanceContextValue | nul
 
 export function EditorAppearanceProvider({ children }: { children: ReactNode }) {
   const [appearance, setAppearance] = useState(DEFAULT_EDITOR_APPEARANCE);
+  const appearanceRevision = useRef(0);
   const [systemDark, setSystemDark] = useState(() => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false);
   const [systemReduced, setSystemReduced] = useState(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
   const activeTheme = resolveEditorTheme(appearance, systemDark);
@@ -79,20 +110,38 @@ export function EditorAppearanceProvider({ children }: { children: ReactNode }) 
 
   useEffect(() => {
     const stored = localStorage.getItem('slide-editor-appearance');
+    let storedAppearance: EditorAppearance | null = null;
     if (stored) {
       try {
-        setAppearance(normalizeEditorAppearance(JSON.parse(stored)));
-        return;
+        storedAppearance = normalizeEditorAppearance(JSON.parse(stored));
+        setAppearance(storedAppearance);
       } catch {
         localStorage.removeItem('slide-editor-appearance');
       }
     }
+    const loadRevision = appearanceRevision.current;
     void getEditorAppearance().then((value) => {
-      if (!value) return;
-      const normalized = normalizeEditorAppearance(value);
-      setAppearance(normalized);
-      localStorage.setItem('slide-editor-appearance', JSON.stringify(normalized));
-    }).catch(() => undefined);
+      if (loadRevision !== appearanceRevision.current) return;
+      if (value) {
+        const normalized = normalizeEditorAppearance(value);
+        // Older desktop builds accepted the new field in the UI but silently
+        // normalized it away. Preserve a non-default local choice and repair
+        // the desktop file on the next launch.
+        if (storedAppearance && hasNonDefaultAppearance(storedAppearance) && !hasNonDefaultAppearance(normalized)) {
+          setAppearance(storedAppearance);
+          localStorage.setItem('slide-editor-appearance', JSON.stringify(storedAppearance));
+          void saveEditorAppearance(storedAppearance).catch(() => undefined);
+          return;
+        }
+        setAppearance(normalized);
+        localStorage.setItem('slide-editor-appearance', JSON.stringify(normalized));
+      } else if (storedAppearance) {
+        setAppearance(storedAppearance);
+      }
+    }).catch(() => {
+      if (loadRevision !== appearanceRevision.current) return;
+      if (storedAppearance) setAppearance(storedAppearance);
+    });
   }, []);
 
   useEffect(() => {
@@ -111,6 +160,8 @@ export function EditorAppearanceProvider({ children }: { children: ReactNode }) 
     root.dataset.editorTheme = activeTheme;
     root.dataset.cornerStyle = appearance.cornerStyle || 'soft';
     root.dataset.motion = reducedMotion ? 'reduced' : 'full';
+    Object.entries(cornerVariables(appearance.cornerStyle || 'soft')).forEach(([name, value]) => root.style.setProperty(name, value));
+    Object.entries(themeVariables(activeDefinition, activeDefinition.dark)).forEach(([name, value]) => root.style.setProperty(name, value));
     root.style.colorScheme = activeDefinition.dark ? 'dark' : 'light';
     const defaults = EDITOR_THEMES.find((theme) => theme.id === activeTheme)!.preview[2];
     const variables = accentVariables(appearance.accentColor ?? defaults, activeDefinition.dark) as Record<string, string>;
@@ -118,10 +169,23 @@ export function EditorAppearanceProvider({ children }: { children: ReactNode }) 
   }, [activeDefinition.dark, activeTheme, appearance.accentColor, appearance.cornerStyle, reducedMotion]);
 
   const updateAppearance = useCallback(async (next: EditorAppearance) => {
+    appearanceRevision.current += 1;
     const normalized = normalizeEditorAppearance(next);
     setAppearance(normalized);
     localStorage.setItem('slide-editor-appearance', JSON.stringify(normalized));
-    await saveEditorAppearance(normalized);
+    try {
+      const saved = await saveEditorAppearance(normalized);
+      const persisted = normalizeEditorAppearance(saved);
+      // Older desktop builds silently drop fields they do not know. Never let
+      // a lossy echo revert the choice the user just made or clobber the
+      // localStorage copy that repairs the desktop file on the next launch.
+      if (appearancesMatch(persisted, normalized)) {
+        setAppearance(persisted);
+        localStorage.setItem('slide-editor-appearance', JSON.stringify(persisted));
+      }
+    } catch (error) {
+      console.warn('Desktop host could not persist the editor appearance; keeping the local choice', error);
+    }
   }, []);
 
   const value = useMemo(() => ({ appearance, activeTheme, reducedMotion, updateAppearance }), [appearance, activeTheme, reducedMotion, updateAppearance]);

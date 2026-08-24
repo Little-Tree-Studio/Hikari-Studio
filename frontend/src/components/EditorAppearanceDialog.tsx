@@ -16,12 +16,19 @@ export function EditorAppearanceDialog({ open, close, openGameTheme }: Props) {
   const { appearance, activeTheme, updateAppearance } = useEditorAppearance();
   const [draft, setDraft] = useState<EditorAppearance>(appearance);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   useEffect(() => { if (open) setDraft(appearance); }, [appearance, open]);
 
   const selectTheme = (themeId: EditorThemeId) => setDraft({ ...draft, mode: 'fixed', themeId, accentColor: undefined });
   const apply = async () => {
     setSaving(true);
-    try { await updateAppearance(draft); close(); } finally { setSaving(false); }
+    setSaveError(null);
+    try {
+      await updateAppearance(draft);
+      close();
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : '外观设置保存失败');
+    } finally { setSaving(false); }
   };
 
   return <AnimatedModal open={open} close={close} className="appearance-dialog" labelledBy="appearance-title">
@@ -35,6 +42,6 @@ export function EditorAppearanceDialog({ open, close, openGameTheme }: Props) {
       <section className="appearance-section appearance-options"><header><div><strong>界面动效</strong><small>拖拽、画布缩放和连续输入始终保持即时响应</small></div></header><div className="appearance-segmented">{([['system', MonitorCog, '跟随系统'], ['full', Sparkles, '完整动效'], ['reduced', SunMedium, '减少动效']] as const).map(([value, Icon, label]) => <button type="button" key={value} className={draft.motion === value ? 'active' : ''} onClick={() => setDraft({ ...draft, motion: value })}><Icon />{label}</button>)}</div></section>
       <button className="game-theme-entry" onClick={() => { close(); openGameTheme(); }}><Gamepad2 /><span><strong>游戏 UI 主题</strong><small>配置玩家看到的对白、菜单和存档界面</small></span><span>打开编辑器</span></button>
     </div>
-    <footer className="modal-footer"><span className="appearance-footnote">主题切换无需重启 Slide Studio</span><button className="button ghost" onClick={close}>取消</button><button className="button primary" disabled={saving} onClick={() => void apply()}><Check />{saving ? '保存中...' : '应用外观'}</button></footer>
+    <footer className="modal-footer"><span className="appearance-footnote">{saveError ?? '主题切换无需重启 Slide Studio'}</span><button className="button ghost" onClick={close}>取消</button><button className="button primary" disabled={saving} onClick={() => void apply()}><Check />{saving ? '保存中...' : '应用外观'}</button></footer>
   </AnimatedModal>;
 }
