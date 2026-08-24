@@ -426,6 +426,35 @@ class AgentTaskManagerTests(unittest.TestCase):
         choice = next(block for block in updated["scripts"]["opening"] if block["id"] == "choice")
         self.assertEqual(choice["title"], "新选择")
 
+    def test_module_and_narrative_map_operations_apply_without_mutating_source(self) -> None:
+        project = sample_project()
+        project["chapters"][0]["fragments"].append({"id": "second", "name": "第二段"})
+        project["scripts"]["second"] = []
+        operations = [
+            {"type": "create_chapter", "name": "第二章", "entry": False, "fragmentName": "序章", "blocks": [{"type": "narration", "text": "新的开始。"}]},
+            {"type": "upsert_scene", "name": "雨夜", "layers": [{"name": "背景", "assetId": "lake", "opacity": 0.8}]},
+            {"type": "update_narrative_map", "positions": {"fragment:opening": {"x": 100, "y": 200}}, "viewMode": "flow", "connections": [{"from": "opening", "to": "second", "kind": "jump"}]},
+        ]
+        updated = AgentTaskManager._apply_operations(project, operations)
+
+        chapter = next(chapter for chapter in updated["chapters"] if chapter["name"] == "第二章")
+        self.assertFalse(chapter["entry"])
+        fragment = chapter["fragments"][0]
+        self.assertEqual(fragment["name"], "序章")
+        self.assertEqual(updated["scripts"][fragment["id"]][0]["text"], "新的开始。")
+
+        scene = next(scene for scene in updated["scenes"] if scene["name"] == "雨夜")
+        self.assertEqual(scene["layers"][0]["assetId"], "lake")
+        self.assertEqual(scene["layers"][0]["opacity"], 0.8)
+
+        self.assertEqual(updated["settings"]["narrativeMap"]["positions"]["fragment:opening"], {"x": 100, "y": 200})
+        self.assertEqual(updated["settings"]["narrativeMap"]["viewMode"], "flow")
+        self.assertEqual(updated["scripts"]["opening"][-1]["type"], "jump")
+        self.assertEqual(updated["scripts"]["opening"][-1]["target"], "second")
+
+        self.assertEqual(project["meta"]["name"], "测试项目")
+        self.assertEqual(project["scripts"]["opening"][-1]["id"], "b1")
+
     def test_atomic_patch_result_rejects_duplicate_operation(self) -> None:
         manager = self.manager(PartialRetryAi())
         source = manager.start_task("配置角色和分支", sample_project(), self.root)

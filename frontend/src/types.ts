@@ -848,11 +848,14 @@ export type AgentOperation =
   | { type: 'update_blocks'; fragmentId: string; updates: Array<{ blockId: string; patch: StoryBlockPatch }> }
   | { type: 'move_blocks'; fragmentId: string; blockIds: string[]; anchorBlockId?: string; position: 'before' | 'after' | 'start' | 'end' }
   | { type: 'create_fragment'; chapterId: string; name: string; blocks: StoryBlockInput[] }
+  | { type: 'create_chapter'; name: string; entry?: boolean; fragmentName?: string; blocks?: StoryBlockInput[] }
   | { type: 'update_project'; name?: string; author?: string }
   | { type: 'upsert_character'; characterId?: string; name: string; color?: string; description?: string; expressions?: string[]; portraits?: Record<string, string>; defaultPosition?: CharacterPosition; defaultScale?: number }
+  | { type: 'upsert_scene'; sceneId?: string; name: string; groupId?: string; layers?: Array<{ name: string; assetId?: string; opacity?: number; blendMode?: SceneBlendMode; offsetX?: number; offsetY?: number; scale?: number; distance?: number; visible?: boolean }> }
   | { type: 'update_asset'; assetId: string; name?: string; forceBundle?: boolean; audioCategory?: AudioCategory; voiceCharacterId?: string }
   | { type: 'upsert_variable'; name: string; defaultValue: string | number | boolean; valueType: VariableType; displayName?: string; description?: string; persistence: VariablePersistence }
   | { type: 'update_branch'; fragmentId: string; blockId: string; title: string; options: BranchOption[] }
+  | { type: 'update_narrative_map'; positions?: Record<string, { x: number; y: number }>; viewMode?: 'graph' | 'flow'; connections?: Array<{ from: string; to: string; kind: 'jump' | 'call'; label?: string }> }
   | { type: 'update_production_memory'; memory: ProductionMemory };
 
 export interface AgentPlan {
@@ -934,7 +937,7 @@ export interface AgentPatchPreconditionResult { taskId: string; stale: boolean; 
 export interface AgentPatchApplyResult extends AgentPatchPreconditionResult { ok: boolean; project?: Project; appliedOperationIndexes: number[]; summary?: string; save?: { ok: boolean; path: string; bytes: number; version: number } }
 
 export interface AgentResultRef { taskId: string; checkpointId?: string | null }
-export interface AgentComparisonTarget { kind: 'fragment' | 'chapter' | 'character' | 'asset' | 'variable' | 'memory' | 'project'; id?: string | null }
+export interface AgentComparisonTarget { kind: 'fragment' | 'chapter' | 'character' | 'scene' | 'asset' | 'variable' | 'memory' | 'project'; id?: string | null }
 export interface AgentComparisonItem { status: 'added' | 'removed' | 'modified'; summary: string; target?: AgentComparisonTarget | null; value: Record<string, unknown> }
 export interface AgentComparisonCategory { name: string; items: AgentComparisonItem[] }
 export interface AgentResultComparison {

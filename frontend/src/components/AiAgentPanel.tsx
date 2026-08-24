@@ -22,7 +22,7 @@ interface AiAgentPanelProps {
   locateEditor?: (fragmentId: string, blockIndex: number) => void;
 }
 
-const operationName: Record<AgentOperation['type'], string> = { add_blocks: '添加 Block', insert_blocks: '插入 Block', update_blocks: '更新 Block', move_blocks: '移动 Block', create_fragment: '创建片段', update_project: '更新项目信息', upsert_character: '配置角色', update_asset: '更新素材引用', upsert_variable: '配置变量', update_branch: '修改分支', update_production_memory: '更新制作记忆' };
+const operationName: Record<AgentOperation['type'], string> = { add_blocks: '添加 Block', insert_blocks: '插入 Block', update_blocks: '更新 Block', move_blocks: '移动 Block', create_fragment: '创建片段', create_chapter: '创建章节', update_project: '更新项目信息', upsert_character: '配置角色', upsert_scene: '配置场景', update_asset: '更新素材引用', upsert_variable: '配置变量', update_branch: '修改分支', update_narrative_map: '更新叙事地图', update_production_memory: '更新制作记忆' };
 const taskStatusName: Record<AgentTaskStatus, string> = { queued: '排队中', running: '执行中', pausing: '正在暂停', paused: '已暂停', cancelling: '正在取消', completed: '已完成', failed: '失败', cancelled: '已取消', interrupted: '已中断' };
 const pausableTaskStatuses: AgentTaskStatus[] = ['queued', 'running', 'pausing'];
 const resumableTaskStatuses: AgentTaskStatus[] = ['paused', 'interrupted'];
@@ -50,12 +50,16 @@ function operationDetail(operation: AgentOperation) {
   if (operation.type === 'update_blocks') return `${operation.fragmentId} · ${operation.updates.length} Blocks`;
   if (operation.type === 'move_blocks') return `${operation.fragmentId} · ${operation.blockIds.length} Blocks · ${operation.position}`;
   if (operation.type === 'create_fragment') return `${operation.name} · ${operation.blocks.length} Blocks`;
+  if (operation.type === 'create_chapter') return `${operation.name}${operation.fragmentName ? ` · 初始片段「${operation.fragmentName}」` : ''} · ${operation.blocks?.length ?? 0} Blocks`;
   if (operation.type === 'update_project') return [operation.name, operation.author].filter(Boolean).join(' / ');
   if (operation.type === 'upsert_character') return `${operation.name} · ${operation.expressions?.length ?? 0} 个表情 · ${Object.keys(operation.portraits ?? {}).length} 个立绘引用`;
+  if (operation.type === 'upsert_scene') return `${operation.name} · ${operation.layers?.length ?? 0} 个图层`;
   if (operation.type === 'update_asset') return `${operation.assetId}${operation.forceBundle !== undefined ? ` · ${operation.forceBundle ? '强制打包' : '按引用打包'}` : ''}`;
   if (operation.type === 'upsert_variable') return `${operation.name} · ${operation.valueType} · ${String(operation.defaultValue)}`;
+  if (operation.type === 'update_branch') return `${operation.fragmentId} · ${operation.options.length} 个选项`;
+  if (operation.type === 'update_narrative_map') return `${operation.positions ? Object.keys(operation.positions).length + ' 节点' : ''}${operation.connections?.length ? ` · ${operation.connections.length} 连线` : ''}${operation.viewMode ? ` · ${operation.viewMode}` : ''}` || '更新布局';
   if (operation.type === 'update_production_memory') return `世界观 · ${operation.memory.characterRules.length + operation.memory.styleRules.length + operation.memory.facts.length + operation.memory.restrictions.length} 条规则`;
-  return `${operation.fragmentId} · ${operation.options.length} 个选项`;
+  return '其他操作';
 }
 
 export function AiAgentPanel({ project, applyPlan, requestBuild, notify, navigateTarget, selectedBlockIndexes = [], updateProject, locateEditor }: AiAgentPanelProps) {
