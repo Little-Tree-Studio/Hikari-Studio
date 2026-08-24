@@ -3,30 +3,30 @@ import type { GameUiTheme, GameUiThemePreset } from '../types';
 
 export const DEFAULT_GAME_UI_THEME: GameUiTheme = {
   preset: 'modern',
-  fontFamily: '"Microsoft YaHei", "Noto Sans SC", sans-serif',
-  dialogueFontSize: 19,
+  fontFamily: '"Source Han Serif SC", "Noto Serif SC", "Songti SC", "Microsoft YaHei", serif',
+  dialogueFontSize: 20,
   dialogueTextColor: '#ffffff',
   dialogueGradientColor: '#000000',
   dialogueBottomOpacity: 0.97,
   dialogueTopOpacity: 0,
   dialogueHeight: 16.6667,
-  speakerColor: '#67d5c1',
+  speakerColor: '#e3c98f',
   speakerFontSize: 17,
   speakerWeight: 700,
   speakerStyle: 'accent',
-  accentColor: '#67d5c1',
+  accentColor: '#c9ad74',
   buttonTextColor: '#ffffff',
-  systemPanelColor: '#0a1215',
+  systemPanelColor: '#15171b',
   systemPanelOpacity: 0.96,
-  savePanelColor: '#111b1e',
-  saveSlotColor: '#172326',
-  cornerRadius: 4,
+  savePanelColor: '#1a1d22',
+  saveSlotColor: '#21252b',
+  cornerRadius: 2,
 };
 
 export const GAME_UI_PRESETS: Record<GameUiThemePreset, { name: string; description: string; theme: GameUiTheme }> = {
   modern: {
     name: '现代沉浸',
-    description: '低遮挡渐变对白与青绿色交互强调',
+    description: '低遮挡渐变对白、香槟金点缀与衬线正文',
     theme: DEFAULT_GAME_UI_THEME,
   },
   classic: {

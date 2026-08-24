@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { ArchiveRestore, ChevronDown, DoorOpen, Eye, EyeOff, History, Pause, Play, RotateCcw, Save, Settings2, Volume2, X, Zap } from 'lucide-react';
+import { ChevronDown, Eye, RotateCcw, Volume2, X } from 'lucide-react';
 import { SaveGameDialog } from '../components/SaveGameDialog';
 import { TransitioningBackground } from '../components/ui/TransitioningBackground';
 import { assetMatchesTrack } from '../core/audio';
@@ -15,6 +15,32 @@ import type { EngineState } from '../engine-core/types';
 import type { BlockType, Project } from '../types';
 
 const clamp = (value: number, min = 0, max = 1) => Math.max(min, Math.min(max, value));
+
+// 无立绘角色的默认剪影：以角色主题色渲染的静态人形，避免生硬的占位色块。
+const CHARACTER_SILHOUETTE_PATH = 'M100 28C121.5 28 138 44.5 138 66C138 83.5 130.5 97 119 104C117 105 116 107.5 116 110L116 120C116 124 118.5 127 122.5 128.5C149 138 168 152 176.5 176C187 206 192 255 194.5 312C196.5 362 197.5 412 197.5 456C197.5 461.5 193.5 466 188 466L12 466C6.5 466 2.5 461.5 2.5 456C2.5 412 3.5 362 5.5 312C8 255 13 206 23.5 176C32 152 51 138 77.5 128.5C81.5 127 84 124 84 120L84 110C84 107.5 83 105 81 104C69.5 97 62 83.5 62 66C62 44.5 78.5 28 100 28Z';
+
+function CharacterSilhouette({ characterId }: { characterId: string }) {
+  const gradientId = `slide-silhouette-${characterId.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+  return (
+    <svg className="game-character-silhouette" viewBox="0 0 200 480" preserveAspectRatio="xMidYMax meet" aria-hidden="true" focusable="false">
+      <defs>
+        <linearGradient id={`${gradientId}-body`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" style={{ stopColor: 'color-mix(in srgb, var(--character-color) 52%, #fff)' }} />
+          <stop offset=".52" style={{ stopColor: 'var(--character-color)' }} />
+          <stop offset="1" style={{ stopColor: 'color-mix(in srgb, var(--character-color) 55%, #000)' }} />
+        </linearGradient>
+        <radialGradient id={`${gradientId}-aura`} cx=".5" cy=".3" r=".75">
+          <stop offset="0" style={{ stopColor: 'var(--character-color)', stopOpacity: .3 }} />
+          <stop offset="1" style={{ stopColor: 'transparent' }} />
+        </radialGradient>
+      </defs>
+      <rect width="200" height="480" fill={`url(#${gradientId}-aura)`} />
+      <ellipse className="game-character-silhouette-shadow" cx="100" cy="463" rx="82" ry="9" />
+      <path className="game-character-silhouette-body" d={CHARACTER_SILHOUETTE_PATH} fill={`url(#${gradientId}-body)`} />
+      <path className="game-character-silhouette-rim" d={CHARACTER_SILHOUETTE_PATH} />
+    </svg>
+  );
+}
 
 interface RuntimePreferences {
   masterVolume: number;
@@ -515,14 +541,14 @@ export function GameRuntime({ project: baseProject, conformanceCaseId }: { proje
           const character = project.characters.find((item) => item.id === actor.characterId);
           const uri = assetUri(actor.assetId);
           return <div className={`game-character enter-${actor.animation}`} key={actor.characterId} style={{ left: `${actor.x}%`, bottom: `${100 - actor.y}%`, width: characterWidthCss(actor.width), height: dimensionCss(actor.height), transform: `translateX(-50%) scale(${actor.scale})`, opacity: actor.opacity, zIndex: actor.layer + 20 }}>
-            {uri ? <img src={uri} alt={`${character?.name ?? actor.characterId} · ${actor.expression}`} /> : <div className="game-character-placeholder" style={{ '--character-color': character?.color ?? '#42636a' } as CSSProperties}>{character?.name?.slice(0, 1) ?? '?'}</div>}
+            {uri ? <img src={uri} alt={`${character?.name ?? actor.characterId} · ${actor.expression}`} /> : <div className="game-character-placeholder" style={{ '--character-color': character?.color ?? '#5d6f81' } as CSSProperties}><CharacterSilhouette characterId={actor.characterId} />{character?.name && <span className="game-character-placeholder-name">{character.name}</span>}</div>}
             {actor.overlays?.map((overlay) => { const overlayUri = assetUri(overlay.assetId); return overlayUri ? <img className="game-character-overlay" key={overlay.id} src={overlayUri} alt="" style={{ opacity: overlay.opacity, zIndex: overlay.layer, width: overlay.overrideSize ? dimensionCss(overlay.width) : '100%', height: overlay.overrideSize ? dimensionCss(overlay.height) : '100%' }} /> : null; })}
           </div>;
         })}
       </div>
       <div className="game-shade" />
-      {current?.type === 'branch' && <section className="game-choices" onClick={(event) => event.stopPropagation()}><strong>{current.title || '请选择'}</strong>{current.options?.map((option, index) => <button key={`${option.target}-${index}`} onClick={() => setState((value) => chooseBranch(project, value, option.target))}>{option.text}</button>)}</section>}
-      {screen === 'playing' && state.finished && <section className={`game-finished ${state.error ? 'error' : ''}`} onClick={(event) => event.stopPropagation()}><small>{state.error ? 'RUNTIME ERROR' : 'FIN'}</small><strong>{state.error ? '游戏运行中断' : '旅程结束'}</strong><span>{state.error || project.meta.name}</span><nav>{state.error && <button onClick={() => setState({ ...createEngineState(project, state.fragmentId), readBlocks: { ...globalReadBlocks.current } })}><RotateCcw />重试当前章节</button>}<button className="primary" onClick={() => { setScreen('title'); setAutoPlay(false); setSkipMode(false); }}><DoorOpen />返回标题</button></nav></section>}
+      {current?.type === 'branch' && <section className="game-choices" onClick={(event) => event.stopPropagation()}><strong>{current.title || '请选择'}</strong>{current.options?.map((option, index) => <button key={`${option.target}-${index}`} onClick={() => setState((value) => chooseBranch(project, value, option.target))}><span>{option.text}</span></button>)}</section>}
+      {screen === 'playing' && state.finished && <section className={`game-finished ${state.error ? 'error' : ''}`} onClick={(event) => event.stopPropagation()}><small>{state.error ? 'RUNTIME ERROR' : 'FIN'}</small><strong>{state.error ? '游戏运行中断' : '旅程结束'}</strong><span>{state.error || project.meta.name}</span><nav>{state.error && <button onClick={() => setState({ ...createEngineState(project, state.fragmentId), readBlocks: { ...globalReadBlocks.current } })}><span>重试当前章节</span></button>}<button className="primary" onClick={() => { setScreen('title'); setAutoPlay(false); setSkipMode(false); }}><span>返回标题</span></button></nav></section>}
     </section>
     {screen === 'title' && <section className="game-title-screen" onClick={(event) => event.stopPropagation()}>
       {titleBackground && <img className="game-title-background" src={titleBackground} alt="" />}
@@ -531,11 +557,11 @@ export function GameRuntime({ project: baseProject, conformanceCaseId }: { proje
         {titleLogo ? <img className="game-title-logo" src={titleLogo} alt={project.meta.name} /> : <h1>{project.meta.name}</h1>}
         <p>{project.ui?.title?.subtitle || project.meta.author || 'Slide Studio'}</p>
         <nav className="game-title-actions" aria-label="标题菜单">
-          <button className="primary" onClick={requestNewGame}><Play />开始游戏</button>
-          <button disabled={!continueSlot || continueLoading} onClick={() => void continueGame()}><RotateCcw />{continueLoading ? '检查存档…' : '继续游戏'}</button>
-          <button onClick={() => openPanel('load')}><ArchiveRestore />读取存档</button>
-          <button onClick={() => openPanel('settings')}><Settings2 />游戏设置</button>
-          <button onClick={() => setConfirmation('exit')}><DoorOpen />退出游戏</button>
+          <button className="primary" onClick={requestNewGame}><span>开始游戏</span></button>
+          <button disabled={!continueSlot || continueLoading} onClick={() => void continueGame()}><span>{continueLoading ? '检查存档…' : '继续游戏'}</span></button>
+          <button onClick={() => openPanel('load')}><span>读取存档</span></button>
+          <button onClick={() => openPanel('settings')}><span>游戏设置</span></button>
+          <button onClick={() => setConfirmation('exit')}><span>退出游戏</span></button>
         </nav>
       </div>
       <small className="game-title-version">{project.meta.author || 'Slide Studio'} · v{project.meta.gameVersion || '1.0.0'}</small>
@@ -549,17 +575,17 @@ export function GameRuntime({ project: baseProject, conformanceCaseId }: { proje
         <div ref={dialogueMeasureRef} className="game-dialogue-measure" aria-hidden="true">{current?.type === 'dialogue' && <strong>{resolveDialogueSpeaker(project, current, state.variables)}</strong>}<p>{fullText}<span className="dialogue-complete-indicator"><ChevronDown /></span></p></div>
       </div>
       <nav className="game-text-controls" aria-label="游戏控制">
-        <button className={fastForwardActive ? 'active' : ''} onClick={() => { setAutoPlay(false); setControlFastForward(false); setSkipMode((value) => !value); }}><Zap />{controlFastForward ? '快进' : '跳过'}</button>
-        <button className={autoPlay ? 'active' : ''} onClick={() => { setSkipMode(false); setAutoPlay((value) => !value); }}>{autoPlay ? <Pause /> : <Play />}自动</button>
-        <button onClick={() => openPanel('save')}><Save />存档</button>
-        <button onClick={() => openPanel('load')}><ArchiveRestore />读档</button>
-        <button onClick={() => openPanel('history')}><History />历史</button>
-        <button onClick={() => openPanel('settings')}><Settings2 />设置</button>
-        <button onClick={() => setUiHidden(true)}><EyeOff />隐藏</button>
+        <button className={fastForwardActive ? 'active' : ''} onClick={() => { setAutoPlay(false); setControlFastForward(false); setSkipMode((value) => !value); }}><span>跳过</span></button>
+        <button className={autoPlay ? 'active' : ''} onClick={() => { setSkipMode(false); setAutoPlay((value) => !value); }}><span>自动</span></button>
+        <button onClick={() => openPanel('save')}><span>存档</span></button>
+        <button onClick={() => openPanel('load')}><span>读档</span></button>
+        <button onClick={() => openPanel('history')}><span>历史</span></button>
+        <button onClick={() => openPanel('settings')}><span>设置</span></button>
+        <button onClick={() => setUiHidden(true)} title="隐藏界面"><span>隐藏</span></button>
       </nav>
     </section>}
     {screen === 'playing' && uiHidden && <button className="game-ui-restore" title="显示界面" onClick={() => setUiHidden(false)}><Eye /></button>}
-    {screen === 'playing' && systemMenuOpen && <section className="game-system-backdrop" onClick={() => setSystemMenuOpen(false)}><div className="game-system-menu" role="dialog" aria-modal="true" aria-labelledby="system-menu-title" onClick={(event) => event.stopPropagation()}><header><span>PAUSED</span><h2 id="system-menu-title">系统菜单</h2></header><nav><button className="primary" onClick={() => setSystemMenuOpen(false)}><Play />继续游戏</button><button onClick={() => void quickSave()}><Zap />快速存档</button><button onClick={() => void quickLoad()}><ArchiveRestore />快速读档</button><button onClick={() => openPanel('load')}><ArchiveRestore />读取存档</button><button onClick={() => openPanel('settings')}><Settings2 />游戏设置</button><button onClick={() => setConfirmation('return-title')}><RotateCcw />返回标题</button></nav></div></section>}
+    {screen === 'playing' && systemMenuOpen && <section className="game-system-backdrop" onClick={() => setSystemMenuOpen(false)}><div className="game-system-menu" role="dialog" aria-modal="true" aria-labelledby="system-menu-title" onClick={(event) => event.stopPropagation()}><header><span>PAUSED</span><h2 id="system-menu-title">系统菜单</h2></header><nav><button className="primary" onClick={() => setSystemMenuOpen(false)}><span>继续游戏</span></button><button onClick={() => void quickSave()}><span>快速存档</span></button><button onClick={() => void quickLoad()}><span>快速读档</span></button><button onClick={() => openPanel('load')}><span>读取存档</span></button><button onClick={() => openPanel('settings')}><span>游戏设置</span></button><button onClick={() => setConfirmation('return-title')}><span>返回标题</span></button></nav></div></section>}
     {notice && <button className="game-notice" onClick={() => setNotice('')}>{notice}</button>}
     {backlogOpen && <section className="game-panel game-backlog"><header><strong>文本历史</strong><button className="backlog-rollback" title="回退一步" disabled={!state.rollbackStack.length} onClick={rollback}><RotateCcw /></button><button title="关闭" onClick={() => setBacklogOpen(false)}><X /></button></header><div>{state.backlog.length ? [...state.backlog].reverse().map((entry, index) => <article key={`${entry.blockId}-${index}`}><div><strong>{entry.speaker || '旁白'}</strong>{entry.voiceAssetId && <button title="重播语音" onClick={() => replayVoice(entry.voiceAssetId!)}><Volume2 /></button>}</div><p>{entry.text}</p></article>) : <span>还没有历史记录</span>}</div></section>}
     {settingsOpen && <section className="game-panel game-settings"><header><strong>游戏设置</strong><button title="关闭" onClick={() => setSettingsOpen(false)}><X /></button></header>
