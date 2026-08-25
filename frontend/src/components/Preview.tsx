@@ -58,6 +58,7 @@ interface PreviewProps {
   onLanguageChange?: (language: string) => void;
   onEditorLocationChange?: (fragmentId: string, blockIndex: number) => void;
   onStageCharacterMove?: (characterId: string, x: number, y: number) => void;
+  onResolutionChange?: (resolution: [number, number]) => void;
   timelinePreview?: TimelinePreviewValues;
   conformanceCaseId?: BlockType;
 }
@@ -92,6 +93,7 @@ export function Preview({
   onLanguageChange,
   onEditorLocationChange,
   onStageCharacterMove,
+  onResolutionChange,
   timelinePreview,
   conformanceCaseId,
 }: PreviewProps) {
@@ -116,6 +118,9 @@ export function Preview({
   const [resolution, setResolution] = useState(
     `${project.meta.resolution[0]}x${project.meta.resolution[1]}`,
   );
+  useEffect(() => {
+    setResolution(`${project.meta.resolution[0]}x${project.meta.resolution[1]}`);
+  }, [project.meta.resolution]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showSafeArea, setShowSafeArea] = useState(false);
   const [constrainToSafeArea, setConstrainToSafeArea] = useState(true);
@@ -583,9 +588,20 @@ export function Preview({
         <Select
           className="compact"
           value={resolution}
-          onChange={(value) => setResolution(value)}
+          onChange={(value) => {
+            setResolution(value);
+            const [width, height] = value.split('x').map(Number);
+            if (onResolutionChange && Number.isFinite(width) && Number.isFinite(height)) onResolutionChange([width, height]);
+          }}
         >
+          {!['1024x768', '1280x800', '1280x720', '1366x768', '1600x900', '1920x1080'].includes(resolution) && (
+            <option value={resolution}>{resolution.replace('x', ' × ')}</option>
+          )}
+          <option value="1024x768">1024 × 768</option>
+          <option value="1280x800">1280 × 800</option>
           <option value="1280x720">1280 × 720</option>
+          <option value="1366x768">1366 × 768</option>
+          <option value="1600x900">1600 × 900</option>
           <option value="1920x1080">1920 × 1080</option>
         </Select>
         {onLanguageChange && runtimeLanguages.length > 1 && (
@@ -681,6 +697,7 @@ export function Preview({
         <div
           className={`stage ${showSafeArea || draggingCharacterId ? "show-safe-area" : ""} ${camera.shake > 0 ? "camera-shake" : ""} ${camera.filter === "vignette" ? "camera-vignette" : ""}`}
           data-resolution={resolution}
+          style={{ '--stage-aspect': resolution.replace('x', ' / ') } as CSSProperties}
           onClick={() =>
             current?.type !== "branch" &&
             setState((value) => advanceEngine(project, value))

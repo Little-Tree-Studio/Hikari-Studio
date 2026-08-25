@@ -571,7 +571,7 @@ html[data-editor-theme="high-contrast"] img { color-scheme: normal; }
   --timeline-character: #d66f67;
   --timeline-camera: #9b76c8;
   --timeline-audio: #4d9d81;
-  height: 100%; min-height: 0; display: grid; grid-template-rows: 48px minmax(280px, 1fr) minmax(280px, 40%);
+  height: 100%; min-height: 0; display: grid; grid-template-rows: 48px minmax(0, 1fr) minmax(140px, 40%);
   background: var(--bg); color: var(--ink); overflow: hidden;
 }
 .stage-timeline-toolbar { display: grid; grid-template-columns: minmax(190px, 1fr) auto minmax(300px, 1fr); align-items: center; gap: 12px; padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
@@ -593,8 +593,11 @@ html[data-editor-theme="high-contrast"] img { color-scheme: normal; }
 .timeline-add-menu button:hover { background: var(--accent-soft); }
 .timeline-add-menu svg { width: 15px; }
 .stage-timeline-upper { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 280px; border-bottom: 1px solid var(--line); }
-.stage-timeline-preview { min-width: 0; min-height: 0; padding: 10px; overflow: auto; background: var(--panel-2); }
-.stage-timeline-preview > .preview-pane { width: min(860px, 100%); min-height: 100%; margin: auto; border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow-sm); }
+.stage-timeline-preview { min-width: 0; min-height: 0; padding: 10px; overflow: hidden; background: var(--panel-2); }
+.stage-timeline-preview > .preview-pane { width: min(860px, 100%); height: 100%; min-height: 0; margin: auto; border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow-sm); }
+.stage-timeline-preview > .preview-pane .stage-wrap { min-height: 0; flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.stage-timeline-preview > .preview-pane .stage { width: auto; height: 100%; max-width: 100%; max-height: 100%; aspect-ratio: var(--stage-aspect, 16 / 9); }
+.desktop-app .stage { aspect-ratio: var(--stage-aspect, 16 / 9); }
 .stage-timeline-preview .inspector { display: none; }
 .timeline-clip-inspector { min-width: 0; min-height: 0; border-left: 1px solid var(--line); background: var(--panel); overflow: auto; }
 .timeline-clip-inspector > header { position: sticky; top: 0; z-index: 2; height: 42px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
