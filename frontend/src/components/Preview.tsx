@@ -58,7 +58,6 @@ interface PreviewProps {
   onLanguageChange?: (language: string) => void;
   onEditorLocationChange?: (fragmentId: string, blockIndex: number) => void;
   onStageCharacterMove?: (characterId: string, x: number, y: number) => void;
-  onResolutionChange?: (resolution: [number, number]) => void;
   timelinePreview?: TimelinePreviewValues;
   conformanceCaseId?: BlockType;
 }
@@ -93,7 +92,6 @@ export function Preview({
   onLanguageChange,
   onEditorLocationChange,
   onStageCharacterMove,
-  onResolutionChange,
   timelinePreview,
   conformanceCaseId,
 }: PreviewProps) {
@@ -588,11 +586,7 @@ export function Preview({
         <Select
           className="compact"
           value={resolution}
-          onChange={(value) => {
-            setResolution(value);
-            const [width, height] = value.split('x').map(Number);
-            if (onResolutionChange && Number.isFinite(width) && Number.isFinite(height)) onResolutionChange([width, height]);
-          }}
+          onChange={setResolution}
         >
           {!['1024x768', '1280x800', '1280x720', '1366x768', '1600x900', '1920x1080'].includes(resolution) && (
             <option value={resolution}>{resolution.replace('x', ' × ')}</option>
