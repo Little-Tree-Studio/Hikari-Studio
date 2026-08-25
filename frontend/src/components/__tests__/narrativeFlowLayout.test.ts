@@ -71,3 +71,30 @@ describe('narrative map flow layout', () => {
     });
   });
 });
+
+describe('narrative map structure layout', () => {
+  it('spaces chapter groups so fragments from different chapters never overlap', () => {
+    const project = {
+      ...makeProject(),
+      chapters: [
+        { id: 'c1', name: '开始', entry: true, fragments: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }] },
+        { id: 'c2', name: '第二章', fragments: [{ id: 'c', name: 'C' }, { id: 'd', name: 'D' }, { id: 'e', name: 'E' }] },
+        { id: 'c3', name: '第三章', fragments: [{ id: 'f', name: 'F' }] },
+        { id: 'c4', name: '空章节', fragments: [] },
+      ],
+      scripts: { a: [], b: [], c: [], d: [], e: [], f: [] },
+    } as unknown as Project;
+    const graph = buildGraph(project);
+
+    const fragmentXs = graph.nodes.filter((node) => node.kind === 'fragment').map((node) => graph.defaults[node.id].x).sort((a, b) => a - b);
+    for (let index = 1; index < fragmentXs.length; index += 1) expect(fragmentXs[index] - fragmentXs[index - 1]).toBeGreaterThanOrEqual(210);
+
+    const chapterXs = graph.nodes.filter((node) => node.kind === 'chapter').map((node) => graph.defaults[node.id].x).sort((a, b) => a - b);
+    for (let index = 1; index < chapterXs.length; index += 1) expect(chapterXs[index] - chapterXs[index - 1]).toBeGreaterThanOrEqual(210);
+
+    graph.nodes.filter((node) => node.kind === 'fragment').forEach((node) => {
+      const chapterX = graph.defaults[`chapter:${node.chapterId}`].x;
+      expect(Math.abs(graph.defaults[node.id].x - chapterX)).toBeLessThanOrEqual(245 * 2);
+    });
+  });
+});

@@ -74,17 +74,20 @@ export function buildGraph(project: Project) {
   const edges: NarrativeEdge[] = [];
   const defaults: Record<string, Point> = {};
   const fragmentIds = new Set(project.chapters.flatMap((chapter) => chapter.fragments.map((fragment) => fragment.id)));
-  const chapterGap = 430;
+  const fragmentStride = 245;
+  const groupGap = 70;
+  let cursorX = 90;
 
   project.chapters.forEach((chapter, chapterIndex) => {
     const chapterNodeId = `chapter:${chapter.id}`;
+    const groupWidth = Math.max(nodeWidth, (chapter.fragments.length - 1) * fragmentStride + nodeWidth);
     nodes.push({ id: chapterNodeId, kind: 'chapter', title: chapter.name, subtitle: chapter.entry ? '游戏入口' : chapter.disabled ? `已禁用 · ${chapter.fragments.length} 个 Fragment` : `${chapter.fragments.length} 个 Fragment`, chapterId: chapter.id, disabled: chapter.disabled });
-    defaults[chapterNodeId] = { x: 90 + chapterIndex * chapterGap, y: 80 };
+    defaults[chapterNodeId] = { x: cursorX + (groupWidth - nodeWidth) / 2, y: 80 };
     const nextChapter = project.chapters[chapterIndex + 1];
     if (nextChapter) edges.push({ id: `trunk:${chapter.id}`, source: chapterNodeId, target: `chapter:${nextChapter.id}`, kind: 'trunk', label: '章节顺序' });
 
     chapter.fragments.forEach((fragment, fragmentIndex) => {
-      const x = 90 + chapterIndex * chapterGap + fragmentIndex * 245;
+      const x = cursorX + fragmentIndex * fragmentStride;
       const fragmentNodeId = `fragment:${fragment.id}`;
       nodes.push({ id: fragmentNodeId, kind: 'fragment', title: fragment.name, subtitle: chapter.name, fragmentId: fragment.id, chapterId: chapter.id, disabled: chapter.disabled });
       defaults[fragmentNodeId] = { x, y: 265 };
@@ -111,6 +114,7 @@ export function buildGraph(project: Project) {
         if ((block.type === 'jump' || block.type === 'call') && block.target && fragmentIds.has(block.target)) edges.push({ id: `${block.id}:target`, source: logicId, target: `fragment:${block.target}`, kind: block.type, label: block.type === 'call' ? '调用并返回' : '跳转', sourceFragment: fragment.id, blockId: block.id, detachable: true });
       });
     });
+    cursorX += groupWidth + groupGap;
   });
 
   const writes = nodes.filter((node) => node.kind === 'write');
