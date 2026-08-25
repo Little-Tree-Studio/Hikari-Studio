@@ -56,8 +56,8 @@ export function useStandalonePanel({ windowName, title, rootId, dock, setDock, n
       windowRef.current.focus();
       return;
     }
-    const width = Math.min(520, Math.max(320, window.innerWidth - 48));
-    const height = Math.min(500, Math.max(240, window.innerHeight - 150));
+    const width = Math.min(380, Math.max(280, window.innerWidth - 80));
+    const height = Math.min(420, Math.max(220, window.innerHeight - 220));
     closeDockRef.current = dockRef.current;
     restorePendingRef.current = true;
     const popup = window.open('', windowName, `popup,width=${width},height=${height},resizable=yes`);
