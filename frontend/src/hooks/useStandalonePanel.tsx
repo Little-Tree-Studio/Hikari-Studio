@@ -64,7 +64,7 @@ export function useStandalonePanel({ windowName, title, rootId, dock, setDock, n
     if (!popup) { restorePendingRef.current = false; notify('独立窗口被系统拦截', 'error'); return; }
     windowRef.current = popup;
     popup.document.open();
-    popup.document.write(`<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><title>${title}</title></head><body><div id="${rootId}"></div></body></html>`);
+    popup.document.write(`<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover"><title>${title}</title></head><body><div id="${rootId}"></div></body></html>`);
     popup.document.close();
     popup.resizeTo(width, height);
     for (const node of document.head.querySelectorAll('style,link[rel="stylesheet"]')) popup.document.head.appendChild(node.cloneNode(true));

@@ -6,7 +6,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QObject, QUrl, Qt, Signal
+from PySide6.QtCore import QObject, QTimer, QUrl, Qt, Signal
 from PySide6.QtGui import QCloseEvent, QMoveEvent, QResizeEvent
 from PySide6.QtWidgets import QApplication, QFileDialog, QMainWindow
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineScript, QWebEngineUrlRequestInterceptor
@@ -243,6 +243,13 @@ class QtWebHost:
         self.page = QtWebPage(self.view, self)
         self.view.setPage(self.page)
         self.page.titleChanged.connect(self.window.setWindowTitle)
+        # Pinch / ctrl-wheel zoom in WebEngine triggers the global page zoom
+        # factor, which scrambles layout and makes toolbar buttons overlap.
+        # Lock the WebEngine zoom factor to 1.0 for every host window.
+        try:
+            self.page.setZoomFactor(1.0)
+        except Exception:
+            LOGGER.debug("Failed to lock the WebEngine zoom factor", exc_info=True)
         self.window.setCentralWidget(self.view)
         if self.window_id != "main":
             register = getattr(self.api, "_register_popup_window", None)
@@ -268,12 +275,60 @@ class QtWebHost:
         if url is not None:
             target = url if isinstance(url, QUrl) else QUrl.fromLocalFile(str(url.resolve()))
             self.view.load(target)
+            # When the page finishes loading, force a reflow after a short
+            # delay so the visible DOM matches Qt's first stable layout.
+            self.view.loadFinished.connect(self._schedule_reflow)
+            self.window.resized.connect(self._schedule_reflow)
+            # The first paint on WebEngine occasionally lands before Qt has
+            # fully synchronized its event dispatch. Kick the renderer a few
+            # times so subsequent clicks land on the right hit targets.
+            QTimer.singleShot(120, self._kick_repaint)
+            QTimer.singleShot(420, self._kick_repaint)
 
     def show(self) -> None:
         self.window.show()
 
     def load_finished_connect(self, callback: Any) -> None:
         self.view.loadFinished.connect(callback)
+
+    def _reflow(self) -> None:
+        # WebEngine sometimes commits the first paint at a stale viewport size
+        # while Qt is still settling its window geometry. Force the page to
+        # recompute its layout after the next tick so pointer hit-testing matches
+        # the visible chrome.
+        try:
+            self.page.runJavaScript(
+                "(function(){window.dispatchEvent(new Event('resize'));"
+                "if (window.visualViewport) {"
+                "  window.visualViewport.dispatchEvent(new Event('resize'));"
+                "} document.documentElement.dataset.slideReflow = String(Date.now());"
+                "})();"
+            )
+        except Exception:
+            LOGGER.debug("Failed to nudge the WebEngine viewport", exc_info=True)
+
+    def _schedule_reflow(self) -> None:
+        QTimer.singleShot(50, self._reflow)
+        QTimer.singleShot(300, self._reflow)
+
+    def _kick_repaint(self) -> None:
+        # Nudge WebEngine: scroll the viewport by zero so it flushes a fresh
+        # frame and re-runs hit-testing. Helps when the first few clicks after
+        # launch are dropped because the renderer kept stale layout.
+        try:
+            self.page.runJavaScript(
+                "(function(){"
+                "const x=window.scrollX,y=window.scrollY;"
+                "window.scrollTo(x,y);"
+                "window.dispatchEvent(new Event('resize'));"
+                "window.dispatchEvent(new Event('focus'));"
+                "if (document.activeElement && document.activeElement.blur) {"
+                "  const ae=document.activeElement; ae.blur(); setTimeout(function(){ae.focus&&ae.focus();},0);"
+                "}"
+                "})();"
+            )
+        except Exception:
+            LOGGER.debug("Failed to nudge the WebEngine renderer", exc_info=True)
 
     def create_popup_page(self) -> QWebEnginePage:
         popup = QtWebHost(
