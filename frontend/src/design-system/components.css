@@ -45,6 +45,10 @@ body { font-size: 13px; }
 .top-dropdown, .context-menu, .notification-panel { border-color: var(--line); background: var(--panel); color: var(--ink); box-shadow: var(--shadow); }
 .top-dropdown button, .context-menu button { color: var(--ink); }
 .top-dropdown button:hover, .context-menu button:hover { background: var(--panel-2); }
+.context-menu-separator { height: 1px; margin: 4px 6px; background: var(--line-soft); }
+.ds-context-menu button { display: flex; align-items: center; gap: 8px; padding-right: 12px; }
+.ds-context-menu button > span { flex: 1; }
+.ds-context-menu button > em { font-style: normal; font-size: 10px; color: var(--muted); margin-left: 8px; }
 
 .block-card, .stat, .asset-card, .history-list, .history-item, .recovery-card, .history-category-list article,
 .agent-comparison-result, .agent-patch-conflicts, .scene-browser, .scene-stage-toolbar, .scene-camera-controls,

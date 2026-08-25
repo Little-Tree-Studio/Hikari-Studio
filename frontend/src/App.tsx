@@ -6,8 +6,8 @@ import {
   CheckCircle2, ChartColumnBig, ChevronDown, ChevronsUpDown, CircleAlert, CirclePlay, Clapperboard, Code2, Copy, CornerDownRight,
   ExternalLink, FilePlus2, FileText, FileUp, Flag, FolderOpen, FolderPlus,
   GitBranch, GitFork, GripVertical, HardDrive, History, Image, Languages, LocateFixed, Maximize2,
-  LogOut, Menu, MessageSquareText, Minus, Music2, NotebookPen, PackageCheck, Palette, Plus,
-  Pin, PinOff, Redo2, Rocket, Save, Search, Settings2, Sigma,
+  LogOut, Menu, MessageSquareText, Minus, Music2, NotebookPen, PackageCheck, Palette, Pin, PinOff, Play, Plus,
+  Redo2, RefreshCw, Rocket, Save, Search, Settings2, Sigma,
   Sparkles, Trash2, Undo2, UserPlus, UserRound, Users, X, PanelBottom, PanelRight, PictureInPicture2, LoaderCircle,
 } from 'lucide-react';
 import {
@@ -30,6 +30,8 @@ import { TextWorkbench } from './components/TextWorkbench';
 import { Checkbox } from './components/ui/Checkbox';
 import { Select } from './components/ui/Select';
 import { Slider } from './components/ui/Slider';
+import { ContextMenu, type ContextMenuItem } from './components/ui/ContextMenu';
+import { PageContextMenu } from './components/ui/PageContextMenu';
 import { EditorAssetImportDialog, type EditorImportAction } from './components/EditorAssetImportDialog';
 import { StageTimelineWorkspace } from './components/StageTimelineWorkspace';
 import { ProjectLaunchScreen } from './components/ProjectLaunchScreen';
@@ -1708,18 +1710,96 @@ export default function App() {
   };
 
   const activeName = project.chapters.flatMap((chapter) => chapter.fragments).find((fragment) => fragment.id === project.activeFragmentId)?.name ?? '片段';
+  const buildScriptContextMenu = (): ContextMenuItem[] => [
+    { kind: 'header', label: '剧本编辑器' },
+    { kind: 'item', label: '打开添加 Block 面板', icon: <Plus />, onSelect: () => setModal('blocks') },
+    { kind: 'item', label: '导入剧本', icon: <FileUp />, onSelect: () => setScriptImportOpen(true) },
+    { kind: 'separator' },
+    { kind: 'item', label: '切换为卡片视图', onSelect: () => setView('cards'), disabled: view === 'cards' },
+    { kind: 'item', label: '切换为纯文本', onSelect: () => setView('plain'), disabled: view === 'plain' },
+    { kind: 'item', label: "切换为 Ren'Py", onSelect: () => setView('code'), disabled: view === 'code' },
+    { kind: 'item', label: '切换为 JSON', onSelect: () => setView('json'), disabled: view === 'json' },
+    { kind: 'separator' },
+    { kind: 'item', label: '新建章节', icon: <BookOpen />, onSelect: () => void addChapter() },
+    { kind: 'separator' },
+    { kind: 'item', label: '撤销', icon: <Undo2 />, onSelect: undo, disabled: !undoCount, shortcut: 'Ctrl Z' },
+    { kind: 'item', label: '重做', icon: <Redo2 />, onSelect: redo, disabled: !redoCount, shortcut: 'Ctrl Y' },
+  ];
+  const buildStageContextMenu = (): ContextMenuItem[] => [
+    { kind: 'header', label: '演出 / 时间线' },
+    { kind: 'item', label: '打开游戏预览', icon: <Play />, onSelect: () => setDebugRunning(true) },
+    { kind: 'item', label: '停止调试', icon: <CircleAlert />, onSelect: () => setDebugRunning(false) },
+    { kind: 'separator' },
+    { kind: 'item', label: '定位到当前 Block', icon: <LocateFixed />, onSelect: () => setSelected(selected) },
+  ];
+  const buildTextsContextMenu = (): ContextMenuItem[] => [
+    { kind: 'header', label: '文本与语言' },
+    { kind: 'item', label: '导入剧本', icon: <FileUp />, onSelect: () => setScriptImportOpen(true) },
+    { kind: 'item', label: '打开剧本编辑器', icon: <NotebookPen />, onSelect: () => navigatePage('script') },
+    { kind: 'separator' },
+    { kind: 'item', label: '查看导出报告', icon: <Sparkles />, onSelect: () => show('导出报告查看：运行诊断/导出时自动生成') },
+  ];
+  const buildAssetsContextMenu = (): ContextMenuItem[] => [
+    { kind: 'header', label: '素材管理' },
+    { kind: 'separator' },
+    { kind: 'item', label: '打开角色管理', icon: <UserPlus />, onSelect: () => navigatePage('characters') },
+    { kind: 'item', label: '打开场景管理', icon: <Image />, onSelect: () => navigatePage('scenes') },
+    { kind: 'item', label: '打开音频管理', icon: <AudioLines />, onSelect: () => navigatePage('audio') },
+  ];
+  const buildAudioContextMenu = (): ContextMenuItem[] => [
+    { kind: 'header', label: '音频管理' },
+    { kind: 'item', label: '查看 BGM', onSelect: () => setAudioCategory('bgm'), disabled: audioCategory === 'bgm' },
+    { kind: 'item', label: '查看音效', onSelect: () => setAudioCategory('sfx'), disabled: audioCategory === 'sfx' },
+    { kind: 'item', label: '查看语音', onSelect: () => setAudioCategory('voice'), disabled: audioCategory === 'voice' },
+    { kind: 'separator' },
+    { kind: 'item', label: '重新扫描模型', icon: <RefreshCw />, onSelect: () => show('语音识别已重新���队') },
+  ];
+  const buildMapContextMenu = (): ContextMenuItem[] => [
+    { kind: 'header', label: '叙事地图' },
+    { kind: 'item', label: '添加章节', icon: <BookOpen />, onSelect: () => void addChapter() },
+    { kind: 'separator' },
+    { kind: 'item', label: '返回剧本编辑', icon: <NotebookPen />, onSelect: () => navigatePage('script') },
+  ];
+  const buildInsightsContextMenu = (): ContextMenuItem[] => [
+    { kind: 'header', label: '制作洞察' },
+    { kind: 'item', label: '导出统计报告', icon: <ChartColumnBig />, onSelect: () => show('可在剧情预览或导出时查看统计') },
+    { kind: 'item', label: '查看 AI 面板', icon: <Sparkles />, onSelect: () => navigatePage('ai') },
+  ];
+  const buildCharactersContextMenu = (): ContextMenuItem[] => [
+    { kind: 'header', label: '角色管理' },
+    { kind: 'item', label: '新建角色', icon: <UserPlus />, onSelect: () => navigatePage('characters') },
+    { kind: 'item', label: '打开剧本编辑', icon: <NotebookPen />, onSelect: () => navigatePage('script') },
+  ];
+  const buildScenesContextMenu = (): ContextMenuItem[] => [
+    { kind: 'header', label: '场景管理' },
+    { kind: 'item', label: '新建场景', icon: <Image />, onSelect: () => navigatePage('scenes') },
+    { kind: 'item', label: '打开剧本编辑', icon: <NotebookPen />, onSelect: () => navigatePage('script') },
+  ];
+  const buildHistoryContextMenu = (): ContextMenuItem[] => [
+    { kind: 'header', label: '历史快照' },
+    { kind: 'item', label: '撤销', icon: <Undo2 />, onSelect: undo, disabled: !undoCount },
+    { kind: 'item', label: '重做', icon: <Redo2 />, onSelect: redo, disabled: !redoCount },
+    { kind: 'separator' },
+    { kind: 'item', label: '清理普通历史', icon: <Trash2 />, onSelect: () => void clearOrdinaryHistory(), danger: true },
+  ];
+  const buildAiContextMenu = (): ContextMenuItem[] => [
+    { kind: 'header', label: 'AI Agent' },
+    { kind: 'item', label: '打开 AI 设置', icon: <Settings2 />, onSelect: () => openUnifiedSettings('ai') },
+    { kind: 'item', label: '打开剧本', icon: <NotebookPen />, onSelect: () => navigatePage('script') },
+  ];
+  const wrapWithMenu = (page: Page, body: ReactNode, builder: () => ContextMenuItem[]) => <PageContextMenu build={builder} label={`${page}-context-menu`}>{body}</PageContextMenu>;
   const pages: Record<Page, ReactNode> = {
-    script: <Profiler id="script-page" onRender={recordComponentRender}><ScriptPage project={project} commit={commit} selected={selected} setSelected={setSelected} view={view} setView={setView} openBlocks={(insertIndex) => { setBlockInsertIndex(insertIndex ?? null); setModal('blocks'); }} openImport={() => setScriptImportOpen(true)} requestConfirm={requestConfirm} openFragmentIds={openFragmentIds} activateFragment={activate} closeFragment={closeFragment} closeOtherFragments={closeOtherFragments} closeAllFragments={closeAllFragments} reorderFragmentTabs={reorderFragmentTabs} inspectorDock={inspectorDock} setInspectorDock={setInspectorDock} initialScrollTop={sessionRef.current.scrollTopByFragment[project.activeFragmentId] ?? 0} saveScrollTop={saveFragmentScrollTop} debugRunning={debugRunning} notify={show} pendingBlockReveal={pendingBlockReveal} completeBlockReveal={completeBlockReveal} previewLanguage={previewLanguage} onPreviewLanguageChange={changePreviewLanguage} /></Profiler>,
-    stage: <StageTimelineWorkspace project={project} selectedBlock={selected} commit={commit} locateBlock={(index) => setSelected(index)} notify={show} />,
-    texts: <TextWorkbench project={project} commit={commit} notify={show} requestText={requestText} requestConfirm={requestConfirm} activate={activate} previewLanguage={previewLanguage} setPreviewLanguage={changePreviewLanguage} />,
-    assets: <AssetManager project={project} commit={commit} notify={show} requestConfirm={requestConfirm} activate={activate} />,
-    audio: <AudioManager project={project} category={audioCategory} setCategory={setAudioCategory} commit={commit} notify={show} requestConfirm={requestConfirm} activate={activate} />,
-    map: <NarrativeMap project={project} activate={activate} commit={commit} notify={show} requestText={requestText} />,
-    insights: <InsightsWorkspace project={project} activate={activate} />,
-    characters: <CharacterManager project={project} commit={commit} notify={show} requestText={requestText} requestConfirm={requestConfirm} />,
-    scenes: <SceneManager project={project} commit={commit} notify={show} requestText={requestText} requestConfirm={requestConfirm} activate={activate} />,
-    history: <HistoryPage project={project} entries={commandEntries} recovery={recoverySnapshot} recoveryLoading={recoverySnapshotState === 'loading'} storage={historyStorage} undoCount={undoCount} redoCount={redoCount} undo={undo} redo={redo} undoCategory={undoCategory} restoreCommand={(entry, target) => void restoreCommandSnapshot(entry, target)} restoreRecovery={() => void restoreCrashSnapshot()} refreshRecovery={() => void refreshRecoverySnapshot()} renameCommand={(entry) => void nameCommandSnapshot(entry)} toggleCommandPinned={(entry) => { if (toggleCommandPinned(entry.id)) show(entry.pinned ? '快照已取消固定' : '快照已固定保护'); }} refreshStorage={() => void refreshHistoryStorage()} clearOrdinaryHistory={() => void clearOrdinaryHistory()} />,
-    ai: <AiAgentPanel project={project} selectedBlockIndexes={[selected]} updateProject={commit} locateEditor={activate} applyPlan={applyAgentPlan} requestBuild={(target) => void runBuild(target)} notify={show} aiConfigured={aiConfigured} openSettings={() => openUnifiedSettings('ai')} navigateTarget={(target) => { if (target.kind === 'fragment' && target.id) activate(target.id); else if (target.kind === 'chapter' && target.id) { const fragment = project.chapters.find((chapter) => chapter.id === target.id)?.fragments[0]; if (fragment) activate(fragment.id); } else if (target.kind === 'chapter') navigatePage('script'); else if (target.kind === 'character') navigatePage('characters'); else if (target.kind === 'scene') navigatePage('scenes'); else if (target.kind === 'asset') navigatePage('assets'); else if (target.kind === 'variable') navigatePage('map'); else if (target.kind === 'memory') navigatePage('ai'); else show('该差异项没有可打开的编辑位置'); }} />,
+    script: wrapWithMenu('script', <Profiler id="script-page" onRender={recordComponentRender}><ScriptPage project={project} commit={commit} selected={selected} setSelected={setSelected} view={view} setView={setView} openBlocks={(insertIndex) => { setBlockInsertIndex(insertIndex ?? null); setModal('blocks'); }} openImport={() => setScriptImportOpen(true)} requestConfirm={requestConfirm} openFragmentIds={openFragmentIds} activateFragment={activate} closeFragment={closeFragment} closeOtherFragments={closeOtherFragments} closeAllFragments={closeAllFragments} reorderFragmentTabs={reorderFragmentTabs} inspectorDock={inspectorDock} setInspectorDock={setInspectorDock} initialScrollTop={sessionRef.current.scrollTopByFragment[project.activeFragmentId] ?? 0} saveScrollTop={saveFragmentScrollTop} debugRunning={debugRunning} notify={show} pendingBlockReveal={pendingBlockReveal} completeBlockReveal={completeBlockReveal} previewLanguage={previewLanguage} onPreviewLanguageChange={changePreviewLanguage} /></Profiler>, buildScriptContextMenu),
+    stage: wrapWithMenu('stage', <StageTimelineWorkspace project={project} selectedBlock={selected} commit={commit} locateBlock={(index) => setSelected(index)} notify={show} />, buildStageContextMenu),
+    texts: wrapWithMenu('texts', <TextWorkbench project={project} commit={commit} notify={show} requestText={requestText} requestConfirm={requestConfirm} activate={activate} previewLanguage={previewLanguage} setPreviewLanguage={changePreviewLanguage} />, buildTextsContextMenu),
+    assets: wrapWithMenu('assets', <AssetManager project={project} commit={commit} notify={show} requestConfirm={requestConfirm} activate={activate} />, buildAssetsContextMenu),
+    audio: wrapWithMenu('audio', <AudioManager project={project} category={audioCategory} setCategory={setAudioCategory} commit={commit} notify={show} requestConfirm={requestConfirm} activate={activate} />, buildAudioContextMenu),
+    map: wrapWithMenu('map', <NarrativeMap project={project} activate={activate} commit={commit} notify={show} requestText={requestText} />, buildMapContextMenu),
+    insights: wrapWithMenu('insights', <InsightsWorkspace project={project} activate={activate} />, buildInsightsContextMenu),
+    characters: wrapWithMenu('characters', <CharacterManager project={project} commit={commit} notify={show} requestText={requestText} requestConfirm={requestConfirm} />, buildCharactersContextMenu),
+    scenes: wrapWithMenu('scenes', <SceneManager project={project} commit={commit} notify={show} requestText={requestText} requestConfirm={requestConfirm} activate={activate} />, buildScenesContextMenu),
+    history: wrapWithMenu('history', <HistoryPage project={project} entries={commandEntries} recovery={recoverySnapshot} recoveryLoading={recoverySnapshotState === 'loading'} storage={historyStorage} undoCount={undoCount} redoCount={redoCount} undo={undo} redo={redo} undoCategory={undoCategory} restoreCommand={(entry, target) => void restoreCommandSnapshot(entry, target)} restoreRecovery={() => void restoreCrashSnapshot()} refreshRecovery={() => void refreshRecoverySnapshot()} renameCommand={(entry) => void nameCommandSnapshot(entry)} toggleCommandPinned={(entry) => { if (toggleCommandPinned(entry.id)) show(entry.pinned ? '快照已取消固定' : '快照已固定保护'); }} refreshStorage={() => void refreshHistoryStorage()} clearOrdinaryHistory={() => void clearOrdinaryHistory()} />, buildHistoryContextMenu),
+    ai: wrapWithMenu('ai', <AiAgentPanel project={project} selectedBlockIndexes={[selected]} updateProject={commit} locateEditor={activate} applyPlan={applyAgentPlan} requestBuild={(target) => void runBuild(target)} notify={show} aiConfigured={aiConfigured} openSettings={() => openUnifiedSettings('ai')} navigateTarget={(target) => { if (target.kind === 'fragment' && target.id) activate(target.id); else if (target.kind === 'chapter' && target.id) { const fragment = project.chapters.find((chapter) => chapter.id === target.id)?.fragments[0]; if (fragment) activate(fragment.id); } else if (target.kind === 'chapter') navigatePage('script'); else if (target.kind === 'character') navigatePage('characters'); else if (target.kind === 'scene') navigatePage('scenes'); else if (target.kind === 'asset') navigatePage('assets'); else if (target.kind === 'variable') navigatePage('map'); else if (target.kind === 'memory') navigatePage('ai'); else show('该差异项没有可打开的编辑位置'); }} />, buildAiContextMenu),
   };
   const openAssetSection = (section: string, target: Page = 'assets') => { setAssetSection(section); navigatePage(target); setAssetMenuOpen(false); };
   const openAudioSection = (category: AudioCategory) => { setAudioCategory(category); navigatePage('audio'); setAssetMenuOpen(false); };
