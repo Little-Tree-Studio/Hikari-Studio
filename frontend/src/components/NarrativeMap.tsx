@@ -6,6 +6,7 @@ import {
   Variable, Workflow,
 } from 'lucide-react';
 import { Select } from './ui/Select';
+import { collectVariableReferences, defaultVariableDefinition as defaultDefinition, renameVariableInProject } from '../core/variables';
 import type { Project, StoryBlock, VariableDefinition, VariablePersistence, VariableScope, VariableType } from '../types';
 
 type Point = { x: number; y: number };
@@ -47,27 +48,7 @@ type Props = {
 
 const nodeWidth = 210;
 const makeId = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-const inferType = (value: string | number | boolean): VariableType => typeof value === 'boolean' ? 'boolean' : typeof value === 'number' ? 'number' : 'string';
-const defaultDefinition = (value: string | number | boolean): VariableDefinition => ({ type: inferType(value), scope: 'project', persistence: 'slot' });
 const blockTitle = (block: StoryBlock) => block.type === 'branch' ? block.title || '选项分支' : block.type === 'condition' ? `${block.variable || '变量'} 条件` : block.type === 'setVariable' ? `写入 ${block.variable || '变量'}` : block.type === 'modifyVariable' ? `增减 ${block.variable || '变量'}` : block.type === 'call' ? '调用片段' : '跳转片段';
-const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const hasBinding = (value: string, name: string) => value.includes(`\${${name}}`) || value.includes(`{{${name}}}`) || new RegExp(`\\$${escapeRegExp(name)}(?![\\w\u4e00-\u9fff])`).test(value);
-const migrateBinding = (value: string, oldName: string, newName: string) => value
-  .replaceAll(`\${${oldName}}`, `\${${newName}}`)
-  .replaceAll(`{{${oldName}}}`, `{{${newName}}}`)
-  .replace(new RegExp(`\\$${escapeRegExp(oldName)}(?![\\w\u4e00-\u9fff])`, 'g'), `$${newName}`);
-const migrateBindingsDeep = (value: unknown, oldName: string, newName: string): unknown => {
-  if (typeof value === 'string') return migrateBinding(value, oldName, newName);
-  if (Array.isArray(value)) return value.map((item) => migrateBindingsDeep(item, oldName, newName));
-  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, migrateBindingsDeep(item, oldName, newName)]));
-  return value;
-};
-const containsBindingDeep = (value: unknown, name: string): boolean => {
-  if (typeof value === 'string') return hasBinding(value, name);
-  if (Array.isArray(value)) return value.some((item) => containsBindingDeep(item, name));
-  if (value && typeof value === 'object') return Object.values(value).some((item) => containsBindingDeep(item, name));
-  return false;
-};
 
 export function buildGraph(project: Project) {
   const nodes: NarrativeNode[] = [];
@@ -250,19 +231,7 @@ export function NarrativeMap({ project, activate, commit, notify, requestText }:
     });
     return [name, refs];
   })), [project.variables, project.scripts, graph.nodes]) as Record<string, NarrativeNode[]>;
-  const variableReferences = useMemo(() => Object.fromEntries(Object.keys(project.variables).map((name) => {
-    const refs: Array<{ id: string; label: string; kind: 'read' | 'write' | 'binding'; fragmentId?: string; blockIndex?: number }> = [];
-    Object.entries(project.scripts).forEach(([fragmentId, blocks]) => blocks.forEach((block, blockIndex) => {
-      if ((block.type === 'setVariable' || block.type === 'modifyVariable' || block.type === 'condition') && block.variable === name) refs.push({ id: `${block.id}:variable`, label: `${block.type === 'condition' ? '读取' : '写入'} · ${blockTitle(block)}`, kind: block.type === 'condition' ? 'read' : 'write', fragmentId, blockIndex });
-      if (block.type === 'condition' && block.compareVariable === name) refs.push({ id: `${block.id}:compare-variable`, label: `读取 · 比较变量 · Block ${blockIndex + 1}`, kind: 'read', fragmentId, blockIndex });
-      const boundFields = [block.text, block.title, block.speaker].filter((value): value is string => typeof value === 'string' && hasBinding(value, name));
-      if (boundFields.length) refs.push({ id: `${block.id}:binding`, label: `文本绑定 · Block ${blockIndex + 1}`, kind: 'binding', fragmentId, blockIndex });
-    }));
-    project.characters.forEach((character) => { if (hasBinding(character.name, name) || character.name === name) refs.push({ id: `character:${character.id}`, label: `角色显示名 · ${character.name}`, kind: 'binding' }); });
-    if (containsBindingDeep(project.ui, name)) refs.push({ id: 'ui:bindings', label: '可视化界面绑定', kind: 'binding' });
-    if (containsBindingDeep(project.translations, name)) refs.push({ id: 'translations:bindings', label: '本地化文本绑定', kind: 'binding' });
-    return [name, refs];
-  })), [project.variables, project.scripts, project.characters, project.ui, project.translations]) as Record<string, Array<{ id: string; label: string; kind: 'read' | 'write' | 'binding'; fragmentId?: string; blockIndex?: number }>>;
+  const variableReferences = useMemo(() => collectVariableReferences(project), [project]);
   const branchBlocks = useMemo(() => project.chapters.map((chapter) => ({ chapterId: chapter.id, chapterName: chapter.name, branches: chapter.fragments.flatMap((fragment) => (project.scripts[fragment.id] ?? []).flatMap((block, blockIndex) => block.type === 'branch' ? [{ id: `logic:${block.id}`, blockId: block.id, title: block.title || '选项分支', fragmentId: fragment.id, fragmentName: fragment.name, blockIndex, options: (block.options ?? []).map((option, index) => ({ id: `${block.id}:option:${index}`, nodeId: `logic:${block.id}`, text: option.text, target: option.target, index })) }] : [])) })).filter((group) => group.branches.length), [project.chapters, project.scripts]);
   const branches = branchBlocks.flatMap((group) => group.branches.flatMap((branch) => branch.options.map((option) => ({ ...option, fragmentId: branch.fragmentId, blockIndex: branch.blockIndex }))));
 
@@ -372,19 +341,7 @@ export function NarrativeMap({ project, activate, commit, notify, requestText }:
     if (/\s/.test(newName)) return notify('变量名不能包含空格', 'error');
     if (newName in project.variables) return notify('目标变量名已经存在', 'error');
     const referenceCount = variableReferences[oldName]?.length ?? 0;
-    commit((current) => {
-      const variables = Object.fromEntries(Object.entries(current.variables).map(([name, value]) => [name === oldName ? newName : name, value]));
-      const variableDefinitions = Object.fromEntries(Object.entries(current.variableDefinitions ?? {}).map(([name, value]) => [name === oldName ? newName : name, value]));
-      const scripts = Object.fromEntries(Object.entries(current.scripts).map(([fragmentId, blocks]) => [fragmentId, blocks.map((block) => {
-        const migrated = migrateBindingsDeep(block, oldName, newName) as StoryBlock;
-        let next = migrated;
-        if ((next.type === 'setVariable' || next.type === 'modifyVariable' || next.type === 'condition') && next.variable === oldName) next = { ...next, variable: newName };
-        if (next.type === 'condition' && next.compareVariable === oldName) next = { ...next, compareVariable: newName };
-        return next;
-      })]));
-      const characters = current.characters.map((character) => ({ ...character, name: character.name === oldName ? newName : migrateBinding(character.name, oldName, newName) }));
-      return { ...current, variables, variableDefinitions, scripts, characters, ui: migrateBindingsDeep(current.ui, oldName, newName) as Project['ui'], translations: migrateBindingsDeep(current.translations, oldName, newName) as Project['translations'] };
-    }, `重命名变量 ${oldName} → ${newName}`);
+    commit((current) => renameVariableInProject(current, oldName, newName), `重命名变量 ${oldName} → ${newName}`);
     setFocus({ type: 'variable', id: newName });
     notify(`变量已重命名并迁移 ${referenceCount} 处已知引用；请检查自定义扩展代码`);
   };

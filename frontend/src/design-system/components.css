@@ -229,6 +229,10 @@ html[data-editor-theme="high-contrast"] img { color-scheme: normal; }
 ) { border-color: var(--line); }
 
 .desktop-app .doc-tab { color: var(--muted); }
+.desktop-app :where(.variable-table article, .variable-summary, .branch-list details) { border-color: var(--line); background-color: var(--panel); color: var(--ink); }
+.desktop-app .variable-summary:hover { background-color: var(--panel-2); }
+.desktop-app .variable-references button { background-color: var(--panel-2); color: var(--ink); }
+.desktop-app .variable-key-row code { border-color: var(--line); background: var(--panel-2); color: var(--muted-strong); }
 .desktop-app .doc-tab.active { background: var(--accent-soft); color: var(--accent-strong); }
 .desktop-app .tabs-edge.left { background: linear-gradient(to right, var(--panel-2) 35%, transparent); }
 .desktop-app .tabs-edge.right { background: linear-gradient(to left, var(--panel-2) 35%, transparent); }
